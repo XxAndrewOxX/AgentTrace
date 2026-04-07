@@ -1,1 +1,3 @@
-// Stream 7: Terminal UI (stub)
+pub mod app;
+pub mod panels;
+pub mod banner;
