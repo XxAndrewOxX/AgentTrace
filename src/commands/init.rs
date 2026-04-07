@@ -1,0 +1,200 @@
+use crate::config::{StoreConfig, StoreInfo, PollingConfig};
+use crate::git_store::GitStore;
+use crate::manifest::Manifest;
+use crate::types::DocType;
+use anyhow::{bail, Result};
+use std::path::Path;
+
+pub fn run(path: &Path, scan: bool) -> Result<()> {
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
+    // Check if already initialised.
+    let docmgr_dir = path.join(".docmgr");
+    if docmgr_dir.join("config.toml").exists() {
+        println!("Store already initialised at {}", path.display());
+        println!("  Config: {}", docmgr_dir.join("config.toml").display());
+        println!("  Manifest: {}", docmgr_dir.join("manifest.toml").display());
+        return Ok(());
+    }
+
+    // Create .docmgr/ with restricted permissions.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&docmgr_dir)?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(&docmgr_dir)?;
+    }
+
+    // Create subdirectories.
+    std::fs::create_dir_all(docmgr_dir.join("locks"))?;
+
+    // Create empty files.
+    let context_updates = docmgr_dir.join("context_updates.jsonl");
+    if !context_updates.exists() {
+        std::fs::write(&context_updates, "")?;
+    }
+    let cmd_history = docmgr_dir.join("command_history.txt");
+    if !cmd_history.exists() {
+        std::fs::write(&cmd_history, "")?;
+    }
+
+    // Generate store config.
+    let store_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "docmgr-store".to_string());
+    let store_info = StoreInfo::new(store_name);
+    let store_config = StoreConfig {
+        store: store_info.clone(),
+        llm: None,
+        polling: PollingConfig::default(),
+    };
+    store_config.save(&path)?;
+
+    // Initialise git store.
+    let git = GitStore::init(&path)?;
+
+    // Create empty manifest.
+    let mut manifest = Manifest::create_empty(store_info, &path)?;
+
+    // Write .gitignore at store root.
+    let gitignore = path.join(".gitignore");
+    if !gitignore.exists() {
+        std::fs::write(&gitignore, DEFAULT_GITIGNORE)?;
+    }
+
+    // If --scan: register all .md files.
+    if scan {
+        let count = scan_and_register(&path, &mut manifest)?;
+        manifest.save(&path)?;
+        // Commit the scanned files.
+        if count > 0 {
+            let files: Vec<_> = manifest.documents.iter()
+                .map(|d| (d.path.clone(), crate::types::Action::Create, d.doc_type.clone()))
+                .collect();
+            let info = crate::git_store::CommitInfo {
+                action: crate::types::Action::Init,
+                files,
+                actor: crate::types::Actor::System,
+                summary: format!("scanned {} existing markdown files", count),
+                agent_name: None,
+                session_id: None,
+            };
+            git.commit(&info)?;
+            println!("Registered {} existing markdown files as scratch.", count);
+        }
+    }
+
+    println!("Initialised docmgr store at {}", path.display());
+    Ok(())
+}
+
+fn scan_and_register(root: &Path, manifest: &mut Manifest) -> Result<usize> {
+    let mut count = 0;
+    for entry in walkdir_md(root) {
+        let rel = entry.strip_prefix(root).unwrap_or(&entry);
+        // Skip .docmgr directory.
+        if rel.starts_with(".docmgr") {
+            continue;
+        }
+        if manifest.is_tracked(rel) {
+            continue;
+        }
+        manifest.register(rel, DocType::Scratch, "")?;
+        count += 1;
+    }
+    Ok(count)
+}
+
+fn walkdir_md(root: &Path) -> Vec<std::path::PathBuf> {
+    let mut results = Vec::new();
+    walk(root, &mut results);
+    results
+}
+
+fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            // Skip hidden directories.
+            if path.file_name().map(|n| n.to_string_lossy().starts_with('.')).unwrap_or(false) {
+                continue;
+            }
+            walk(&path, out);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
+            out.push(path);
+        }
+    }
+}
+
+const DEFAULT_GITIGNORE: &str = r#"# docmgr defaults
+.DS_Store
+*.tmp
+*.swp
+*.swo
+~*
+"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_init_empty_directory() {
+        let tmp = TempDir::new().unwrap();
+        run(tmp.path(), false).unwrap();
+        assert!(tmp.path().join(".docmgr").exists());
+        assert!(tmp.path().join(".docmgr").join("config.toml").exists());
+        assert!(tmp.path().join(".docmgr").join("manifest.toml").exists());
+        assert!(tmp.path().join(".docmgr").join("repo").exists());
+        assert!(tmp.path().join(".docmgr").join("locks").exists());
+        assert!(tmp.path().join(".gitignore").exists());
+    }
+
+    #[test]
+    fn test_init_idempotent() {
+        let tmp = TempDir::new().unwrap();
+        run(tmp.path(), false).unwrap();
+        // Second init should not error.
+        run(tmp.path(), false).unwrap();
+    }
+
+    #[test]
+    fn test_init_with_scan() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("prd.md"), "# PRD").unwrap();
+        std::fs::write(tmp.path().join("notes.md"), "notes").unwrap();
+        run(tmp.path(), true).unwrap();
+        let manifest = crate::manifest::Manifest::load(tmp.path()).unwrap();
+        assert_eq!(manifest.documents.len(), 2);
+        assert!(manifest.documents.iter().all(|d| d.doc_type == DocType::Scratch));
+    }
+
+    #[test]
+    fn test_config_has_uuid() {
+        let tmp = TempDir::new().unwrap();
+        run(tmp.path(), false).unwrap();
+        let cfg = crate::config::StoreConfig::load(tmp.path()).unwrap();
+        assert!(cfg.store.id.parse::<uuid::Uuid>().is_ok());
+        assert!(!cfg.store.docmgr_version.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_docmgr_dir_permissions() {
+        use std::os::unix::fs::MetadataExt;
+        let tmp = TempDir::new().unwrap();
+        run(tmp.path(), false).unwrap();
+        let meta = std::fs::metadata(tmp.path().join(".docmgr")).unwrap();
+        // 0700 = rwx------
+        assert_eq!(meta.mode() & 0o777, 0o700);
+    }
+}
