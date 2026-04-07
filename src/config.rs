@@ -183,9 +183,12 @@ pub fn store_config_path(store_root: &Path) -> PathBuf {
 /// Resolved configuration: per-store values override global defaults.
 #[derive(Debug, Clone)]
 pub struct MergedConfig {
+    #[allow(dead_code)]
     pub store: StoreInfo,
     pub llm: LlmConfig,
+    #[allow(dead_code)]
     pub ui: UiConfig,
+    #[allow(dead_code)]
     pub defaults: DefaultsConfig,
     pub polling: PollingConfig,
 }

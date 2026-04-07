@@ -1,5 +1,4 @@
 use super::panels::{ChangelogState, ChatState, Focus, TreeState};
-use crate::git_store::GitStore;
 use crate::manifest::Manifest;
 use crate::poll::UiEvent;
 use crate::types::LogEntry;
@@ -23,6 +22,7 @@ const MIN_HEIGHT: u16 = 24;
 // ── Application ───────────────────────────────────────────────────────────────
 
 pub struct App {
+    #[allow(dead_code)]
     pub store_root: PathBuf,
     pub manifest: Arc<Mutex<Manifest>>,
     pub tree: TreeState,

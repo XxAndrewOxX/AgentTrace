@@ -2,7 +2,7 @@ use crate::config::{StoreConfig, StoreInfo, PollingConfig};
 use crate::git_store::GitStore;
 use crate::manifest::Manifest;
 use crate::types::DocType;
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::path::Path;
 
 pub fn run(path: &Path, scan: bool) -> Result<()> {

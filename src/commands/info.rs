@@ -1,6 +1,6 @@
 use crate::git_store::GitStore;
 use crate::manifest::Manifest;
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::path::Path;
 
 pub fn run(store_root: &Path, file: &Path) -> Result<()> {

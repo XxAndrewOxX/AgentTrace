@@ -1,6 +1,6 @@
 use crate::config::MergedConfig;
 use crate::git_store::GitStore;
-use crate::llm::NoLlm;
+use crate::llm::{spawn_llm_task, LlmRequest, LlmResponse, NoLlm};
 use crate::manifest::Manifest;
 use crate::poll::{AgentState, ChangeProcessor, InstanceLock, UiEvent};
 use crate::tui::app::App;
@@ -24,10 +24,39 @@ pub fn run(store_root: &Path, agent_name: Option<String>, ascii: bool) -> Result
     let manifest = Manifest::load(&store_root)?;
     let manifest = Arc::new(Mutex::new(manifest));
 
+    // Try to load LLM model if configured. Fall back to NoLlm silently.
+    let llm_engine: Arc<dyn crate::llm::LlmEngine> = match &config.llm.model_path {
+        Some(path) if path.exists() => {
+            match crate::llm::candle::CandleLlm::load(path) {
+                Ok(m) => {
+                    tracing::info!("LLM loaded from {}", path.display());
+                    Arc::new(m)
+                }
+                Err(e) => {
+                    tracing::warn!("LLM load failed ({}), using NoLlm", e);
+                    Arc::new(NoLlm)
+                }
+            }
+        }
+        _ => Arc::new(NoLlm),
+    };
+
     // Print startup banner before entering raw mode.
     {
         let m = manifest.lock().unwrap();
-        banner::print_banner(&m, &NoLlm, ascii);
+        banner::print_banner(&m, llm_engine.as_ref(), ascii);
+    }
+
+    // Start the LLM background task.
+    let (_llm_req_tx, llm_req_rx) = tokio::sync::mpsc::channel::<LlmRequest>(32);
+    let (llm_res_tx, _llm_res_rx) = tokio::sync::mpsc::channel::<LlmResponse>(32);
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    {
+        let engine = llm_engine.clone();
+        runtime.spawn(async move {
+            spawn_llm_task(engine, llm_req_rx, llm_res_tx);
+        });
     }
 
     // Acquire instance lock.
@@ -60,12 +89,11 @@ pub fn run(store_root: &Path, agent_name: Option<String>, ascii: bool) -> Result
         Some(ui_tx),
     );
 
-    // Launch the tokio runtime for the poll loop.
+    // Spawn the poll loop.
     let poll_interval_ms = config.polling.interval_ms;
     let processor = Arc::new(Mutex::new(processor));
     let processor_clone = processor.clone();
 
-    let runtime = tokio::runtime::Runtime::new()?;
     runtime.spawn(async move {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_millis(poll_interval_ms)).await;
@@ -88,7 +116,7 @@ pub fn run(store_root: &Path, agent_name: Option<String>, ascii: bool) -> Result
         store_root.clone(),
         manifest,
         initial_log,
-        history.clone(),
+        history,
         ui_rx,
     );
 
@@ -152,6 +180,5 @@ fn load_command_history(store_root: &Path) -> Vec<String> {
 
 fn save_command_history(store_root: &Path, history: &[String]) {
     let path = store_root.join(".docmgr").join("command_history.txt");
-    let content = history.join("\n") + "\n";
-    let _ = std::fs::write(path, content);
+    let _ = std::fs::write(path, history.join("\n") + "\n");
 }

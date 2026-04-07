@@ -5,6 +5,7 @@ use anyhow::Result;
 use std::path::Path;
 
 /// Generate and write DOCMGR.md at the store root, then commit it.
+#[allow(dead_code)]
 pub fn generate_and_commit(store_root: &Path, manifest: &Manifest, git: &GitStore) -> Result<()> {
     let content = generate(store_root, manifest);
     std::fs::write(store_root.join("DOCMGR.md"), &content)?;
@@ -27,7 +28,7 @@ pub fn generate_and_commit(store_root: &Path, manifest: &Manifest, git: &GitStor
 }
 
 /// Generate the DOCMGR.md content without writing to disk.
-pub fn generate(store_root: &Path, manifest: &Manifest) -> String {
+pub fn generate(_store_root: &Path, manifest: &Manifest) -> String {
     let plans = manifest.list(Some(&DocType::Plan));
     let contexts = manifest.list(Some(&DocType::Context));
     let logs = manifest.list(Some(&DocType::Log));

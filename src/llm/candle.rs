@@ -6,18 +6,21 @@
 /// Without the feature, `CandleLlm::load` is still present but always returns an error,
 /// so the rest of the codebase uses `NoLlm` as the fallback.
 use crate::llm::{Classification, DocSummary, LlmEngine, ParsedCommand};
-use crate::types::DocType;
-use anyhow::{bail, Context, Result};
+use anyhow::bail;
+use anyhow::Result;
 use std::path::Path;
 
 // ── Token budget ─────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 const MAX_PROMPT_CHARS: usize = 8_000;
+#[allow(dead_code)]
 const MAX_NEW_TOKENS: usize = 512;
 
 // ── CandleLlm ────────────────────────────────────────────────────────────────
 
 pub struct CandleLlm {
+    #[allow(dead_code)]
     model_path: std::path::PathBuf,
     #[cfg(feature = "llm")]
     inner: Option<CandleInner>,
@@ -80,6 +83,7 @@ impl CandleLlm {
         }
     }
 
+    #[allow(dead_code)]
     pub fn model_path(&self) -> &Path {
         &self.model_path
     }
@@ -171,6 +175,7 @@ fn generate(inner: &mut CandleInner, prompt: &str, max_new_tokens: usize) -> Res
 
 // ── Prompt templates ─────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 fn truncate(s: &str, max_chars: usize) -> &str {
     if s.len() <= max_chars {
         return s;
@@ -179,6 +184,7 @@ fn truncate(s: &str, max_chars: usize) -> &str {
     truncated.rfind('\n').map(|i| &s[..i]).unwrap_or(truncated)
 }
 
+#[allow(dead_code)]
 fn classification_prompt(content: &str) -> String {
     format!(
         "<|system|>\nClassify this document into exactly one of: \
@@ -188,6 +194,7 @@ fn classification_prompt(content: &str) -> String {
     )
 }
 
+#[allow(dead_code)]
 fn summarize_prompt(path: &str, doc_type: &str, diff: &str) -> String {
     format!(
         "<|system|>\nSummarize this diff of a {} document '{}' in one sentence (max 20 words).\n\
@@ -198,6 +205,7 @@ fn summarize_prompt(path: &str, doc_type: &str, diff: &str) -> String {
     )
 }
 
+#[allow(dead_code)]
 fn command_prompt(input: &str, manifest_summary: &str) -> String {
     format!(
         "<|system|>\nParse this natural language docmgr command into JSON: \
@@ -209,6 +217,7 @@ fn command_prompt(input: &str, manifest_summary: &str) -> String {
     )
 }
 
+#[allow(dead_code)]
 fn context_prompt(documents: &[DocSummary], updates: &[String]) -> String {
     let mut docs_str = String::new();
     for doc in documents {
@@ -229,49 +238,32 @@ fn context_prompt(documents: &[DocSummary], updates: &[String]) -> String {
 // ── LlmEngine impl ────────────────────────────────────────────────────────────
 
 impl LlmEngine for CandleLlm {
-    fn classify(&self, content: &str) -> Result<Classification> {
+    fn classify(&self, _content: &str) -> Result<Classification> {
         #[cfg(feature = "llm")]
-        {
-            // `generate` needs `&mut self` via the mutable model cache.
-            // We use an unsafe cell approach or restructure. Since candle's
-            // ModelWeights::forward takes &mut self, we need interior mutability.
-            // For now, return Scratch when the model is not mutable here.
-            // In a production integration, CandleInner would be behind Mutex.
-            let _ = content;
-            bail!("classify requires mutable access — use the async spawn_llm_task interface");
-        }
+        bail!("classify requires mutable access — use spawn_candle_task");
         #[cfg(not(feature = "llm"))]
-        bail!("LLM feature not compiled in")
+        bail!("LLM feature not compiled in — rebuild with `--features llm`")
     }
 
-    fn summarize_change(&self, path: &str, doc_type: &str, diff: &str) -> Result<String> {
+    fn summarize_change(&self, _path: &str, _doc_type: &str, _diff: &str) -> Result<String> {
         #[cfg(feature = "llm")]
-        {
-            let _ = (path, doc_type, diff);
-            bail!("summarize requires mutable access — use the async spawn_llm_task interface");
-        }
+        bail!("summarize_change requires mutable access — use spawn_candle_task");
         #[cfg(not(feature = "llm"))]
-        bail!("LLM feature not compiled in")
+        bail!("LLM feature not compiled in — rebuild with `--features llm`")
     }
 
-    fn parse_command(&self, input: &str, manifest_summary: &str) -> Result<ParsedCommand> {
+    fn parse_command(&self, _input: &str, _manifest_summary: &str) -> Result<ParsedCommand> {
         #[cfg(feature = "llm")]
-        {
-            let _ = (input, manifest_summary);
-            bail!("parse_command requires mutable access — use the async spawn_llm_task interface");
-        }
+        bail!("parse_command requires mutable access — use spawn_candle_task");
         #[cfg(not(feature = "llm"))]
-        bail!("LLM feature not compiled in")
+        bail!("LLM feature not compiled in — rebuild with `--features llm`")
     }
 
-    fn synthesize_context(&self, documents: &[DocSummary], updates: &[String]) -> Result<String> {
+    fn synthesize_context(&self, _documents: &[DocSummary], _updates: &[String]) -> Result<String> {
         #[cfg(feature = "llm")]
-        {
-            let _ = (documents, updates);
-            bail!("synthesize_context requires mutable access — use the async spawn_llm_task interface");
-        }
+        bail!("synthesize_context requires mutable access — use spawn_candle_task");
         #[cfg(not(feature = "llm"))]
-        bail!("LLM feature not compiled in")
+        bail!("LLM feature not compiled in — rebuild with `--features llm`")
     }
 
     fn is_loaded(&self) -> bool {

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 /// Generate a human-readable summary for an agent change (no LLM version).
 pub fn summarize_change_no_llm(
     path: &Path,
-    doc_type: &DocType,
+    _doc_type: &DocType,
     stats: &DiffStats,
     agent_name: &str,
 ) -> String {

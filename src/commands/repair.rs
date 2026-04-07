@@ -49,10 +49,8 @@ pub fn run(store_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn git_head_files(git: &GitStore, store_root: &Path) -> Result<Vec<PathBuf>> {
-    // Use git status to find all tracked .md files.
+fn git_head_files(_git: &GitStore, store_root: &Path) -> Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
-    // Walk the working directory for .md files (simplest approach).
     walk(store_root, &mut paths);
     Ok(paths)
 }

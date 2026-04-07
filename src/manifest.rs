@@ -135,6 +135,7 @@ impl Manifest {
         self.by_path.get(path).map(|&i| &self.documents[i])
     }
 
+    #[allow(dead_code)]
     pub fn find_by_id(&self, id: &str) -> Option<&DocumentEntry> {
         self.by_id.get(id).map(|&i| &self.documents[i])
     }

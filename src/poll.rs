@@ -1,5 +1,8 @@
 use crate::config::MergedConfig;
+use crate::context::{synthesize_no_llm, write_context};
+use crate::docmgr_md;
 use crate::git_store::{CommitInfo, GitStore};
+use crate::log_synth::{append_agent_log, summarize_change_no_llm, LogSynthEntry};
 use crate::manifest::Manifest;
 use crate::permissions::{check_permission, Overrides, PermissionResult, Violation};
 use crate::types::{Action, Actor, DocType, FileChange, LogEntry};
@@ -11,6 +14,7 @@ use std::sync::{Arc, Mutex};
 // ── UI Event channel ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum UiEvent {
     NewCommit(LogEntry),
     Violation(String),
@@ -77,20 +81,22 @@ fn is_pid_alive(pid: u32) -> bool {
 pub struct ChangeProcessor {
     pub git: GitStore,
     pub manifest: Arc<Mutex<Manifest>>,
-    pub config: MergedConfig,
     pub agent_state: AgentState,
     pub ui_tx: Option<tokio::sync::mpsc::Sender<UiEvent>>,
+    /// Session ID used for agent log file naming.
+    session_id: String,
 }
 
 impl ChangeProcessor {
     pub fn new(
         git: GitStore,
         manifest: Arc<Mutex<Manifest>>,
-        config: MergedConfig,
+        _config: MergedConfig,
         agent_state: AgentState,
         ui_tx: Option<tokio::sync::mpsc::Sender<UiEvent>>,
     ) -> Self {
-        Self { git, manifest, config, agent_state, ui_tx }
+        let session_id = format!("{}", Utc::now().format("%Y%m%d-%H%M%S"));
+        Self { git, manifest, agent_state, ui_tx, session_id }
     }
 
     pub fn run_poll_cycle(&mut self) -> Result<()> {
@@ -200,13 +206,9 @@ impl ChangeProcessor {
                 action: allowed[0].1.clone(),
                 files: allowed.clone(),
                 actor: actor.clone(),
-                summary: format!(
-                    "{} {} file(s)",
-                    allowed[0].1,
-                    allowed.len()
-                ),
+                summary: format!("{} {} file(s)", allowed[0].1, allowed.len()),
                 agent_name: actor.agent_name().map(String::from),
-                session_id: None,
+                session_id: Some(self.session_id.clone()),
             };
             if let Ok(oid) = self.git.commit(&info) {
                 let entry = LogEntry {
@@ -220,6 +222,45 @@ impl ChangeProcessor {
                 };
                 if let Some(tx) = &self.ui_tx {
                     let _ = tx.try_send(UiEvent::NewCommit(entry));
+                }
+            }
+
+            // If agent made changes, synthesize log entries.
+            if actor.is_agent() {
+                let agent_name = actor.agent_name().unwrap_or("unknown");
+                let log_entries: Vec<LogSynthEntry> = allowed
+                    .iter()
+                    .map(|(path, _, doc_type)| {
+                        let stats = self.git
+                            .diff_stats(path, None, None)
+                            .unwrap_or_default();
+                        let summary = summarize_change_no_llm(path, doc_type, &stats, agent_name);
+                        LogSynthEntry { timestamp: Utc::now(), path: path.clone(), summary }
+                    })
+                    .collect();
+                if let Err(e) = append_agent_log(&store_root, &self.git, agent_name, &self.session_id, &log_entries) {
+                    tracing::warn!("append_agent_log failed: {}", e);
+                }
+            }
+
+            // Regenerate DOCMGR.md.
+            let docmgr_content = docmgr_md::generate(&store_root, &manifest);
+            if let Err(e) = std::fs::write(store_root.join("DOCMGR.md"), &docmgr_content) {
+                tracing::warn!("DOCMGR.md write failed: {}", e);
+            }
+
+            // If a plan or reference changed, re-synthesize context.md.
+            let context_trigger = allowed.iter().any(|(_, _, dt)| {
+                matches!(dt, DocType::Plan | DocType::Reference)
+            });
+            if context_trigger {
+                match synthesize_no_llm(&store_root, &manifest) {
+                    Ok(content) => {
+                        if let Err(e) = write_context(&store_root, &content) {
+                            tracing::warn!("write_context failed: {}", e);
+                        }
+                    }
+                    Err(e) => tracing::warn!("synthesize_no_llm failed: {}", e),
                 }
             }
         }

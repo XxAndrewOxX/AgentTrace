@@ -19,7 +19,7 @@ pub enum PermissionResult {
 pub fn check_permission(
     doc_type: &DocType,
     actor: &Actor,
-    action: &Action,
+    _action: &Action,
     overrides: &Overrides,
     path: Option<&Path>,
 ) -> PermissionResult {

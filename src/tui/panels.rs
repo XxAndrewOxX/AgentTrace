@@ -1,10 +1,8 @@
 use crate::manifest::{DocumentEntry, Manifest};
-use crate::poll::UiEvent;
 use crate::types::LogEntry;
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use std::path::PathBuf;
 
 // ── Tree Panel State ──────────────────────────────────────────────────────────
 

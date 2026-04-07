@@ -5,18 +5,21 @@ use anyhow::Result;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Classification {
     pub doc_type: DocType,
     pub confidence: f32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ParsedCommand {
     pub command: String,
     pub args: std::collections::HashMap<String, String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DocSummary {
     pub path: String,
@@ -24,6 +27,7 @@ pub struct DocSummary {
     pub content_snippet: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum LlmRequest {
     Classify { id: u64, content: String },
@@ -32,6 +36,7 @@ pub enum LlmRequest {
     SynthesizeContext { id: u64, documents: Vec<DocSummary>, updates: Vec<String> },
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum LlmResponse {
     Classification { id: u64, result: Result<Classification, String> },
@@ -42,6 +47,9 @@ pub enum LlmResponse {
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
 
+/// Immutable inference interface. Implement this for `NoLlm` and for wrappers
+/// that don't need a mutable KV cache (e.g. stateless REST-backed engines).
+/// `CandleLlm` uses a separate `CandleLlmMut` + `spawn_candle_task` instead.
 pub trait LlmEngine: Send + Sync {
     fn classify(&self, content: &str) -> Result<Classification>;
     fn summarize_change(&self, path: &str, doc_type: &str, diff: &str) -> Result<String>;
@@ -56,14 +64,10 @@ pub struct NoLlm;
 
 impl LlmEngine for NoLlm {
     fn classify(&self, _content: &str) -> Result<Classification> {
-        Ok(Classification {
-            doc_type: DocType::Scratch,
-            confidence: 0.0,
-        })
+        Ok(Classification { doc_type: DocType::Scratch, confidence: 0.0 })
     }
 
     fn summarize_change(&self, path: &str, _doc_type: &str, diff: &str) -> Result<String> {
-        // Count added/removed lines from the diff.
         let added = diff.lines().filter(|l| l.starts_with('+')).count();
         let removed = diff.lines().filter(|l| l.starts_with('-')).count();
         Ok(format!("{}: +{} lines, -{} lines.", path, added, removed))
@@ -89,8 +93,11 @@ impl LlmEngine for NoLlm {
     }
 }
 
-// ── Async Task ────────────────────────────────────────────────────────────────
+// ── Async Task (immutable engine: NoLlm or future REST backend) ───────────────
 
+/// Spawn a background task that services `LlmRequest`s using an immutable engine.
+/// For `CandleLlmMut` (which requires `&mut self` for KV-cache inference),
+/// use `spawn_candle_task` instead.
 pub fn spawn_llm_task(
     engine: std::sync::Arc<dyn LlmEngine>,
     mut request_rx: tokio::sync::mpsc::Receiver<LlmRequest>,
@@ -104,22 +111,75 @@ pub fn spawn_llm_task(
             tokio::task::spawn_blocking(move || {
                 let response = match request {
                     LlmRequest::Classify { id, content } => {
-                        let result = engine.classify(&content)
-                            .map_err(|e| e.to_string());
+                        let result = engine.classify(&content).map_err(|e| e.to_string());
                         LlmResponse::Classification { id, result }
                     }
                     LlmRequest::SummarizeChange { id, path, doc_type, diff } => {
-                        let result = engine.summarize_change(&path, &doc_type, &diff)
+                        let result = engine
+                            .summarize_change(&path, &doc_type, &diff)
                             .map_err(|e| e.to_string());
                         LlmResponse::Summary { id, result }
                     }
                     LlmRequest::ParseCommand { id, input, manifest_summary } => {
-                        let result = engine.parse_command(&input, &manifest_summary)
+                        let result = engine
+                            .parse_command(&input, &manifest_summary)
                             .map_err(|e| e.to_string());
                         LlmResponse::ParsedCommand { id, result }
                     }
                     LlmRequest::SynthesizeContext { id, documents, updates } => {
-                        let result = engine.synthesize_context(&documents, &updates)
+                        let result = engine
+                            .synthesize_context(&documents, &updates)
+                            .map_err(|e| e.to_string());
+                        LlmResponse::Context { id, result }
+                    }
+                };
+                let _ = tx.blocking_send(response);
+            });
+        }
+    });
+}
+
+// ── Async Task (CandleLlmMut — requires mutable KV cache) ────────────────────
+
+/// Spawn a background task for `CandleLlmMut`. The model is owned exclusively
+/// by the task thread; all requests are serialized through a mutex so the KV
+/// cache is never concurrently accessed.
+#[cfg(feature = "llm")]
+pub fn spawn_candle_task(
+    model: candle::CandleLlmMut,
+    mut request_rx: tokio::sync::mpsc::Receiver<LlmRequest>,
+    response_tx: tokio::sync::mpsc::Sender<LlmResponse>,
+) {
+    use std::sync::{Arc, Mutex};
+    let model = Arc::new(Mutex::new(model));
+
+    tokio::spawn(async move {
+        while let Some(request) = request_rx.recv().await {
+            let model = model.clone();
+            let tx = response_tx.clone();
+
+            tokio::task::spawn_blocking(move || {
+                let mut m = model.lock().unwrap();
+                let response = match request {
+                    LlmRequest::Classify { id, content } => {
+                        let result = m.classify(&content).map_err(|e| e.to_string());
+                        LlmResponse::Classification { id, result }
+                    }
+                    LlmRequest::SummarizeChange { id, path, doc_type, diff } => {
+                        let result = m
+                            .summarize_change(&path, &doc_type, &diff)
+                            .map_err(|e| e.to_string());
+                        LlmResponse::Summary { id, result }
+                    }
+                    LlmRequest::ParseCommand { id, input, manifest_summary } => {
+                        let result = m
+                            .parse_command(&input, &manifest_summary)
+                            .map_err(|e| e.to_string());
+                        LlmResponse::ParsedCommand { id, result }
+                    }
+                    LlmRequest::SynthesizeContext { id, documents, updates } => {
+                        let result = m
+                            .synthesize_context(&documents, &updates)
                             .map_err(|e| e.to_string());
                         LlmResponse::Context { id, result }
                     }
@@ -136,16 +196,14 @@ mod tests {
 
     #[test]
     fn test_no_llm_classify() {
-        let llm = NoLlm;
-        let result = llm.classify("some content").unwrap();
+        let result = NoLlm.classify("some content").unwrap();
         assert_eq!(result.doc_type, DocType::Scratch);
     }
 
     #[test]
     fn test_no_llm_summarize() {
-        let llm = NoLlm;
         let diff = "+new line\n-old line\n unchanged";
-        let result = llm.summarize_change("prd.md", "plan", diff).unwrap();
+        let result = NoLlm.summarize_change("prd.md", "plan", diff).unwrap();
         assert!(result.contains("prd.md"));
         assert!(result.contains("+1"));
         assert!(result.contains("-1"));
@@ -153,20 +211,18 @@ mod tests {
 
     #[test]
     fn test_no_llm_parse_command() {
-        let llm = NoLlm;
-        let result = llm.parse_command("show me all plans", "").unwrap();
+        let result = NoLlm.parse_command("show me all plans", "").unwrap();
         assert_eq!(result.command, "unknown");
     }
 
     #[test]
     fn test_no_llm_synthesize_context() {
-        let llm = NoLlm;
         let docs = vec![DocSummary {
             path: "prd.md".into(),
             doc_type: DocType::Plan,
             content_snippet: "Product requirements".into(),
         }];
-        let result = llm.synthesize_context(&docs, &[]).unwrap();
+        let result = NoLlm.synthesize_context(&docs, &[]).unwrap();
         assert!(result.contains("prd.md"));
     }
 
@@ -183,23 +239,58 @@ mod tests {
 
         spawn_llm_task(engine, req_rx, res_tx);
 
-        req_tx.send(LlmRequest::Classify {
-            id: 42,
-            content: "hello".into(),
-        }).await.unwrap();
+        req_tx
+            .send(LlmRequest::Classify { id: 42, content: "hello".into() })
+            .await
+            .unwrap();
 
         let response = tokio::time::timeout(
             std::time::Duration::from_secs(2),
             res_rx.recv(),
-        ).await.unwrap().unwrap();
+        )
+        .await
+        .unwrap()
+        .unwrap();
 
         match response {
             LlmResponse::Classification { id, result } => {
                 assert_eq!(id, 42);
-                assert!(result.is_ok());
                 assert_eq!(result.unwrap().doc_type, DocType::Scratch);
             }
             _ => panic!("Wrong response type"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_llm_task_all_variants() {
+        let engine = std::sync::Arc::new(NoLlm);
+        let (req_tx, req_rx) = tokio::sync::mpsc::channel(10);
+        let (res_tx, mut res_rx) = tokio::sync::mpsc::channel(10);
+
+        spawn_llm_task(engine, req_rx, res_tx);
+
+        req_tx.send(LlmRequest::SummarizeChange {
+            id: 1, path: "f.md".into(), doc_type: "plan".into(), diff: "+a\n-b".into(),
+        }).await.unwrap();
+        req_tx.send(LlmRequest::ParseCommand {
+            id: 2, input: "list all plans".into(), manifest_summary: "".into(),
+        }).await.unwrap();
+        req_tx.send(LlmRequest::SynthesizeContext {
+            id: 3, documents: vec![], updates: vec![],
+        }).await.unwrap();
+
+        let mut ids_seen = std::collections::HashSet::new();
+        for _ in 0..3 {
+            let r = tokio::time::timeout(std::time::Duration::from_secs(2), res_rx.recv())
+                .await.unwrap().unwrap();
+            let id = match &r {
+                LlmResponse::Summary { id, .. } => *id,
+                LlmResponse::ParsedCommand { id, .. } => *id,
+                LlmResponse::Context { id, .. } => *id,
+                _ => panic!("unexpected variant"),
+            };
+            ids_seen.insert(id);
+        }
+        assert_eq!(ids_seen, [1, 2, 3].into());
     }
 }

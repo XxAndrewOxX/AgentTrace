@@ -1,8 +1,8 @@
 use crate::types::{Action, Actor, DocType, DiffStats, FileChange, LogEntry};
 use anyhow::{bail, Context, Result};
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 use git2::{
-    BranchType, DiffOptions, IndexAddOption, Oid, Repository, RepositoryInitOptions,
+    DiffOptions, Oid, Repository, RepositoryInitOptions,
     Signature, StatusOptions, Tree,
 };
 use std::path::{Path, PathBuf};
@@ -85,32 +85,52 @@ impl GitStore {
         opts.include_untracked(true)
             .recurse_untracked_dirs(true)
             .include_ignored(false)
-            .exclude_submodules(true);
+            .exclude_submodules(true)
+            .renames_from_rewrites(true)
+            .renames_index_to_workdir(true)
+            .renames_head_to_index(true);
 
         let statuses = self.repo.statuses(Some(&mut opts))?;
         let mut changes = Vec::new();
 
         for entry in statuses.iter() {
+            let s = entry.status();
+
+            // Rename: has both head_to_index and index_to_workdir paths.
+            if s.is_index_renamed() || s.is_wt_renamed() {
+                let new_path = match entry.path() {
+                    Some(p) => PathBuf::from(p),
+                    None => continue,
+                };
+                let old_path = entry
+                    .head_to_index()
+                    .and_then(|d| d.old_file().path())
+                    .or_else(|| entry.index_to_workdir().and_then(|d| d.old_file().path()))
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| new_path.clone());
+
+                if !is_md(&new_path) && !is_md(&old_path) {
+                    continue;
+                }
+                changes.push(FileChange::Renamed { from: old_path, to: new_path });
+                continue;
+            }
+
             let path = match entry.path() {
                 Some(p) => PathBuf::from(p),
                 None => continue,
             };
 
-            // Only track .md files.
-            if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            if !is_md(&path) {
                 continue;
             }
 
-            let s = entry.status();
             if s.is_wt_new() || s.is_index_new() {
                 changes.push(FileChange::New(path));
             } else if s.is_wt_modified() || s.is_index_modified() {
                 changes.push(FileChange::Modified(path));
             } else if s.is_wt_deleted() || s.is_index_deleted() {
                 changes.push(FileChange::Deleted(path));
-            } else if s.is_wt_renamed() || s.is_index_renamed() {
-                // git2 status doesn't give us old path easily; fall back to modified.
-                changes.push(FileChange::Modified(path));
             }
         }
 
@@ -212,6 +232,7 @@ impl GitStore {
         Ok(entries)
     }
 
+    #[allow(dead_code)]
     pub fn version_count(&self, path: &Path) -> Result<u32> {
         Ok(self.log_file(path, usize::MAX)?.len() as u32)
     }
@@ -492,6 +513,10 @@ fn parse_file_line(s: &str) -> Option<(PathBuf, Action, DocType)> {
     let action = parts[1].parse().ok()?;
     let doc_type = parts[2].parse().ok()?;
     Some((path, action, doc_type))
+}
+
+fn is_md(p: &PathBuf) -> bool {
+    p.extension().and_then(|e| e.to_str()) == Some("md")
 }
 
 fn commit_touches_file(repo: &Repository, commit: &git2::Commit<'_>, path: &str) -> Result<bool> {
