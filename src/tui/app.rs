@@ -165,7 +165,7 @@ impl App {
         }
     }
 
-    fn render(&mut self, f: &mut Frame<'_>) {
+    pub fn render(&mut self, f: &mut Frame<'_>) {
         let size = f.area();
 
         // Check minimum terminal size.

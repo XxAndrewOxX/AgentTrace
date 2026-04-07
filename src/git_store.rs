@@ -403,10 +403,10 @@ impl GitStore {
 fn build_commit_message(info: &CommitInfo) -> String {
     // Subject: [docmgr] <action> <type>: <file>
     let first_file = info.files.first();
-    let subject = if let Some((path, action, doc_type)) = first_file {
+    let subject = if let Some((path, _action, doc_type)) = first_file {
         format!(
             "[docmgr] {} {}: {}",
-            action,
+            info.action,
             doc_type,
             path.display()
         )

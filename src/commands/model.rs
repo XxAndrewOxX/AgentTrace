@@ -1,9 +1,26 @@
 use crate::config::GlobalConfig;
-use crate::ModelCmd;
 use anyhow::{bail, Context, Result};
+use clap::Subcommand;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::io::Write;
 use std::path::PathBuf;
+
+#[derive(Subcommand, Debug)]
+pub enum ModelCmd {
+    /// Download a model from Hugging Face.
+    Download {
+        /// Model size variant.
+        #[arg(long, default_value = "3b")]
+        size: String,
+    },
+    /// Show information about the current model.
+    Info,
+    /// Set the model to use.
+    Set {
+        /// Path to the GGUF model file.
+        path: PathBuf,
+    },
+}
 
 /// Known model variants: (size_key, hf_repo, filename)
 const MODELS: &[(&str, &str, &str)] = &[

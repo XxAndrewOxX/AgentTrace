@@ -69,15 +69,43 @@ pub fn run(path: &Path, scan: bool) -> Result<()> {
         std::fs::write(&gitignore, DEFAULT_GITIGNORE)?;
     }
 
+    // Generate initial DOCMGR.md and commit it.
+    let docmgr_content = crate::docmgr_md::generate(&path, &manifest);
+    std::fs::write(path.join("DOCMGR.md"), &docmgr_content)?;
+    {
+        let docmgr_info = crate::git_store::CommitInfo {
+            action: crate::types::Action::Create,
+            files: vec![(
+                std::path::PathBuf::from("DOCMGR.md"),
+                crate::types::Action::Create,
+                crate::types::DocType::Reference,
+            )],
+            actor: crate::types::Actor::System,
+            summary: "init: create DOCMGR.md".into(),
+            agent_name: None,
+            session_id: None,
+        };
+        git.commit(&docmgr_info)?;
+    }
+
     // If --scan: register all .md files.
     if scan {
         let count = scan_and_register(&path, &mut manifest)?;
         manifest.save(&path)?;
-        // Commit the scanned files.
+        // Commit the scanned files (not DOCMGR.md — already committed).
         if count > 0 {
-            let files: Vec<_> = manifest.documents.iter()
+            // Regenerate DOCMGR.md now that the manifest has content.
+            let docmgr_content = crate::docmgr_md::generate(&path, &manifest);
+            std::fs::write(path.join("DOCMGR.md"), &docmgr_content)?;
+
+            let mut files: Vec<_> = manifest.documents.iter()
                 .map(|d| (d.path.clone(), crate::types::Action::Create, d.doc_type.clone()))
                 .collect();
+            files.push((
+                std::path::PathBuf::from("DOCMGR.md"),
+                crate::types::Action::Modify,
+                crate::types::DocType::Reference,
+            ));
             let info = crate::git_store::CommitInfo {
                 action: crate::types::Action::Init,
                 files,
@@ -99,8 +127,11 @@ fn scan_and_register(root: &Path, manifest: &mut Manifest) -> Result<usize> {
     let mut count = 0;
     for entry in walkdir_md(root) {
         let rel = entry.strip_prefix(root).unwrap_or(&entry);
-        // Skip .docmgr directory.
+        // Skip .docmgr directory and docmgr-managed files.
         if rel.starts_with(".docmgr") {
+            continue;
+        }
+        if rel == std::path::Path::new("DOCMGR.md") || rel == std::path::Path::new("context.md") {
             continue;
         }
         if manifest.is_tracked(rel) {

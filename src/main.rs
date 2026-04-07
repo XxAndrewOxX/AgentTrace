@@ -1,20 +1,11 @@
-mod commands;
-mod config;
-mod context;
-mod docmgr_md;
-mod git_store;
-mod llm;
-mod log_synth;
-mod manifest;
-mod permissions;
-mod poll;
-mod tui;
-mod types;
+use docmgr::commands;
+use docmgr::commands::context::ContextCmd;
+use docmgr::commands::model::ModelCmd;
+use docmgr::types::DocType;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use types::DocType;
 
 // ── Top-level CLI ─────────────────────────────────────────────────────────────
 
@@ -197,42 +188,6 @@ pub enum Commands {
     Model {
         #[command(subcommand)]
         subcommand: ModelCmd,
-    },
-}
-
-// ── Context subcommands ───────────────────────────────────────────────────────
-
-#[derive(Subcommand, Debug)]
-pub enum ContextCmd {
-    /// Force a full re-synthesis of context.md.
-    Refresh,
-    /// Inject a specific update statement for the next synthesis.
-    Update {
-        /// The update statement to inject.
-        statement: String,
-    },
-    /// Print the current context.md to stdout.
-    Show,
-    /// List pending (unincorporated) context updates.
-    Updates,
-}
-
-// ── Model subcommands ─────────────────────────────────────────────────────────
-
-#[derive(Subcommand, Debug)]
-pub enum ModelCmd {
-    /// Download a model from Hugging Face.
-    Download {
-        /// Model size variant.
-        #[arg(long, default_value = "3b")]
-        size: String,
-    },
-    /// Show information about the current model.
-    Info,
-    /// Set the model to use.
-    Set {
-        /// Path to the GGUF model file.
-        path: PathBuf,
     },
 }
 

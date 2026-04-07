@@ -28,9 +28,16 @@ pub fn run(store_root: &Path, doc_type: DocType, file: &Path) -> Result<()> {
     manifest.register(&rel, doc_type.clone(), "")?;
     manifest.save(store_root)?;
 
+    // Regenerate DOCMGR.md so the new document appears.
+    let docmgr_content = crate::docmgr_md::generate(store_root, &manifest);
+    std::fs::write(store_root.join("DOCMGR.md"), &docmgr_content)?;
+
     let info = CommitInfo {
         action: Action::Create,
-        files: vec![(rel.clone(), Action::Create, doc_type.clone())],
+        files: vec![
+            (rel.clone(), Action::Create, doc_type.clone()),
+            (std::path::PathBuf::from("DOCMGR.md"), Action::Modify, DocType::Reference),
+        ],
         actor: Actor::User,
         summary: format!("add {}: {}", doc_type, rel.display()),
         agent_name: None,

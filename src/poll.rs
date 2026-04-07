@@ -38,8 +38,9 @@ impl AgentState {
         if lock_path.exists() {
             if let Ok(content) = std::fs::read_to_string(&lock_path) {
                 if let Ok(value) = toml::from_str::<toml::Value>(&content) {
-                    let pid = value.get("pid").and_then(|v| v.as_integer());
-                    let name = value.get("name").and_then(|v| v.as_str()).map(String::from);
+                    let agent_section = value.get("agent");
+                    let pid = agent_section.and_then(|a| a.get("pid")).and_then(|v| v.as_integer());
+                    let name = agent_section.and_then(|a| a.get("name")).and_then(|v| v.as_str()).map(String::from);
 
                     if let (Some(pid), Some(name)) = (pid, name) {
                         if is_pid_alive(pid as u32) {

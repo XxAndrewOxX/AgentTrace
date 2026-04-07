@@ -1,9 +1,23 @@
 use crate::manifest::Manifest;
 use anyhow::Result;
 use chrono::Utc;
+use clap::Subcommand;
 use std::path::Path;
 
-use crate::ContextCmd;
+#[derive(Subcommand, Debug)]
+pub enum ContextCmd {
+    /// Force a full re-synthesis of context.md.
+    Refresh,
+    /// Inject a specific update statement for the next synthesis.
+    Update {
+        /// The update statement to inject.
+        statement: String,
+    },
+    /// Print the current context.md to stdout.
+    Show,
+    /// List pending (unincorporated) context updates.
+    Updates,
+}
 
 pub fn run(store_root: &Path, cmd: ContextCmd) -> Result<()> {
     match cmd {
@@ -81,6 +95,25 @@ pub fn run(store_root: &Path, cmd: ContextCmd) -> Result<()> {
             }
 
             std::fs::write(store_root.join("context.md"), &out)?;
+
+            // Mark all pending updates as incorporated.
+            let updates_file = store_root.join(".docmgr").join("context_updates.jsonl");
+            if updates_file.exists() {
+                let content = std::fs::read_to_string(&updates_file)?;
+                let updated: String = content
+                    .lines()
+                    .filter(|l| !l.trim().is_empty())
+                    .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+                    .map(|mut v| {
+                        v["incorporated"] = serde_json::json!(true);
+                        v.to_string()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    + "\n";
+                std::fs::write(&updates_file, updated)?;
+            }
+
             println!("context.md refreshed ({} plans, {} reference docs).", plans.len(), refs.len());
         }
     }
