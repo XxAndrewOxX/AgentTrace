@@ -1,4 +1,6 @@
-use crate::types::{DocType, DiffStats};
+pub mod candle;
+
+use crate::types::DocType;
 use anyhow::Result;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
