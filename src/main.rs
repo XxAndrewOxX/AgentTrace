@@ -250,10 +250,9 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Init { path, scan } => commands::init::run(&path, scan),
-        Commands::Open { path, .. } => {
+        Commands::Open { path, agent, ascii } => {
             let root = path.unwrap_or_else(|| PathBuf::from("."));
-            println!("TUI not yet implemented. Store: {}", root.display());
-            Ok(())
+            commands::open::run(&root, agent.or(cli.agent), ascii)
         }
         Commands::Status { path } => {
             let root = path.unwrap_or_else(|| PathBuf::from("."));

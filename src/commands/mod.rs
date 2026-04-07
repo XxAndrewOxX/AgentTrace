@@ -1,4 +1,5 @@
 pub mod init;
+pub mod open;
 pub mod status;
 pub mod add;
 pub mod ls;
