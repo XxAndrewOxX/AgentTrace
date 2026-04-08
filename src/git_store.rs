@@ -1,4 +1,6 @@
 use crate::types::{Action, Actor, DocType, DiffStats, FileChange, LogEntry};
+
+type ParsedCommit = (Action, String, Actor, Option<String>, Vec<(PathBuf, Action, DocType)>);
 use anyhow::{bail, Context, Result};
 use chrono::{TimeZone, Utc};
 use git2::{
@@ -455,9 +457,7 @@ fn parse_commit(commit: &git2::Commit<'_>) -> Option<LogEntry> {
     })
 }
 
-fn parse_structured_message(
-    message: &str,
-) -> (Action, String, Actor, Option<String>, Vec<(PathBuf, Action, DocType)>) {
+fn parse_structured_message(message: &str) -> ParsedCommit {
     let mut action = Action::Unknown;
     let mut summary = message.to_string();
     let mut actor = Actor::System;
@@ -515,7 +515,7 @@ fn parse_file_line(s: &str) -> Option<(PathBuf, Action, DocType)> {
     Some((path, action, doc_type))
 }
 
-fn is_md(p: &PathBuf) -> bool {
+fn is_md(p: &Path) -> bool {
     p.extension().and_then(|e| e.to_str()) == Some("md")
 }
 

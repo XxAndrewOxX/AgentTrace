@@ -69,11 +69,8 @@ impl App {
             }
 
             // Drain UI events from poll loop.
-            loop {
-                match self.ui_rx.try_recv() {
-                    Ok(event) => self.handle_ui_event(event),
-                    Err(_) => break,
-                }
+            while let Ok(event) = self.ui_rx.try_recv() {
+                self.handle_ui_event(event);
             }
 
             if self.should_quit {

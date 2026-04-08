@@ -172,7 +172,7 @@ impl Manifest {
 
     pub fn list(&self, type_filter: Option<&DocType>) -> Vec<&DocumentEntry> {
         self.documents.iter()
-            .filter(|d| type_filter.map_or(true, |t| &d.doc_type == t))
+            .filter(|d| type_filter.is_none_or(|t| &d.doc_type == t))
             .collect()
     }
 

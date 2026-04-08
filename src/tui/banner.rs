@@ -13,7 +13,7 @@ pub fn print_banner(manifest: &Manifest, llm: &dyn LlmEngine, ascii: bool) {
     let hr_line = hr.repeat(width);
 
     println!("{}{}{}", border, hr_line, if ascii { "+" } else { "╗" });
-    println!("{}  docmgr v{}  —  Agent Document Manager{:>width$}{}", side, version, side, "", width = width - 16 - version.len());
+    println!("{}  docmgr v{}  —  Agent Document Manager{:>width$}{side}", side, version, "", width = width - 16 - version.len());
     println!("{}{}{}", bottom, hr_line, if ascii { "+" } else { "╝" });
     println!();
     println!("  Documents tracked : {}", manifest.documents.len());
