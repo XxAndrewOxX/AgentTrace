@@ -60,6 +60,8 @@ impl TreeState {
 
 // ── Changelog Panel State ─────────────────────────────────────────────────────
 
+const MAX_CHANGELOG_ENTRIES: usize = 200;
+
 pub struct ChangelogState {
     pub entries: Vec<LogEntry>,
     pub scroll: usize,
@@ -72,6 +74,10 @@ impl ChangelogState {
 
     pub fn push(&mut self, entry: LogEntry) {
         self.entries.insert(0, entry);
+        if self.entries.len() > MAX_CHANGELOG_ENTRIES {
+            self.entries.truncate(MAX_CHANGELOG_ENTRIES);
+            self.scroll = self.scroll.min(MAX_CHANGELOG_ENTRIES.saturating_sub(1));
+        }
     }
 
     pub fn scroll_up(&mut self) {

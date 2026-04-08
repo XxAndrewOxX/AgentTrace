@@ -113,6 +113,8 @@ impl ChangeProcessor {
 
         let mut allowed: Vec<(PathBuf, Action, DocType)> = Vec::new();
         let mut violations: Vec<Violation> = Vec::new();
+        // Track newly-registered paths so we can roll back if the git commit fails.
+        let mut newly_registered: Vec<PathBuf> = Vec::new();
 
         let mut manifest = self.manifest.lock().unwrap();
 
@@ -133,6 +135,7 @@ impl ChangeProcessor {
                     if matches!(change, FileChange::New(_)) && !manifest.is_tracked(&path) {
                         let agent_name = actor.agent_name().unwrap_or("");
                         let _ = manifest.register(&path, DocType::Scratch, agent_name);
+                        newly_registered.push(path.clone());
                     }
                     // Update renamed paths.
                     if let FileChange::Renamed { from, to } = change {
@@ -201,8 +204,6 @@ impl ChangeProcessor {
 
         // Batch commit allowed changes.
         if !allowed.is_empty() {
-            let _ = manifest.save(&store_root);
-
             let info = CommitInfo {
                 action: allowed[0].1.clone(),
                 files: allowed.clone(),
@@ -211,18 +212,33 @@ impl ChangeProcessor {
                 agent_name: actor.agent_name().map(String::from),
                 session_id: Some(self.session_id.clone()),
             };
-            if let Ok(oid) = self.git.commit(&info) {
-                let entry = LogEntry {
-                    commit_id: oid.to_string(),
-                    timestamp: Utc::now(),
-                    action: info.action,
-                    actor: actor.clone(),
-                    agent_name: actor.agent_name().map(String::from),
-                    files: info.files.clone(),
-                    summary: info.summary,
-                };
-                if let Some(tx) = &self.ui_tx {
-                    let _ = tx.try_send(UiEvent::NewCommit(entry));
+            match self.git.commit(&info) {
+                Ok(oid) => {
+                    // Persist the manifest now that git is consistent.
+                    let _ = manifest.save(&store_root);
+                    let entry = LogEntry {
+                        commit_id: oid.to_string(),
+                        timestamp: Utc::now(),
+                        action: info.action,
+                        actor: actor.clone(),
+                        agent_name: actor.agent_name().map(String::from),
+                        files: info.files.clone(),
+                        summary: info.summary,
+                    };
+                    if let Some(tx) = &self.ui_tx {
+                        let _ = tx.try_send(UiEvent::NewCommit(entry));
+                    }
+                }
+                Err(e) => {
+                    // Roll back in-memory registrations so manifest stays consistent.
+                    for path in &newly_registered {
+                        let _ = manifest.untrack(path);
+                    }
+                    tracing::warn!(
+                        "Commit failed, rolled back {} registration(s): {}",
+                        newly_registered.len(), e
+                    );
+                    return Ok(());
                 }
             }
 
@@ -244,9 +260,12 @@ impl ChangeProcessor {
                 }
             }
 
-            // Regenerate DOCMGR.md.
+            // Regenerate DOCMGR.md atomically (tmp → rename so readers never see a partial file).
             let docmgr_content = docmgr_md::generate(&store_root, &manifest);
-            if let Err(e) = std::fs::write(store_root.join("DOCMGR.md"), &docmgr_content) {
+            let docmgr_tmp = store_root.join(".docmgr").join("DOCMGR.md.tmp");
+            if let Err(e) = std::fs::write(&docmgr_tmp, &docmgr_content)
+                .and_then(|_| std::fs::rename(&docmgr_tmp, store_root.join("DOCMGR.md")))
+            {
                 tracing::warn!("DOCMGR.md write failed: {}", e);
             }
 
