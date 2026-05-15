@@ -223,9 +223,9 @@ fn ai7_docmgr_md_discovery() {
     assert!(docmgr.contains("Reference"), "AGENT-TRACE.md should list references");
     assert!(docmgr.contains("Scratch"), "AGENT-TRACE.md should list scratch");
     assert!(docmgr.contains("Logs"), "AGENT-TRACE.md should list logs");
-    assert!(docmgr.contains("prd.md"), "prd.md in AGENT-TRACE");
-    assert!(docmgr.contains("api.md"), "api.md in AGENT-TRACE");
-    assert!(docmgr.contains("plan"), "plan row in AGENT-TRACE");
+    assert!(docmgr.contains("prd.md"), "prd.md in DOCMGR");
+    assert!(docmgr.contains("api.md"), "api.md in DOCMGR");
+    assert!(docmgr.contains("plan"), "plan row in DOCMGR");
 }
 
 // ── AI-8: Stale Agent Lock Cleanup ───────────────────────────────────────────
