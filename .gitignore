@@ -1,1 +1,11 @@
 /target
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Claude Code internals
+.claude/
+
+# Planning & internal docs (not for public repo)
+agent-trace-docs/
