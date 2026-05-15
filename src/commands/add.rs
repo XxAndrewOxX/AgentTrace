@@ -28,15 +28,15 @@ pub fn run(store_root: &Path, doc_type: DocType, file: &Path) -> Result<()> {
     manifest.register(&rel, doc_type.clone(), "")?;
     manifest.save(store_root)?;
 
-    // Regenerate DOCMGR.md so the new document appears.
-    let docmgr_content = crate::docmgr_md::generate(store_root, &manifest);
-    std::fs::write(store_root.join("DOCMGR.md"), &docmgr_content)?;
+    // Regenerate AGENT-TRACE.md so the new document appears.
+    let agent_trace_content = crate::agent_trace_md::generate(store_root, &manifest);
+    std::fs::write(store_root.join("AGENT-TRACE.md"), &agent_trace_content)?;
 
     let info = CommitInfo {
         action: Action::Create,
         files: vec![
             (rel.clone(), Action::Create, doc_type.clone()),
-            (std::path::PathBuf::from("DOCMGR.md"), Action::Modify, DocType::Reference),
+            (std::path::PathBuf::from("AGENT-TRACE.md"), Action::Modify, DocType::Reference),
         ],
         actor: Actor::User,
         summary: format!("add {}: {}", doc_type, rel.display()),

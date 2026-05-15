@@ -43,7 +43,7 @@ pub fn check_permission(
             reason: "Agents cannot modify system-owned context documents".into(),
         },
         (DocType::Context, Actor::User) => PermissionResult::RequiresConfirmation {
-            prompt: "Context is system-synthesized. Use `docmgr context update \"...\"` to update. Overwrite directly? [y/N]".into(),
+            prompt: "Context is system-synthesized. Use `agent-trace context update \"...\"` to update. Overwrite directly? [y/N]".into(),
         },
 
         // Log: system only. Agent denied; user requires confirmation.
@@ -143,7 +143,7 @@ impl Overrides {
 }
 
 fn overrides_path(store_root: &Path) -> PathBuf {
-    store_root.join(".docmgr").join("overrides.toml")
+    store_root.join(".agent-trace").join("overrides.toml")
 }
 
 // ── Violation ─────────────────────────────────────────────────────────────────
@@ -292,7 +292,7 @@ mod tests {
     fn test_overrides_roundtrip() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
-        std::fs::create_dir_all(root.join(".docmgr")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
         let mut o = Overrides::default();
         o.add(OverrideEntry {
             doc_id: "id1".into(),

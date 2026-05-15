@@ -3,11 +3,11 @@
 mod helpers;
 use helpers::TestStore;
 
-use docmgr::config::{GlobalConfig, MergedConfig, PollingConfig, StoreConfig, StoreInfo};
-use docmgr::git_store::{CommitInfo, GitStore};
-use docmgr::manifest::Manifest;
-use docmgr::poll::{AgentState, ChangeProcessor};
-use docmgr::types::{Action, Actor, DocType};
+use agent_trace::config::{GlobalConfig, MergedConfig, PollingConfig, StoreConfig, StoreInfo};
+use agent_trace::git_store::{CommitInfo, GitStore};
+use agent_trace::manifest::Manifest;
+use agent_trace::poll::{AgentState, ChangeProcessor};
+use agent_trace::types::{Action, Actor, DocType};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -16,7 +16,7 @@ use tempfile::TempDir;
 fn setup_large_store(n_files: usize, n_dirs: usize) -> (TempDir, Arc<Mutex<Manifest>>) {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
-    std::fs::create_dir_all(root.join(".docmgr/locks")).unwrap();
+    std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
     let git = GitStore::init(root).unwrap();
     let info = StoreInfo::new("perf-test".into());
     let mut manifest = Manifest::create_empty(info.clone(), root).unwrap();
@@ -104,7 +104,7 @@ fn ps3_git_log_performance() {
     // Create a store with many commits.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
-    std::fs::create_dir_all(root.join(".docmgr/locks")).unwrap();
+    std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
     let git = GitStore::init(root).unwrap();
     let info = StoreInfo::new("perf-test".into());
     let _manifest = Manifest::create_empty(info.clone(), root).unwrap();

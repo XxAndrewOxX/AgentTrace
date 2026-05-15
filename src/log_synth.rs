@@ -104,7 +104,7 @@ mod tests {
     fn test_append_agent_log_creates_file() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
-        std::fs::create_dir_all(root.join(".docmgr")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
         let git = GitStore::init(root).unwrap();
 
         let entries = vec![LogSynthEntry {
@@ -126,7 +126,7 @@ mod tests {
     fn test_append_agent_log_appends_to_existing() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
-        std::fs::create_dir_all(root.join(".docmgr")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
         let git = GitStore::init(root).unwrap();
 
         let entries1 = vec![LogSynthEntry {

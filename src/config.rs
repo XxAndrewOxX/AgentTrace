@@ -80,7 +80,7 @@ pub struct GlobalConfig {
 }
 
 impl GlobalConfig {
-    /// Load from `~/.config/docmgr/config.toml`, using defaults if absent.
+    /// Load from `~/.config/agent-trace/config.toml`, using defaults if absent.
     pub fn load() -> Result<Self> {
         let path = global_config_path();
         if !path.exists() {
@@ -106,7 +106,7 @@ impl GlobalConfig {
 pub fn global_config_path() -> PathBuf {
     dirs_next::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("docmgr")
+        .join("agent-trace")
         .join("config.toml")
 }
 
@@ -117,7 +117,7 @@ pub struct StoreInfo {
     pub id: String,
     pub name: String,
     pub created: DateTime<Utc>,
-    pub docmgr_version: String,
+    pub agent_trace_version: String,
 }
 
 impl StoreInfo {
@@ -126,7 +126,7 @@ impl StoreInfo {
             id: Uuid::new_v4().to_string(),
             name,
             created: Utc::now(),
-            docmgr_version: env!("CARGO_PKG_VERSION").to_string(),
+            agent_trace_version: env!("CARGO_PKG_VERSION").to_string(),
         }
     }
 }
@@ -157,7 +157,7 @@ pub struct StoreConfig {
 }
 
 impl StoreConfig {
-    /// Load from `.docmgr/config.toml` inside the store root.
+    /// Load from `.agent-trace/config.toml` inside the store root.
     pub fn load(store_root: &Path) -> Result<Self> {
         let path = store_config_path(store_root);
         let contents = std::fs::read_to_string(&path)
@@ -175,7 +175,7 @@ impl StoreConfig {
 }
 
 pub fn store_config_path(store_root: &Path) -> PathBuf {
-    store_root.join(".docmgr").join("config.toml")
+    store_root.join(".agent-trace").join("config.toml")
 }
 
 // ── Merged Config ─────────────────────────────────────────────────────────────
@@ -234,7 +234,7 @@ mod tests {
     fn test_store_config_roundtrip() {
         let tmp = TempDir::new().unwrap();
         let store_root = tmp.path();
-        std::fs::create_dir_all(store_root.join(".docmgr")).unwrap();
+        std::fs::create_dir_all(store_root.join(".agent-trace")).unwrap();
 
         let info = StoreInfo::new("test-store".into());
         let cfg = StoreConfig {
@@ -294,7 +294,7 @@ mod tests {
         let info = StoreInfo::new("my-store".into());
         assert!(!info.id.is_empty());
         assert_eq!(info.name, "my-store");
-        assert_eq!(info.docmgr_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(info.agent_trace_version, env!("CARGO_PKG_VERSION"));
         // Validate UUID format
         assert!(info.id.parse::<uuid::Uuid>().is_ok());
     }

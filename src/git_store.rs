@@ -28,7 +28,7 @@ impl GitStore {
     // ── Init / Open ───────────────────────────────────────────────────────
 
     pub fn init(store_root: &Path) -> Result<Self> {
-        let git_dir = store_root.join(".docmgr").join("repo");
+        let git_dir = store_root.join(".agent-trace").join("repo");
 
         let mut opts = RepositoryInitOptions::new();
         opts.bare(false);
@@ -38,23 +38,23 @@ impl GitStore {
         let repo = Repository::init_opts(&git_dir, &opts)
             .with_context(|| format!("Initialising git repo at {}", git_dir.display()))?;
 
-        // Write exclude file so .docmgr itself is never tracked.
+        // Write exclude file so .agent-trace itself is never tracked.
         let exclude = git_dir.join("info").join("exclude");
         std::fs::create_dir_all(exclude.parent().unwrap())?;
-        std::fs::write(&exclude, ".docmgr/\n")?;
+        std::fs::write(&exclude, ".agent-trace/\n")?;
 
         let store = Self { repo, workdir: store_root.to_path_buf() };
 
         // Create initial empty commit.
-        store.create_empty_commit("docmgr store initialized")?;
+        store.create_empty_commit("agent-trace store initialized")?;
 
         Ok(store)
     }
 
     pub fn open(store_root: &Path) -> Result<Self> {
-        let git_dir = store_root.join(".docmgr").join("repo");
+        let git_dir = store_root.join(".agent-trace").join("repo");
         if !git_dir.exists() {
-            bail!("Not a docmgr store: .docmgr/repo not found in {}", store_root.display());
+            bail!("Not an agent-trace store: .agent-trace/repo not found in {}", store_root.display());
         }
         let repo = Repository::open(&git_dir)
             .with_context(|| format!("Opening git repo at {}", git_dir.display()))?;
@@ -62,7 +62,7 @@ impl GitStore {
     }
 
     fn create_empty_commit(&self, message: &str) -> Result<Oid> {
-        let sig = Signature::now("docmgr", "system@docmgr")?;
+        let sig = Signature::now("agent-trace", "system@agent-trace")?;
         let tree_oid = {
             let mut index = self.repo.index()?;
             index.write_tree()?
@@ -388,7 +388,7 @@ impl GitStore {
     }
 
     pub fn save_rejected(&self, path: &Path, content: &str) -> Result<()> {
-        let rejected_dir = self.workdir.join(".docmgr").join("rejected");
+        let rejected_dir = self.workdir.join(".agent-trace").join("rejected");
         std::fs::create_dir_all(&rejected_dir)?;
         let filename = format!(
             "{}-{}.rejected",
@@ -403,17 +403,17 @@ impl GitStore {
 // ── Commit message helpers ────────────────────────────────────────────────────
 
 fn build_commit_message(info: &CommitInfo) -> String {
-    // Subject: [docmgr] <action> <type>: <file>
+    // Subject: [agent-trace] <action> <type>: <file>
     let first_file = info.files.first();
     let subject = if let Some((path, _action, doc_type)) = first_file {
         format!(
-            "[docmgr] {} {}: {}",
+            "[agent-trace] {} {}: {}",
             info.action,
             doc_type,
             path.display()
         )
     } else {
-        format!("[docmgr] {}", info.action)
+        format!("[agent-trace] {}", info.action)
     };
 
     let mut body = format!("summary: {}\n", info.summary);
@@ -440,7 +440,7 @@ fn parse_commit(commit: &git2::Commit<'_>) -> Option<LogEntry> {
     let lines: Vec<&str> = message.lines().collect();
     let subject = lines.first().unwrap_or(&"");
 
-    let (action, summary, actor, agent_name, files) = if subject.starts_with("[docmgr]") {
+    let (action, summary, actor, agent_name, files) = if subject.starts_with("[agent-trace]") {
         parse_structured_message(message)
     } else {
         (Action::Unknown, message.to_string(), Actor::System, None, Vec::new())
@@ -468,8 +468,8 @@ fn parse_structured_message(message: &str) -> ParsedCommit {
     let subject = parts[0];
     let body = parts.get(1).copied().unwrap_or("");
 
-    // Parse action from subject: "[docmgr] modify plan: prd.md"
-    if let Some(rest) = subject.strip_prefix("[docmgr] ") {
+    // Parse action from subject: "[agent-trace] modify plan: prd.md"
+    if let Some(rest) = subject.strip_prefix("[agent-trace] ") {
         let first_word = rest.split_whitespace().next().unwrap_or("");
         action = first_word.parse().unwrap_or(Action::Unknown);
     }
@@ -546,7 +546,7 @@ mod tests {
 
     fn setup_store() -> (TempDir, GitStore) {
         let tmp = TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".docmgr")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-trace")).unwrap();
         let store = GitStore::init(tmp.path()).unwrap();
         (tmp, store)
     }
@@ -572,9 +572,9 @@ mod tests {
     #[test]
     fn test_init_creates_repo() {
         let tmp = TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".docmgr")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-trace")).unwrap();
         let store = GitStore::init(tmp.path()).unwrap();
-        assert!(tmp.path().join(".docmgr").join("repo").exists());
+        assert!(tmp.path().join(".agent-trace").join("repo").exists());
         assert_eq!(store.workdir, tmp.path());
     }
 
@@ -627,7 +627,7 @@ mod tests {
 
         let head = store.head_commit().unwrap();
         assert_eq!(head.author().name().unwrap(), "Agent: claude-code");
-        assert_eq!(head.author().email().unwrap(), "agent@docmgr");
+        assert_eq!(head.author().email().unwrap(), "agent@agent-trace");
     }
 
     #[test]
@@ -707,7 +707,7 @@ mod tests {
         store.commit(&info).unwrap();
         let head = store.head_commit().unwrap();
         let msg = head.message().unwrap();
-        assert!(msg.contains("[docmgr] modify plan: prd.md"), "Got: {}", msg);
+        assert!(msg.contains("[agent-trace] modify plan: prd.md"), "Got: {}", msg);
         assert!(msg.contains("actor: user"));
     }
 }

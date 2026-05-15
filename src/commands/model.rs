@@ -57,7 +57,7 @@ pub fn run(cmd: ModelCmd) -> Result<()> {
                 }
                 None => println!(
                     "No model configured.\n\
-                     Use `docmgr model download` or `docmgr model set <path>`."
+                     Use `agent-trace model download` or `agent-trace model set <path>`."
                 ),
             }
         }
@@ -113,7 +113,7 @@ pub fn run(cmd: ModelCmd) -> Result<()> {
             config.save()?;
 
             println!("Saved to {}", dest_path.display());
-            println!("Global config updated — LLM will be used on next `docmgr open`.");
+            println!("Global config updated — LLM will be used on next `agent-trace open`.");
         }
     }
     Ok(())
@@ -122,7 +122,7 @@ pub fn run(cmd: ModelCmd) -> Result<()> {
 fn model_dir() -> Result<PathBuf> {
     let base = dirs_next::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."));
-    Ok(base.join("docmgr").join("models"))
+    Ok(base.join("agent-trace").join("models"))
 }
 
 fn download_with_progress(url: &str, dest: &std::path::Path) -> Result<()> {
@@ -199,6 +199,6 @@ mod tests {
     fn test_model_dir_is_absolute() {
         let dir = model_dir().unwrap();
         assert!(dir.is_absolute());
-        assert!(dir.to_string_lossy().contains("docmgr"));
+        assert!(dir.to_string_lossy().contains("agent-trace"));
     }
 }

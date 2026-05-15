@@ -41,7 +41,7 @@ pub fn run(store_root: &Path) -> Result<()> {
         }
     }).count();
     if untracked > 0 {
-        println!("\n{} untracked file(s). Use `docmgr add <type> <file>` to register.", untracked);
+        println!("\n{} untracked file(s). Use `agent-trace add <type> <file>` to register.", untracked);
     }
 
     Ok(())

@@ -208,7 +208,7 @@ fn summarize_prompt(path: &str, doc_type: &str, diff: &str) -> String {
 #[allow(dead_code)]
 fn command_prompt(input: &str, manifest_summary: &str) -> String {
     format!(
-        "<|system|>\nParse this natural language docmgr command into JSON: \
+        "<|system|>\nParse this natural language agent-trace command into JSON: \
          {{\"cmd\": \"<command>\", \"args\": {{...}}}}.\n\
          Commands: ls, add, rm, info, diff, log, show, restore, replace, status.\n\
          Store contents:\n{}\n<|user|>\n{}\n<|assistant|>\n",

@@ -81,16 +81,16 @@ impl Actor {
         match self {
             Actor::User => "User".to_string(),
             Actor::Agent { name } => format!("Agent: {}", name),
-            Actor::System => "docmgr".to_string(),
+            Actor::System => "agent-trace".to_string(),
         }
     }
 
     /// Returns the git author email for commit attribution.
     pub fn git_author_email(&self) -> &'static str {
         match self {
-            Actor::User => "user@docmgr",
-            Actor::Agent { .. } => "agent@docmgr",
-            Actor::System => "system@docmgr",
+            Actor::User => "user@agent-trace",
+            Actor::Agent { .. } => "agent@agent-trace",
+            Actor::System => "system@agent-trace",
         }
     }
 
@@ -224,14 +224,14 @@ mod tests {
     #[test]
     fn test_actor_git_attribution() {
         assert_eq!(Actor::User.git_author_name(), "User");
-        assert_eq!(Actor::User.git_author_email(), "user@docmgr");
+        assert_eq!(Actor::User.git_author_email(), "user@agent-trace");
 
         let agent = Actor::Agent { name: "claude-code".into() };
         assert_eq!(agent.git_author_name(), "Agent: claude-code");
-        assert_eq!(agent.git_author_email(), "agent@docmgr");
+        assert_eq!(agent.git_author_email(), "agent@agent-trace");
 
-        assert_eq!(Actor::System.git_author_name(), "docmgr");
-        assert_eq!(Actor::System.git_author_email(), "system@docmgr");
+        assert_eq!(Actor::System.git_author_name(), "agent-trace");
+        assert_eq!(Actor::System.git_author_email(), "system@agent-trace");
     }
 
     #[test]

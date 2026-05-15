@@ -5,13 +5,13 @@
 mod helpers;
 use helpers::TestStore;
 
-use docmgr::config::{GlobalConfig, MergedConfig, PollingConfig, StoreConfig, StoreInfo};
-use docmgr::git_store::{CommitInfo, GitStore};
-use docmgr::manifest::Manifest;
-use docmgr::permissions::{OverrideEntry, Overrides};
-use docmgr::poll::{AgentState, ChangeProcessor};
-use docmgr::tui::panels::{ChangelogState, ChatState, TreeState};
-use docmgr::types::{Action, Actor, DocType, LogEntry};
+use agent_trace::config::{GlobalConfig, MergedConfig, PollingConfig, StoreConfig, StoreInfo};
+use agent_trace::git_store::{CommitInfo, GitStore};
+use agent_trace::manifest::Manifest;
+use agent_trace::permissions::{OverrideEntry, Overrides};
+use agent_trace::poll::{AgentState, ChangeProcessor};
+use agent_trace::tui::panels::{ChangelogState, ChatState, TreeState};
+use agent_trace::types::{Action, Actor, DocType, LogEntry};
 use chrono::Utc;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -22,7 +22,7 @@ use tempfile::TempDir;
 
 fn setup_store(tmp: &TempDir) -> (GitStore, Arc<Mutex<Manifest>>) {
     let root = tmp.path();
-    std::fs::create_dir_all(root.join(".docmgr/locks")).unwrap();
+    std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
     let git = GitStore::init(root).unwrap();
     let info = StoreInfo::new("test".into());
     let manifest = Manifest::create_empty(info.clone(), root).unwrap();
@@ -210,7 +210,7 @@ fn rc4_simultaneous_lock_and_file_modification() {
     // Write the lock file and modify the plan simultaneously (both happen before the poll).
     let pid = std::process::id();
     let lock_content = format!("[agent]\npid = {}\nname = \"fast-agent\"\n", pid);
-    std::fs::write(root.join(".docmgr/locks/agent-lock.toml"), &lock_content).unwrap();
+    std::fs::write(root.join(".agent-trace/locks/agent-lock.toml"), &lock_content).unwrap();
     std::fs::write(root.join("plan.md"), "# Plan v2 by agent").unwrap();
 
     // Poll cycle should not crash regardless of read ordering.
@@ -249,7 +249,7 @@ fn rc5_lock_removed_during_processing() {
 
     let pid = std::process::id();
     let lock_content = format!("[agent]\npid = {}\nname = \"test-agent\"\n", pid);
-    std::fs::write(root.join(".docmgr/locks/agent-lock.toml"), &lock_content).unwrap();
+    std::fs::write(root.join(".agent-trace/locks/agent-lock.toml"), &lock_content).unwrap();
 
     // Modify file while lock is present → agent attribution.
     std::fs::write(root.join("plan.md"), "# Plan v2").unwrap();
@@ -257,7 +257,7 @@ fn rc5_lock_removed_during_processing() {
     proc.run_poll_cycle().unwrap();
 
     // Remove lock.
-    std::fs::remove_file(root.join(".docmgr/locks/agent-lock.toml")).unwrap();
+    std::fs::remove_file(root.join(".agent-trace/locks/agent-lock.toml")).unwrap();
 
     // Modify file again → user attribution (lock is gone).
     std::fs::write(root.join("plan.md"), "# Plan v3").unwrap();
@@ -299,7 +299,7 @@ fn rc6_manifest_write_read_contention() {
         let start = Instant::now();
         let mut read_count = 0usize;
         while start.elapsed().as_millis() < 500 {
-            let content = std::fs::read_to_string(root_clone.join(".docmgr/manifest.toml"))
+            let content = std::fs::read_to_string(root_clone.join(".agent-trace/manifest.toml"))
                 .unwrap_or_default();
             // If we see a partial/corrupted file, TOML parsing would fail.
             if !content.is_empty() {
@@ -322,13 +322,13 @@ fn rc6_manifest_write_read_contention() {
     assert!(reads > 0, "Reader thread must have run");
 
     // Final manifest must be valid TOML.
-    let final_content = std::fs::read_to_string(root.join(".docmgr/manifest.toml")).unwrap();
+    let final_content = std::fs::read_to_string(root.join(".agent-trace/manifest.toml")).unwrap();
     let parsed: Result<toml::Value, _> = toml::from_str(&final_content);
     assert!(parsed.is_ok(), "Final manifest must be valid TOML");
 
     // The .tmp file must not linger (atomic rename cleans it up).
     assert!(
-        !root.join(".docmgr/manifest.toml.tmp").exists(),
+        !root.join(".agent-trace/manifest.toml.tmp").exists(),
         "Tmp manifest file must not persist after successful write"
     );
 }
@@ -620,7 +620,7 @@ fn gs2_integrity_after_abrupt_drop() {
 
     // No index.lock should exist.
     assert!(
-        !root.join(".docmgr/repo/index.lock").exists(),
+        !root.join(".agent-trace/repo/index.lock").exists(),
         "index.lock must not exist after clean drop"
     );
 }
@@ -761,10 +761,10 @@ fn gs6_symlinks_in_store_directory() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 4. DOCMGR.MD AND CONTEXT SYNTHESIS EDGE CASES
+// 4. AGENT-TRACE.MD AND CONTEXT SYNTHESIS EDGE CASES
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// DC-1: Rapid operations — DOCMGR.md stays consistent with manifest.
+/// DC-1: Rapid operations — AGENT-TRACE.md stays consistent with manifest.
 #[test]
 fn dc1_docmgr_md_consistency_under_rapid_changes() {
     let tmp = TempDir::new().unwrap();
@@ -790,14 +790,14 @@ fn dc1_docmgr_md_consistency_under_rapid_changes() {
         proc.run_poll_cycle().unwrap();
     }
 
-    // After settling, DOCMGR.md must list exactly the files in the manifest.
-    let docmgr_content = std::fs::read_to_string(root.join("DOCMGR.md")).unwrap();
+    // After settling, AGENT-TRACE.md must list exactly the files in the manifest.
+    let docmgr_content = std::fs::read_to_string(root.join("AGENT-TRACE.md")).unwrap();
     let m = manifest.lock().unwrap();
     for doc in m.list(None) {
         let filename = doc.path.file_name().unwrap().to_string_lossy();
         assert!(
             docmgr_content.contains(filename.as_ref()),
-            "DOCMGR.md must list {}; content snippet: {}",
+            "AGENT-TRACE.md must list {}; content snippet: {}",
             filename,
             &docmgr_content[..200.min(docmgr_content.len())]
         );
@@ -828,8 +828,8 @@ fn dc2_context_synthesis_with_conflicting_documents() {
     // Synthesize context directly via Rust API (no CLI needed).
     {
         let m = manifest.lock().unwrap();
-        let content = docmgr::context::synthesize_no_llm(&root, &m).unwrap();
-        docmgr::context::write_context(&root, &content).unwrap();
+        let content = agent_trace::context::synthesize_no_llm(&root, &m).unwrap();
+        agent_trace::context::write_context(&root, &content).unwrap();
     }
 
     // Context must contain references to both plans without crashing.
@@ -863,7 +863,7 @@ fn dc3_context_synthesis_large_document_set() {
     assert!(!context.is_empty(), "context.md must not be empty");
 }
 
-/// DC-4: DOCMGR.md is written atomically — readers never see a partial file.
+/// DC-4: AGENT-TRACE.md is written atomically — readers never see a partial file.
 #[test]
 fn dc4_docmgr_md_written_atomically() {
     let tmp = TempDir::new().unwrap();
@@ -871,17 +871,17 @@ fn dc4_docmgr_md_written_atomically() {
     let root = tmp.path();
     let mut proc = make_processor(git, manifest.clone(), None);
 
-    // Create initial DOCMGR.md.
+    // Create initial AGENT-TRACE.md.
     std::fs::write(root.join("init.md"), "# Init").unwrap();
     proc.run_poll_cycle().unwrap();
 
-    // Spawn a reader thread that reads DOCMGR.md continuously.
+    // Spawn a reader thread that reads AGENT-TRACE.md continuously.
     let root_clone = root.to_path_buf();
     let reader = std::thread::spawn(move || {
         let start = Instant::now();
         let mut partial_reads = 0usize;
         while start.elapsed().as_millis() < 300 {
-            if let Ok(content) = std::fs::read_to_string(root_clone.join("DOCMGR.md")) {
+            if let Ok(content) = std::fs::read_to_string(root_clone.join("AGENT-TRACE.md")) {
                 // A partial write would produce invalid/incomplete content.
                 // We check that the content is always non-empty when the file exists.
                 if content.is_empty() {
@@ -892,7 +892,7 @@ fn dc4_docmgr_md_written_atomically() {
         partial_reads
     });
 
-    // While reader runs, create files to trigger DOCMGR.md regeneration.
+    // While reader runs, create files to trigger AGENT-TRACE.md regeneration.
     for i in 0..20 {
         std::fs::write(root.join(format!("f{}.md", i)), format!("# {}", i)).unwrap();
         proc.run_poll_cycle().unwrap();
@@ -901,11 +901,11 @@ fn dc4_docmgr_md_written_atomically() {
     let partial = reader.join().unwrap();
     // The tmp file must not persist.
     assert!(
-        !root.join(".docmgr/DOCMGR.md.tmp").exists(),
-        "DOCMGR.md.tmp must not persist after write"
+        !root.join(".agent-trace/AGENT-TRACE.md.tmp").exists(),
+        "AGENT-TRACE.md.tmp must not persist after write"
     );
     // Ideally zero partial reads, but we accept a small race window.
-    assert!(partial == 0, "Readers saw {} empty DOCMGR.md reads — atomic write may have failed", partial);
+    assert!(partial == 0, "Readers saw {} empty AGENT-TRACE.md reads — atomic write may have failed", partial);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -946,12 +946,12 @@ fn ts1_changelog_panel_entry_eviction() {
 #[test]
 fn ts2_long_filenames_in_tree_panel() {
     use ratatui::{backend::TestBackend, Terminal};
-    use docmgr::tui::app::App;
+    use agent_trace::tui::app::App;
     use std::sync::{Arc, Mutex};
 
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
-    std::fs::create_dir_all(root.join(".docmgr")).unwrap();
+    std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
     let info = StoreInfo::new("test".into());
     let mut manifest = Manifest::create_empty(info, root).unwrap();
 
@@ -974,12 +974,12 @@ fn ts2_long_filenames_in_tree_panel() {
 #[test]
 fn ts3_thousands_of_files_in_tree_panel() {
     use ratatui::{backend::TestBackend, Terminal};
-    use docmgr::tui::app::App;
+    use agent_trace::tui::app::App;
     use std::sync::{Arc, Mutex};
 
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
-    std::fs::create_dir_all(root.join(".docmgr")).unwrap();
+    std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
     let info = StoreInfo::new("test".into());
     let mut manifest = Manifest::create_empty(info, root).unwrap();
 
@@ -1072,7 +1072,7 @@ fn fs1_read_only_store_directory() {
     // Restore permissions so TempDir can clean up.
     std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    // Either Ok (if git index is in .docmgr/repo which is still accessible) or Err.
+    // Either Ok (if git index is in .agent-trace/repo which is still accessible) or Err.
     // The key requirement: no panic.
     let _ = result;
 }

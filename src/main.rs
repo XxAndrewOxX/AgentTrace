@@ -1,7 +1,7 @@
-use docmgr::commands;
-use docmgr::commands::context::ContextCmd;
-use docmgr::commands::model::ModelCmd;
-use docmgr::types::DocType;
+use agent_trace::commands;
+use agent_trace::commands::context::ContextCmd;
+use agent_trace::commands::model::ModelCmd;
+use agent_trace::types::DocType;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "docmgr",
+    name = "agent-trace",
     version,
     about = "Agent Document Manager — git-backed document store with AI integration",
     arg_required_else_help = true,

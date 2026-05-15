@@ -1,10 +1,10 @@
 [package]
-name = "docmgr"
+name = "agent_trace"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "docmgr"
+name = "agent-trace"
 path = "src/main.rs"
 
 [dependencies]

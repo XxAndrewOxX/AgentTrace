@@ -3,11 +3,11 @@
 mod helpers;
 use helpers::TestStore;
 
-use docmgr::config::{MergedConfig, GlobalConfig, StoreConfig, StoreInfo, PollingConfig};
-use docmgr::git_store::{CommitInfo, GitStore};
-use docmgr::manifest::Manifest;
-use docmgr::poll::{AgentState, ChangeProcessor};
-use docmgr::types::{Action, Actor, DocType};
+use agent_trace::config::{MergedConfig, GlobalConfig, StoreConfig, StoreInfo, PollingConfig};
+use agent_trace::git_store::{CommitInfo, GitStore};
+use agent_trace::manifest::Manifest;
+use agent_trace::poll::{AgentState, ChangeProcessor};
+use agent_trace::types::{Action, Actor, DocType};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
@@ -20,7 +20,7 @@ fn setup_processor(
     agent_name: Option<&str>,
 ) -> (Arc<Mutex<Manifest>>, ChangeProcessor) {
     let root = tmp.path();
-    std::fs::create_dir_all(root.join(".docmgr/locks")).unwrap();
+    std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
     let git = GitStore::init(root).unwrap();
     let info = StoreInfo::new("test".into());
     let manifest = Manifest::create_empty(info.clone(), root).unwrap();
@@ -56,7 +56,7 @@ fn commit_file(root: &std::path::Path, name: &str, content: &str, doc_type: DocT
 fn ai1_agent_lock_file_attribution() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
-    std::fs::create_dir_all(root.join(".docmgr/locks")).unwrap();
+    std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
     let git = GitStore::init(root).unwrap();
     let info = StoreInfo::new("test".into());
     let manifest = Manifest::create_empty(info.clone(), root).unwrap();
@@ -75,7 +75,7 @@ fn ai1_agent_lock_file_attribution() {
     // Write agent-lock.toml with current PID (so is_pid_alive returns true).
     let pid = std::process::id();
     let lock_content = format!("[agent]\npid = {}\nname = \"test-agent\"\n", pid);
-    std::fs::write(root.join(".docmgr/locks/agent-lock.toml"), lock_content).unwrap();
+    std::fs::write(root.join(".agent-trace/locks/agent-lock.toml"), lock_content).unwrap();
 
     let agent = AgentState::new(None);
     let mut proc = ChangeProcessor::new(git, manifest, config, agent, None);
@@ -138,7 +138,7 @@ fn ai3_agent_cannot_modify_context() {
 
     let git2 = GitStore::open(tmp.path()).unwrap();
     let log = git2.log(10).unwrap();
-    let has_violation = log.iter().any(|e| matches!(e.action, docmgr::types::Action::Violation));
+    let has_violation = log.iter().any(|e| matches!(e.action, agent_trace::types::Action::Violation));
     assert!(has_violation, "Expected a violation commit in git log");
 }
 
@@ -198,7 +198,7 @@ fn ai6_agent_new_file_registered_as_scratch() {
     assert_eq!(doc.unwrap().doc_type, DocType::Scratch, "agent-created files should be Scratch");
 }
 
-// ── AI-7: DOCMGR.md Agent Discovery ──────────────────────────────────────────
+// ── AI-7: AGENT-TRACE.md Agent Discovery ──────────────────────────────────────────
 
 #[test]
 fn ai7_docmgr_md_discovery() {
@@ -216,13 +216,13 @@ fn ai7_docmgr_md_discovery() {
     store.docmgr(&["add", "scratch", "notes.md"]).expect_success("add scratch");
     store.docmgr(&["add", "log", "logs/session.md"]).expect_success("add log");
 
-    let docmgr = store.read_file("DOCMGR.md");
-    assert!(docmgr.contains("How to Use This Store"), "DOCMGR.md should have how-to section");
-    assert!(docmgr.contains("Write Permission Rules"), "DOCMGR.md should have permission rules");
-    assert!(docmgr.contains("Plans"), "DOCMGR.md should list plans");
-    assert!(docmgr.contains("Reference"), "DOCMGR.md should list references");
-    assert!(docmgr.contains("Scratch"), "DOCMGR.md should list scratch");
-    assert!(docmgr.contains("Logs"), "DOCMGR.md should list logs");
+    let docmgr = store.read_file("AGENT-TRACE.md");
+    assert!(docmgr.contains("How to Use This Store"), "AGENT-TRACE.md should have how-to section");
+    assert!(docmgr.contains("Write Permission Rules"), "AGENT-TRACE.md should have permission rules");
+    assert!(docmgr.contains("Plans"), "AGENT-TRACE.md should list plans");
+    assert!(docmgr.contains("Reference"), "AGENT-TRACE.md should list references");
+    assert!(docmgr.contains("Scratch"), "AGENT-TRACE.md should list scratch");
+    assert!(docmgr.contains("Logs"), "AGENT-TRACE.md should list logs");
     assert!(docmgr.contains("prd.md"), "prd.md in DOCMGR");
     assert!(docmgr.contains("api.md"), "api.md in DOCMGR");
     assert!(docmgr.contains("plan"), "plan row in DOCMGR");
@@ -234,9 +234,9 @@ fn ai7_docmgr_md_discovery() {
 fn ai8_stale_agent_lock_cleaned_up() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
-    std::fs::create_dir_all(root.join(".docmgr/locks")).unwrap();
+    std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
 
-    let lock_path = root.join(".docmgr/locks/agent-lock.toml");
+    let lock_path = root.join(".agent-trace/locks/agent-lock.toml");
     // PID 9999999 — almost certainly not running.
     let lock_content = "[agent]\npid = 9999999\nname = \"ghost-agent\"\n";
     std::fs::write(&lock_path, lock_content).unwrap();

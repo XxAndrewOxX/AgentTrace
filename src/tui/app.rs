@@ -280,7 +280,7 @@ mod tests {
 
     fn make_app(tmp: &TempDir) -> (App, tokio::sync::mpsc::Sender<UiEvent>) {
         let root = tmp.path().to_path_buf();
-        std::fs::create_dir_all(root.join(".docmgr")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
         let info = StoreInfo::new("test".into());
         let manifest = Manifest::create_empty(info, &root).unwrap();
         let manifest = Arc::new(Mutex::new(manifest));

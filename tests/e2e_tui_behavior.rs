@@ -11,11 +11,11 @@
 mod helpers;
 use helpers::TestStore;
 
-use docmgr::tui::app::App;
-use docmgr::tui::panels::{ChangelogState, ChatState, Focus, TreeState};
-use docmgr::manifest::Manifest;
-use docmgr::config::StoreInfo;
-use docmgr::llm::LlmEngine;
+use agent_trace::tui::app::App;
+use agent_trace::tui::panels::{ChangelogState, ChatState, Focus, TreeState};
+use agent_trace::manifest::Manifest;
+use agent_trace::config::StoreInfo;
+use agent_trace::llm::LlmEngine;
 use std::sync::{Arc, Mutex};
 
 // ── TB-1/TB-2/TB-3/TB-4: Layout rendering ────────────────────────────────────
@@ -34,11 +34,11 @@ use std::sync::{Arc, Mutex};
 fn tb3_below_minimum_shows_message() {
     // Mirrors the unit test in app.rs — validates the TUI error message logic.
     use ratatui::{backend::TestBackend, Terminal};
-    use docmgr::types::LogEntry;
+    use agent_trace::types::LogEntry;
 
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();
-    std::fs::create_dir_all(root.join(".docmgr")).unwrap();
+    std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
     let info = StoreInfo::new("test".into());
     let manifest = Manifest::create_empty(info, root).unwrap();
     let manifest = Arc::new(Mutex::new(manifest));
@@ -63,7 +63,7 @@ fn tb1_minimum_size_renders() {
 
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();
-    std::fs::create_dir_all(root.join(".docmgr")).unwrap();
+    std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
     let info = StoreInfo::new("test".into());
     let manifest = Manifest::create_empty(info, root).unwrap();
     let manifest = Arc::new(Mutex::new(manifest));
@@ -93,15 +93,15 @@ fn tb1_minimum_size_renders() {
 #[test]
 fn tb5_proxy_new_file_detected_and_committed() {
     // This re-tests the poll cycle integration: new file → commit → tree update.
-    use docmgr::config::{GlobalConfig, MergedConfig, PollingConfig, StoreConfig};
-    use docmgr::git_store::GitStore;
-    use docmgr::poll::{AgentState, ChangeProcessor};
+    use agent_trace::config::{GlobalConfig, MergedConfig, PollingConfig, StoreConfig};
+    use agent_trace::git_store::GitStore;
+    use agent_trace::poll::{AgentState, ChangeProcessor};
     use tempfile::TempDir;
     use std::path::PathBuf;
 
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
-    std::fs::create_dir_all(root.join(".docmgr/locks")).unwrap();
+    std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
     let git = GitStore::init(root).unwrap();
     let info = StoreInfo::new("test".into());
     let manifest = Manifest::create_empty(info.clone(), root).unwrap();
@@ -163,7 +163,7 @@ fn tb7_chat_state_history_and_input() {
 
 #[test]
 fn tb8_no_llm_engine_is_not_loaded() {
-    use docmgr::llm::NoLlm;
+    use agent_trace::llm::NoLlm;
     let no_llm = NoLlm;
     assert!(!no_llm.is_loaded(), "NoLlm should report is_loaded() = false");
 }
@@ -172,13 +172,13 @@ fn tb8_no_llm_engine_is_not_loaded() {
 
 #[test]
 fn tb9_startup_banner_content() {
-    use docmgr::tui::banner;
-    use docmgr::llm::NoLlm;
+    use agent_trace::tui::banner;
+    use agent_trace::llm::NoLlm;
     use std::io::BufWriter;
 
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();
-    std::fs::create_dir_all(root.join(".docmgr")).unwrap();
+    std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
     let info = StoreInfo::new("test".into());
     let manifest = Manifest::create_empty(info, root).unwrap();
     let no_llm = NoLlm;
@@ -221,9 +221,9 @@ fn tb10_command_history_persistence() {
     store.docmgr(&["add", "plan", "a.md"]).expect_success("add");
 
     // The command_history.txt is only written by docmgr open, not CLI commands.
-    // Verify the .docmgr directory has the expected structure.
-    assert!(store.file_exists(".docmgr/config.toml"), ".docmgr/config.toml");
-    assert!(store.file_exists(".docmgr/manifest.toml"), ".docmgr/manifest.toml");
+    // Verify the .agent-trace directory has the expected structure.
+    assert!(store.file_exists(".agent-trace/config.toml"), ".agent-trace/config.toml");
+    assert!(store.file_exists(".agent-trace/manifest.toml"), ".agent-trace/manifest.toml");
     // No instance lock left.
-    assert!(!store.file_exists(".docmgr/locks/instance.lock"), "no lock after commands");
+    assert!(!store.file_exists(".agent-trace/locks/instance.lock"), "no lock after commands");
 }

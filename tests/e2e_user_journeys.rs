@@ -10,16 +10,16 @@ fn uj1_cold_start_empty() {
     let store = TestStore::new();
     let root = store.root();
 
-    // .docmgr/ structure created.
-    assert!(root.join(".docmgr/config.toml").exists(), ".docmgr/config.toml");
-    assert!(root.join(".docmgr/manifest.toml").exists(), ".docmgr/manifest.toml");
-    assert!(root.join(".docmgr/locks").exists(), ".docmgr/locks/");
+    // .agent-trace/ structure created.
+    assert!(root.join(".agent-trace/config.toml").exists(), ".agent-trace/config.toml");
+    assert!(root.join(".agent-trace/manifest.toml").exists(), ".agent-trace/manifest.toml");
+    assert!(root.join(".agent-trace/locks").exists(), ".agent-trace/locks/");
     assert!(root.join(".gitignore").exists(), ".gitignore");
 
-    // DOCMGR.md present and mentions 0 documents.
-    assert!(root.join("DOCMGR.md").exists(), "DOCMGR.md");
-    let docmgr = std::fs::read_to_string(root.join("DOCMGR.md")).unwrap();
-    assert!(docmgr.contains("0 total"), "DOCMGR.md should say 0 total");
+    // AGENT-TRACE.md present and mentions 0 documents.
+    assert!(root.join("AGENT-TRACE.md").exists(), "AGENT-TRACE.md");
+    let docmgr = std::fs::read_to_string(root.join("AGENT-TRACE.md")).unwrap();
+    assert!(docmgr.contains("0 total"), "AGENT-TRACE.md should say 0 total");
 
     // No context.md (no documents).
     assert!(!root.join("context.md").exists(), "context.md should not exist on empty store");
@@ -66,9 +66,9 @@ fn uj2_cold_start_populated() {
     assert!(!stdout.contains("readme.txt"), "txt should not be tracked");
     assert!(!stdout.contains("data.json"), "json should not be tracked");
 
-    // DOCMGR.md lists 5 files.
-    let docmgr = std::fs::read_to_string(store.root().join("DOCMGR.md")).unwrap();
-    assert!(docmgr.contains("5 total"), "DOCMGR.md should have 5 total");
+    // AGENT-TRACE.md lists 5 files.
+    let docmgr = std::fs::read_to_string(store.root().join("AGENT-TRACE.md")).unwrap();
+    assert!(docmgr.contains("5 total"), "AGENT-TRACE.md should have 5 total");
 
     // info on one file.
     let out = store.docmgr(&["info", "notes.md"]).expect_success("info");

@@ -13,7 +13,7 @@ pub fn print_banner(manifest: &Manifest, llm: &dyn LlmEngine, ascii: bool) {
     let hr_line = hr.repeat(width);
 
     println!("{}{}{}", border, hr_line, if ascii { "+" } else { "╗" });
-    println!("{}  docmgr v{}  —  Agent Document Manager{:>width$}{side}", side, version, "", width = width - 16 - version.len());
+    println!("{}  agent-trace v{}  —  Agent Document Manager{:>width$}{side}", side, version, "", width = width - 18 - version.len());
     println!("{}{}{}", bottom, hr_line, if ascii { "+" } else { "╝" });
     println!();
     println!("  Documents tracked : {}", manifest.documents.len());
@@ -33,7 +33,7 @@ mod tests {
     fn test_banner_prints_version() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
-        std::fs::create_dir_all(root.join(".docmgr")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
         let info = StoreInfo::new("test".into());
         let manifest = Manifest::create_empty(info, root).unwrap();
         // Just verify it doesn't panic.

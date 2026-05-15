@@ -1,6 +1,6 @@
 use crate::config::MergedConfig;
 use crate::context::{synthesize_no_llm, write_context};
-use crate::docmgr_md;
+use crate::agent_trace_md;
 use crate::git_store::{CommitInfo, GitStore};
 use crate::log_synth::{append_agent_log, summarize_change_no_llm, LogSynthEntry};
 use crate::manifest::Manifest;
@@ -34,7 +34,7 @@ impl AgentState {
 
     pub fn current_actor(&self, store_root: &Path) -> Actor {
         // 1. Check agent-lock file.
-        let lock_path = store_root.join(".docmgr").join("locks").join("agent-lock.toml");
+        let lock_path = store_root.join(".agent-trace").join("locks").join("agent-lock.toml");
         if lock_path.exists() {
             if let Ok(content) = std::fs::read_to_string(&lock_path) {
                 if let Ok(value) = toml::from_str::<toml::Value>(&content) {
@@ -260,13 +260,13 @@ impl ChangeProcessor {
                 }
             }
 
-            // Regenerate DOCMGR.md atomically (tmp → rename so readers never see a partial file).
-            let docmgr_content = docmgr_md::generate(&store_root, &manifest);
-            let docmgr_tmp = store_root.join(".docmgr").join("DOCMGR.md.tmp");
-            if let Err(e) = std::fs::write(&docmgr_tmp, &docmgr_content)
-                .and_then(|_| std::fs::rename(&docmgr_tmp, store_root.join("DOCMGR.md")))
+            // Regenerate AGENT-TRACE.md atomically (tmp → rename so readers never see a partial file).
+            let agent_trace_content = agent_trace_md::generate(&store_root, &manifest);
+            let agent_trace_tmp = store_root.join(".agent-trace").join("AGENT-TRACE.md.tmp");
+            if let Err(e) = std::fs::write(&agent_trace_tmp, &agent_trace_content)
+                .and_then(|_| std::fs::rename(&agent_trace_tmp, store_root.join("AGENT-TRACE.md")))
             {
-                tracing::warn!("DOCMGR.md write failed: {}", e);
+                tracing::warn!("AGENT-TRACE.md write failed: {}", e);
             }
 
             // If a plan or reference changed, re-synthesize context.md.
@@ -297,7 +297,7 @@ pub struct InstanceLock {
 
 impl InstanceLock {
     pub fn acquire(store_root: &Path) -> Result<Self> {
-        let path = store_root.join(".docmgr").join("locks").join("instance.lock");
+        let path = store_root.join(".agent-trace").join("locks").join("instance.lock");
         std::fs::create_dir_all(path.parent().unwrap())?;
 
         // Check for stale lock.
@@ -306,7 +306,7 @@ impl InstanceLock {
                 if let Ok(pid) = content.trim().parse::<u32>() {
                     if is_pid_alive(pid) {
                         anyhow::bail!(
-                            "Another docmgr instance is running (PID {}). \
+                            "Another agent-trace instance is running (PID {}). \
                              Opening in read-only mode.",
                             pid
                         );
@@ -335,7 +335,7 @@ mod tests {
 
     fn setup(tmp: &TempDir) -> (GitStore, Arc<Mutex<Manifest>>, MergedConfig) {
         let root = tmp.path();
-        std::fs::create_dir_all(root.join(".docmgr").join("locks")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-trace").join("locks")).unwrap();
         let git = GitStore::init(root).unwrap();
         let info = StoreInfo::new("test".into());
         let manifest = Manifest::create_empty(info.clone(), root).unwrap();
@@ -388,8 +388,8 @@ mod tests {
     fn test_instance_lock_created_and_removed() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
-        std::fs::create_dir_all(root.join(".docmgr").join("locks")).unwrap();
-        let lock_path = root.join(".docmgr").join("locks").join("instance.lock");
+        std::fs::create_dir_all(root.join(".agent-trace").join("locks")).unwrap();
+        let lock_path = root.join(".agent-trace").join("locks").join("instance.lock");
 
         {
             let _lock = InstanceLock::acquire(root).unwrap();

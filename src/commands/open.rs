@@ -169,7 +169,7 @@ fn run_readonly(
 }
 
 fn load_command_history(store_root: &Path) -> Vec<String> {
-    let path = store_root.join(".docmgr").join("command_history.txt");
+    let path = store_root.join(".agent-trace").join("command_history.txt");
     std::fs::read_to_string(&path)
         .unwrap_or_default()
         .lines()
@@ -179,6 +179,6 @@ fn load_command_history(store_root: &Path) -> Vec<String> {
 }
 
 fn save_command_history(store_root: &Path, history: &[String]) {
-    let path = store_root.join(".docmgr").join("command_history.txt");
+    let path = store_root.join(".agent-trace").join("command_history.txt");
     let _ = std::fs::write(path, history.join("\n") + "\n");
 }

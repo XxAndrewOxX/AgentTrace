@@ -3,12 +3,12 @@
 mod helpers;
 use helpers::TestStore;
 
-use docmgr::config::{GlobalConfig, MergedConfig, PollingConfig, StoreConfig, StoreInfo};
-use docmgr::git_store::{CommitInfo, GitStore};
-use docmgr::manifest::Manifest;
-use docmgr::permissions::{check_permission, OverrideEntry, Overrides, PermissionResult};
-use docmgr::poll::{AgentState, ChangeProcessor};
-use docmgr::types::{Action, Actor, DocType};
+use agent_trace::config::{GlobalConfig, MergedConfig, PollingConfig, StoreConfig, StoreInfo};
+use agent_trace::git_store::{CommitInfo, GitStore};
+use agent_trace::manifest::Manifest;
+use agent_trace::permissions::{check_permission, OverrideEntry, Overrides, PermissionResult};
+use agent_trace::poll::{AgentState, ChangeProcessor};
+use agent_trace::types::{Action, Actor, DocType};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
@@ -25,7 +25,7 @@ fn no_overrides() -> Overrides {
 
 fn setup_with_agent(tmp: &TempDir, agent_name: &str) -> (Arc<Mutex<Manifest>>, ChangeProcessor) {
     let root = tmp.path();
-    std::fs::create_dir_all(root.join(".docmgr/locks")).unwrap();
+    std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
     let git = GitStore::init(root).unwrap();
     let info = StoreInfo::new("test".into());
     let manifest = Manifest::create_empty(info.clone(), root).unwrap();
@@ -240,7 +240,7 @@ fn pi1_23_integration_agent_modify_log_reverted() {
 fn pi2_override_grants_then_expires() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
-    std::fs::create_dir_all(root.join(".docmgr")).unwrap();
+    std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
 
     let path = PathBuf::from("api.md");
 
@@ -361,7 +361,7 @@ fn pi4_violation_accumulation() {
     proc.run_poll_cycle().unwrap();
 
     // Check violations via CLI.
-    let store = TestStore { dir: tempfile::Builder::new().tempdir_in(tmp.path().parent().unwrap()).unwrap(), bin: std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/release/docmgr") };
+    let store = TestStore { dir: tempfile::Builder::new().tempdir_in(tmp.path().parent().unwrap()).unwrap(), bin: std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/release/agent-trace") };
     // Actually we need to query the git log directly.
     let git2 = GitStore::open(tmp.path()).unwrap();
     let log = git2.log(100).unwrap();
@@ -387,8 +387,8 @@ fn pi5_rejected_content_preserved() {
     let content = std::fs::read_to_string(tmp.path().join("context.md")).unwrap();
     assert_eq!(content, "# Context Original", "should be reverted");
 
-    // Check for rejected snapshot in .docmgr/rejected/.
-    let rejected_dir = tmp.path().join(".docmgr").join("rejected");
+    // Check for rejected snapshot in .agent-trace/rejected/.
+    let rejected_dir = tmp.path().join(".agent-trace").join("rejected");
     assert!(rejected_dir.exists(), "rejected dir should exist");
     let entries: Vec<_> = std::fs::read_dir(&rejected_dir).unwrap().collect();
     assert!(!entries.is_empty(), "at least one rejected snapshot should exist");

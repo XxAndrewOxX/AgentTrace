@@ -182,11 +182,11 @@ impl Manifest {
 }
 
 fn manifest_path(store_root: &Path) -> PathBuf {
-    store_root.join(".docmgr").join("manifest.toml")
+    store_root.join(".agent-trace").join("manifest.toml")
 }
 
 fn tmp_manifest_path(store_root: &Path) -> PathBuf {
-    store_root.join(".docmgr").join(".manifest.toml.tmp")
+    store_root.join(".agent-trace").join(".manifest.toml.tmp")
 }
 
 #[cfg(test)]
@@ -197,7 +197,7 @@ mod tests {
 
     fn make_store(tmp: &TempDir) -> (PathBuf, StoreInfo) {
         let root = tmp.path().to_path_buf();
-        std::fs::create_dir_all(root.join(".docmgr")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
         let info = StoreInfo::new("test".into());
         (root, info)
     }
@@ -313,7 +313,7 @@ mod tests {
         m.save(&root).unwrap();
 
         // Simulate a stale tmp file.
-        let tmp_path = root.join(".docmgr").join(".manifest.toml.tmp");
+        let tmp_path = root.join(".agent-trace").join(".manifest.toml.tmp");
         std::fs::write(&tmp_path, "garbage").unwrap();
         assert!(tmp_path.exists());
 

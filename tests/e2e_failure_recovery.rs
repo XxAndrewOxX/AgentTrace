@@ -22,7 +22,7 @@ fn fr1_manifest_corruption_recovery() {
     assert_eq!(out.stdout().lines().filter(|l| l.starts_with("[S]")).count(), 5);
 
     // Corrupt the manifest.
-    std::fs::write(store.root().join(".docmgr/manifest.toml"), "THIS IS GARBAGE !!@#$%").unwrap();
+    std::fs::write(store.root().join(".agent-trace/manifest.toml"), "THIS IS GARBAGE !!@#$%").unwrap();
 
     // repair should rebuild.
     let out = store.docmgr(&["repair"]).expect_success("repair");
@@ -48,7 +48,7 @@ fn fr2_manifest_deletion_recovery() {
     ]);
 
     // Delete manifest entirely.
-    std::fs::remove_file(store.root().join(".docmgr/manifest.toml")).unwrap();
+    std::fs::remove_file(store.root().join(".agent-trace/manifest.toml")).unwrap();
 
     // repair should create fresh manifest.
     let out = store.docmgr(&["repair"]).expect_success("repair after deletion");
@@ -65,7 +65,7 @@ fn fr3_interrupted_manifest_write_cleanup() {
     let store = TestStore::new();
 
     // Create a stale .tmp file (simulating interrupted atomic write).
-    let tmp_path = store.root().join(".docmgr/.manifest.toml.tmp");
+    let tmp_path = store.root().join(".agent-trace/.manifest.toml.tmp");
     std::fs::write(&tmp_path, "stale content").unwrap();
     assert!(tmp_path.exists(), "tmp file should exist before test");
 
@@ -85,7 +85,7 @@ fn fr4_git_corruption_reported_clearly() {
     store.docmgr(&["add", "plan", "plan.md"]).expect_success("add");
 
     // Delete a critical git object to corrupt the repo.
-    let objects_dir = store.root().join(".docmgr/repo/objects");
+    let objects_dir = store.root().join(".agent-trace/repo/objects");
     // Find and remove the first non-info/pack object file.
     fn find_object_file(dir: &std::path::Path) -> Option<std::path::PathBuf> {
         for entry in std::fs::read_dir(dir).ok()?.flatten() {
@@ -130,7 +130,7 @@ fn fr5_no_lock_left_after_normal_operation() {
     store.docmgr(&["ls"]).expect_success("ls");
     store.docmgr(&["log"]).expect_success("log");
 
-    let lock_path = store.root().join(".docmgr/locks/instance.lock");
+    let lock_path = store.root().join(".agent-trace/locks/instance.lock");
     assert!(!lock_path.exists(), "no instance lock should remain after CLI operations");
 }
 

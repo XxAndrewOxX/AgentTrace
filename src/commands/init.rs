@@ -9,7 +9,7 @@ pub fn run(path: &Path, scan: bool) -> Result<()> {
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
     // Check if already initialised.
-    let docmgr_dir = path.join(".docmgr");
+    let docmgr_dir = path.join(".agent-trace");
     if docmgr_dir.join("config.toml").exists() {
         println!("Store already initialised at {}", path.display());
         println!("  Config: {}", docmgr_dir.join("config.toml").display());
@@ -17,7 +17,7 @@ pub fn run(path: &Path, scan: bool) -> Result<()> {
         return Ok(());
     }
 
-    // Create .docmgr/ with restricted permissions.
+    // Create .agent-trace/ with restricted permissions.
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
@@ -48,7 +48,7 @@ pub fn run(path: &Path, scan: bool) -> Result<()> {
     let store_name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "docmgr-store".to_string());
+        .unwrap_or_else(|| "agent-trace-store".to_string());
     let store_info = StoreInfo::new(store_name);
     let store_config = StoreConfig {
         store: store_info.clone(),
@@ -69,40 +69,40 @@ pub fn run(path: &Path, scan: bool) -> Result<()> {
         std::fs::write(&gitignore, DEFAULT_GITIGNORE)?;
     }
 
-    // Generate initial DOCMGR.md and commit it.
-    let docmgr_content = crate::docmgr_md::generate(&path, &manifest);
-    std::fs::write(path.join("DOCMGR.md"), &docmgr_content)?;
+    // Generate initial AGENT-TRACE.md and commit it.
+    let agent_trace_content = crate::agent_trace_md::generate(&path, &manifest);
+    std::fs::write(path.join("AGENT-TRACE.md"), &agent_trace_content)?;
     {
-        let docmgr_info = crate::git_store::CommitInfo {
+        let agent_trace_info = crate::git_store::CommitInfo {
             action: crate::types::Action::Create,
             files: vec![(
-                std::path::PathBuf::from("DOCMGR.md"),
+                std::path::PathBuf::from("AGENT-TRACE.md"),
                 crate::types::Action::Create,
                 crate::types::DocType::Reference,
             )],
             actor: crate::types::Actor::System,
-            summary: "init: create DOCMGR.md".into(),
+            summary: "init: create AGENT-TRACE.md".into(),
             agent_name: None,
             session_id: None,
         };
-        git.commit(&docmgr_info)?;
+        git.commit(&agent_trace_info)?;
     }
 
     // If --scan: register all .md files.
     if scan {
         let count = scan_and_register(&path, &mut manifest)?;
         manifest.save(&path)?;
-        // Commit the scanned files (not DOCMGR.md — already committed).
+        // Commit the scanned files (not AGENT-TRACE.md — already committed).
         if count > 0 {
-            // Regenerate DOCMGR.md now that the manifest has content.
-            let docmgr_content = crate::docmgr_md::generate(&path, &manifest);
-            std::fs::write(path.join("DOCMGR.md"), &docmgr_content)?;
+            // Regenerate AGENT-TRACE.md now that the manifest has content.
+            let agent_trace_content = crate::agent_trace_md::generate(&path, &manifest);
+            std::fs::write(path.join("AGENT-TRACE.md"), &agent_trace_content)?;
 
             let mut files: Vec<_> = manifest.documents.iter()
                 .map(|d| (d.path.clone(), crate::types::Action::Create, d.doc_type.clone()))
                 .collect();
             files.push((
-                std::path::PathBuf::from("DOCMGR.md"),
+                std::path::PathBuf::from("AGENT-TRACE.md"),
                 crate::types::Action::Modify,
                 crate::types::DocType::Reference,
             ));
@@ -119,7 +119,7 @@ pub fn run(path: &Path, scan: bool) -> Result<()> {
         }
     }
 
-    println!("Initialised docmgr store at {}", path.display());
+    println!("Initialised agent-trace store at {}", path.display());
     Ok(())
 }
 
@@ -127,11 +127,11 @@ fn scan_and_register(root: &Path, manifest: &mut Manifest) -> Result<usize> {
     let mut count = 0;
     for entry in walkdir_md(root) {
         let rel = entry.strip_prefix(root).unwrap_or(&entry);
-        // Skip .docmgr directory and docmgr-managed files.
-        if rel.starts_with(".docmgr") {
+        // Skip .agent-trace directory and agent-trace-managed files.
+        if rel.starts_with(".agent-trace") {
             continue;
         }
-        if rel == std::path::Path::new("DOCMGR.md") || rel == std::path::Path::new("context.md") {
+        if rel == std::path::Path::new("AGENT-TRACE.md") || rel == std::path::Path::new("context.md") {
             continue;
         }
         if manifest.is_tracked(rel) {
@@ -165,7 +165,7 @@ fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
     }
 }
 
-const DEFAULT_GITIGNORE: &str = r#"# docmgr defaults
+const DEFAULT_GITIGNORE: &str = r#"# agent-trace defaults
 .DS_Store
 *.tmp
 *.swp
@@ -182,11 +182,11 @@ mod tests {
     fn test_init_empty_directory() {
         let tmp = TempDir::new().unwrap();
         run(tmp.path(), false).unwrap();
-        assert!(tmp.path().join(".docmgr").exists());
-        assert!(tmp.path().join(".docmgr").join("config.toml").exists());
-        assert!(tmp.path().join(".docmgr").join("manifest.toml").exists());
-        assert!(tmp.path().join(".docmgr").join("repo").exists());
-        assert!(tmp.path().join(".docmgr").join("locks").exists());
+        assert!(tmp.path().join(".agent-trace").exists());
+        assert!(tmp.path().join(".agent-trace").join("config.toml").exists());
+        assert!(tmp.path().join(".agent-trace").join("manifest.toml").exists());
+        assert!(tmp.path().join(".agent-trace").join("repo").exists());
+        assert!(tmp.path().join(".agent-trace").join("locks").exists());
         assert!(tmp.path().join(".gitignore").exists());
     }
 
@@ -215,16 +215,16 @@ mod tests {
         run(tmp.path(), false).unwrap();
         let cfg = crate::config::StoreConfig::load(tmp.path()).unwrap();
         assert!(cfg.store.id.parse::<uuid::Uuid>().is_ok());
-        assert!(!cfg.store.docmgr_version.is_empty());
+        assert!(!cfg.store.agent_trace_version.is_empty());
     }
 
     #[cfg(unix)]
     #[test]
-    fn test_docmgr_dir_permissions() {
+    fn test_agent_trace_dir_permissions() {
         use std::os::unix::fs::MetadataExt;
         let tmp = TempDir::new().unwrap();
         run(tmp.path(), false).unwrap();
-        let meta = std::fs::metadata(tmp.path().join(".docmgr")).unwrap();
+        let meta = std::fs::metadata(tmp.path().join(".agent-trace")).unwrap();
         // 0700 = rwx------
         assert_eq!(meta.mode() & 0o777, 0o700);
     }

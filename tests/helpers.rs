@@ -12,7 +12,7 @@ impl TestStore {
     pub fn new() -> Self {
         let dir = TempDir::new().expect("create tempdir");
         let bin = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target/release/docmgr");
+            .join("target/release/agent-trace");
         let s = Self { dir, bin };
         s.docmgr(&["init", s.dir.path().to_str().unwrap()])
             .expect_success("init");
@@ -22,7 +22,7 @@ impl TestStore {
     pub fn new_with_scan(files: &[(&str, &str)]) -> Self {
         let dir = TempDir::new().expect("create tempdir");
         let bin = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target/release/docmgr");
+            .join("target/release/agent-trace");
         let s = Self { dir, bin };
         // Create files before init --scan.
         for (name, content) in files {
@@ -37,17 +37,17 @@ impl TestStore {
         s
     }
 
-    /// Run docmgr with given args from the store directory.
+    /// Run agent-trace with given args from the store directory.
     pub fn docmgr(&self, args: &[&str]) -> DocmgrOutput {
         let output = Command::new(&self.bin)
             .args(args)
             .current_dir(self.dir.path())
             .output()
-            .expect("run docmgr");
+            .expect("run agent-trace");
         DocmgrOutput { output }
     }
 
-    /// Run docmgr with --agent flag.
+    /// Run agent-trace with --agent flag.
     pub fn docmgr_as_agent<'a>(&self, agent: &'a str, args: &[&str]) -> DocmgrOutput {
         let mut full_args = vec!["--agent", agent];
         full_args.extend_from_slice(args);
