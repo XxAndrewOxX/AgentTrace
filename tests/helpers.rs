@@ -11,8 +11,7 @@ pub struct TestStore {
 impl TestStore {
     pub fn new() -> Self {
         let dir = TempDir::new().expect("create tempdir");
-        let bin = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target/release/agent-trace");
+        let bin = PathBuf::from(env!("CARGO_BIN_EXE_agent-trace"));
         let s = Self { dir, bin };
         s.docmgr(&["init", s.dir.path().to_str().unwrap()])
             .expect_success("init");
@@ -21,8 +20,7 @@ impl TestStore {
 
     pub fn new_with_scan(files: &[(&str, &str)]) -> Self {
         let dir = TempDir::new().expect("create tempdir");
-        let bin = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target/release/agent-trace");
+        let bin = PathBuf::from(env!("CARGO_BIN_EXE_agent-trace"));
         let s = Self { dir, bin };
         // Create files before init --scan.
         for (name, content) in files {
