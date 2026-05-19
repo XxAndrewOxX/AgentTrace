@@ -49,23 +49,7 @@ pub fn run(store_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn git_head_files(_git: &GitStore, store_root: &Path) -> Result<Vec<PathBuf>> {
-    let mut paths = Vec::new();
-    walk(store_root, &mut paths);
-    Ok(paths)
-}
-
-fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            if path.file_name().map(|n| n.to_string_lossy().starts_with('.')).unwrap_or(false) {
-                continue;
-            }
-            walk(&path, out);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
-            out.push(path);
-        }
-    }
+fn git_head_files(git: &GitStore, _store_root: &Path) -> Result<Vec<PathBuf>> {
+    // Walk the git HEAD tree to get tracked .md files (relative paths).
+    git.head_md_files()
 }

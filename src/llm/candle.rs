@@ -177,11 +177,10 @@ fn generate(inner: &mut CandleInner, prompt: &str, max_new_tokens: usize) -> Res
 
 #[allow(dead_code)]
 fn truncate(s: &str, max_chars: usize) -> &str {
-    if s.len() <= max_chars {
-        return s;
+    match s.char_indices().nth(max_chars) {
+        Some((idx, _)) => &s[..idx],
+        None => s,
     }
-    let truncated = &s[..max_chars];
-    truncated.rfind('\n').map(|i| &s[..i]).unwrap_or(truncated)
 }
 
 #[allow(dead_code)]

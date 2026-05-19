@@ -47,6 +47,19 @@ pub fn run(store_root: &Path, agent_name: Option<String>, ascii: bool) -> Result
         banner::print_banner(&m, llm_engine.as_ref(), ascii);
     }
 
+    // Install panic hook to restore terminal on panic.
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        // Restore terminal — best effort, ignore errors.
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(
+            std::io::stderr(),
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::cursor::Show,
+        );
+        original_hook(panic_info);
+    }));
+
     // Start the LLM background task.
     let (_llm_req_tx, llm_req_rx) = tokio::sync::mpsc::channel::<LlmRequest>(32);
     let (llm_res_tx, _llm_res_rx) = tokio::sync::mpsc::channel::<LlmResponse>(32);
@@ -147,6 +160,18 @@ fn run_readonly(
     let initial_log = git.log(50).unwrap_or_default();
     let history = load_command_history(store_root);
     let (_tx, rx) = tokio::sync::mpsc::channel::<UiEvent>(1);
+
+    // Install panic hook to restore terminal on panic.
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(
+            std::io::stderr(),
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::cursor::Show,
+        );
+        original_hook(panic_info);
+    }));
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();

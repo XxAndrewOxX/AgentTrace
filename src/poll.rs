@@ -199,7 +199,9 @@ impl ChangeProcessor {
                 agent_name: v.agent_name.clone(),
                 session_id: None,
             };
-            let _ = self.git.commit(&info);
+            if let Err(e) = self.git.commit(&info) {
+                tracing::error!("Failed to commit violation record for {:?}: {:#}", v.doc_path, e);
+            }
         }
 
         // Batch commit allowed changes.

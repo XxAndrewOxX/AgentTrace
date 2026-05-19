@@ -387,6 +387,28 @@ impl GitStore {
         Ok(())
     }
 
+    /// Return all .md file paths tracked in the git HEAD tree (relative to workdir).
+    pub fn head_md_files(&self) -> Result<Vec<PathBuf>> {
+        let head = self.head_commit()?;
+        let tree = head.tree()?;
+        let mut paths = Vec::new();
+        tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+            if entry.kind() == Some(git2::ObjectType::Blob) {
+                let name = entry.name().unwrap_or("");
+                if name.ends_with(".md") {
+                    let rel = if root.is_empty() {
+                        PathBuf::from(name)
+                    } else {
+                        PathBuf::from(root).join(name)
+                    };
+                    paths.push(rel);
+                }
+            }
+            git2::TreeWalkResult::Ok
+        })?;
+        Ok(paths)
+    }
+
     pub fn save_rejected(&self, path: &Path, content: &str) -> Result<()> {
         let rejected_dir = self.workdir.join(".agent-trace").join("rejected");
         std::fs::create_dir_all(&rejected_dir)?;
