@@ -98,7 +98,7 @@ pub fn run(path: &Path, scan: bool) -> Result<()> {
             let agent_trace_content = crate::agent_trace_md::generate(&path, &manifest);
             std::fs::write(path.join("AGENT-TRACE.md"), &agent_trace_content)?;
 
-            let mut files: Vec<_> = manifest.documents.iter()
+            let mut files: Vec<_> = manifest.documents().iter()
                 .map(|d| (d.path.clone(), crate::types::Action::Create, d.doc_type.clone()))
                 .collect();
             files.push((
@@ -205,8 +205,8 @@ mod tests {
         std::fs::write(tmp.path().join("notes.md"), "notes").unwrap();
         run(tmp.path(), true).unwrap();
         let manifest = crate::manifest::Manifest::load(tmp.path()).unwrap();
-        assert_eq!(manifest.documents.len(), 2);
-        assert!(manifest.documents.iter().all(|d| d.doc_type == DocType::Scratch));
+        assert_eq!(manifest.len(), 2);
+        assert!(manifest.documents().iter().all(|d| d.doc_type == DocType::Scratch));
     }
 
     #[test]

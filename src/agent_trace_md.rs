@@ -35,7 +35,7 @@ pub fn generate(_store_root: &Path, manifest: &Manifest) -> String {
     let references = manifest.list(Some(&DocType::Reference));
     let scratches = manifest.list(Some(&DocType::Scratch));
 
-    let total = manifest.documents.len();
+    let total = manifest.len();
 
     let mut out = String::from("# AGENT-TRACE.md — Agent Discovery Index\n\n");
     out.push_str(

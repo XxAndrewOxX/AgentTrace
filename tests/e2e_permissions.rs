@@ -60,139 +60,139 @@ fn commit_as(root: &std::path::Path, name: &str, content: &str, doc_type: DocTyp
 
 // Row 1: User create plan → Allowed
 #[test] fn pi1_01_user_create_plan() {
-    assert_eq!(check_permission(&DocType::Plan, &Actor::User, &Action::Create, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Plan, &Actor::User, &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 2: User create context → Confirmation (system-synthesized)
 #[test] fn pi1_02_user_create_context() {
-    assert!(matches!(check_permission(&DocType::Context, &Actor::User, &Action::Create, &no_overrides(), None), PermissionResult::RequiresConfirmation { .. }));
+    assert!(matches!(check_permission(&DocType::Context, &Actor::User, &no_overrides(), None), PermissionResult::RequiresConfirmation { .. }));
 }
 // Row 3: User create log → Confirmation
 #[test] fn pi1_03_user_create_log() {
-    assert!(matches!(check_permission(&DocType::Log, &Actor::User, &Action::Create, &no_overrides(), None), PermissionResult::RequiresConfirmation { .. }));
+    assert!(matches!(check_permission(&DocType::Log, &Actor::User, &no_overrides(), None), PermissionResult::RequiresConfirmation { .. }));
 }
 // Row 4: User create reference → Allowed
 #[test] fn pi1_04_user_create_reference() {
-    assert_eq!(check_permission(&DocType::Reference, &Actor::User, &Action::Create, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Reference, &Actor::User, &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 5: User create scratch → Allowed
 #[test] fn pi1_05_user_create_scratch() {
-    assert_eq!(check_permission(&DocType::Scratch, &Actor::User, &Action::Create, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Scratch, &Actor::User, &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 6: User modify plan → Allowed
 #[test] fn pi1_06_user_modify_plan() {
-    assert_eq!(check_permission(&DocType::Plan, &Actor::User, &Action::Modify, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Plan, &Actor::User, &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 7: User modify context → Confirmation
 #[test] fn pi1_07_user_modify_context() {
-    assert!(matches!(check_permission(&DocType::Context, &Actor::User, &Action::Modify, &no_overrides(), None), PermissionResult::RequiresConfirmation { .. }));
+    assert!(matches!(check_permission(&DocType::Context, &Actor::User, &no_overrides(), None), PermissionResult::RequiresConfirmation { .. }));
 }
 // Row 8: User modify log → Confirmation
 #[test] fn pi1_08_user_modify_log() {
-    assert!(matches!(check_permission(&DocType::Log, &Actor::User, &Action::Modify, &no_overrides(), None), PermissionResult::RequiresConfirmation { .. }));
+    assert!(matches!(check_permission(&DocType::Log, &Actor::User, &no_overrides(), None), PermissionResult::RequiresConfirmation { .. }));
 }
 // Row 9: User modify reference → Allowed
 #[test] fn pi1_09_user_modify_reference() {
-    assert_eq!(check_permission(&DocType::Reference, &Actor::User, &Action::Modify, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Reference, &Actor::User, &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 10: User modify scratch → Allowed
 #[test] fn pi1_10_user_modify_scratch() {
-    assert_eq!(check_permission(&DocType::Scratch, &Actor::User, &Action::Modify, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Scratch, &Actor::User, &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 11: User delete plan → Allowed
 #[test] fn pi1_11_user_delete_plan() {
-    assert_eq!(check_permission(&DocType::Plan, &Actor::User, &Action::Delete, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Plan, &Actor::User, &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 12: User delete context → Confirmation
 #[test] fn pi1_12_user_delete_context() {
-    assert!(matches!(check_permission(&DocType::Context, &Actor::User, &Action::Delete, &no_overrides(), None), PermissionResult::RequiresConfirmation { .. }));
+    assert!(matches!(check_permission(&DocType::Context, &Actor::User, &no_overrides(), None), PermissionResult::RequiresConfirmation { .. }));
 }
 // Row 13: User delete log → Confirmation
 #[test] fn pi1_13_user_delete_log() {
-    assert!(matches!(check_permission(&DocType::Log, &Actor::User, &Action::Delete, &no_overrides(), None), PermissionResult::RequiresConfirmation { .. }));
+    assert!(matches!(check_permission(&DocType::Log, &Actor::User, &no_overrides(), None), PermissionResult::RequiresConfirmation { .. }));
 }
 // Row 14: User delete reference → Allowed
 #[test] fn pi1_14_user_delete_reference() {
-    assert_eq!(check_permission(&DocType::Reference, &Actor::User, &Action::Delete, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Reference, &Actor::User, &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 15: User delete scratch → Allowed
 #[test] fn pi1_15_user_delete_scratch() {
-    assert_eq!(check_permission(&DocType::Scratch, &Actor::User, &Action::Delete, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Scratch, &Actor::User, &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 16: Agent create plan → Allowed
 #[test] fn pi1_16_agent_create_plan() {
-    assert_eq!(check_permission(&DocType::Plan, &agent("x"), &Action::Create, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Plan, &agent("x"), &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 17: Agent create context → Denied (agents cannot create context)
 #[test] fn pi1_17_agent_create_context() {
-    assert!(matches!(check_permission(&DocType::Context, &agent("x"), &Action::Create, &no_overrides(), None), PermissionResult::Denied { .. }));
+    assert!(matches!(check_permission(&DocType::Context, &agent("x"), &no_overrides(), None), PermissionResult::Denied { .. }));
 }
 // Row 18: Agent create log → Denied
 #[test] fn pi1_18_agent_create_log() {
-    assert!(matches!(check_permission(&DocType::Log, &agent("x"), &Action::Create, &no_overrides(), None), PermissionResult::Denied { .. }));
+    assert!(matches!(check_permission(&DocType::Log, &agent("x"), &no_overrides(), None), PermissionResult::Denied { .. }));
 }
 // Row 19: Agent create reference → Denied
 #[test] fn pi1_19_agent_create_reference() {
-    assert!(matches!(check_permission(&DocType::Reference, &agent("x"), &Action::Create, &no_overrides(), None), PermissionResult::Denied { .. }));
+    assert!(matches!(check_permission(&DocType::Reference, &agent("x"), &no_overrides(), None), PermissionResult::Denied { .. }));
 }
 // Row 20: Agent create scratch → Allowed
 #[test] fn pi1_20_agent_create_scratch() {
-    assert_eq!(check_permission(&DocType::Scratch, &agent("x"), &Action::Create, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Scratch, &agent("x"), &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 21: Agent modify plan → Allowed
 #[test] fn pi1_21_agent_modify_plan() {
-    assert_eq!(check_permission(&DocType::Plan, &agent("x"), &Action::Modify, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Plan, &agent("x"), &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 22: Agent modify context → Denied + revert (tested integration below)
 #[test] fn pi1_22_agent_modify_context_denied() {
-    assert!(matches!(check_permission(&DocType::Context, &agent("x"), &Action::Modify, &no_overrides(), None), PermissionResult::Denied { .. }));
+    assert!(matches!(check_permission(&DocType::Context, &agent("x"), &no_overrides(), None), PermissionResult::Denied { .. }));
 }
 // Row 23: Agent modify log → Denied
 #[test] fn pi1_23_agent_modify_log_denied() {
-    assert!(matches!(check_permission(&DocType::Log, &agent("x"), &Action::Modify, &no_overrides(), None), PermissionResult::Denied { .. }));
+    assert!(matches!(check_permission(&DocType::Log, &agent("x"), &no_overrides(), None), PermissionResult::Denied { .. }));
 }
 // Row 24: Agent modify reference → Denied
 #[test] fn pi1_24_agent_modify_reference_denied() {
-    assert!(matches!(check_permission(&DocType::Reference, &agent("x"), &Action::Modify, &no_overrides(), None), PermissionResult::Denied { .. }));
+    assert!(matches!(check_permission(&DocType::Reference, &agent("x"), &no_overrides(), None), PermissionResult::Denied { .. }));
 }
 // Row 25: Agent modify scratch → Allowed
 #[test] fn pi1_25_agent_modify_scratch() {
-    assert_eq!(check_permission(&DocType::Scratch, &agent("x"), &Action::Modify, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Scratch, &agent("x"), &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 26: Agent delete plan → Allowed
 #[test] fn pi1_26_agent_delete_plan() {
-    assert_eq!(check_permission(&DocType::Plan, &agent("x"), &Action::Delete, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Plan, &agent("x"), &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 27: Agent delete context → Denied
 #[test] fn pi1_27_agent_delete_context_denied() {
-    assert!(matches!(check_permission(&DocType::Context, &agent("x"), &Action::Delete, &no_overrides(), None), PermissionResult::Denied { .. }));
+    assert!(matches!(check_permission(&DocType::Context, &agent("x"), &no_overrides(), None), PermissionResult::Denied { .. }));
 }
 // Row 28: Agent delete log → Denied
 #[test] fn pi1_28_agent_delete_log_denied() {
-    assert!(matches!(check_permission(&DocType::Log, &agent("x"), &Action::Delete, &no_overrides(), None), PermissionResult::Denied { .. }));
+    assert!(matches!(check_permission(&DocType::Log, &agent("x"), &no_overrides(), None), PermissionResult::Denied { .. }));
 }
 // Row 29: Agent delete reference → Denied
 #[test] fn pi1_29_agent_delete_reference_denied() {
-    assert!(matches!(check_permission(&DocType::Reference, &agent("x"), &Action::Delete, &no_overrides(), None), PermissionResult::Denied { .. }));
+    assert!(matches!(check_permission(&DocType::Reference, &agent("x"), &no_overrides(), None), PermissionResult::Denied { .. }));
 }
 // Row 30: Agent delete scratch → Allowed
 #[test] fn pi1_30_agent_delete_scratch() {
-    assert_eq!(check_permission(&DocType::Scratch, &agent("x"), &Action::Delete, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Scratch, &agent("x"), &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 31: System create context → Allowed
 #[test] fn pi1_31_system_create_context() {
-    assert_eq!(check_permission(&DocType::Context, &Actor::System, &Action::Create, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Context, &Actor::System, &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 32: System create log → Allowed
 #[test] fn pi1_32_system_create_log() {
-    assert_eq!(check_permission(&DocType::Log, &Actor::System, &Action::Create, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Log, &Actor::System, &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 33: System modify context → Allowed
 #[test] fn pi1_33_system_modify_context() {
-    assert_eq!(check_permission(&DocType::Context, &Actor::System, &Action::Modify, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Context, &Actor::System, &no_overrides(), None), PermissionResult::Allowed);
 }
 // Row 34: System modify log → Allowed
 #[test] fn pi1_34_system_modify_log() {
-    assert_eq!(check_permission(&DocType::Log, &Actor::System, &Action::Modify, &no_overrides(), None), PermissionResult::Allowed);
+    assert_eq!(check_permission(&DocType::Log, &Actor::System, &no_overrides(), None), PermissionResult::Allowed);
 }
 
 // Integration test: agent modify context → revert + violation recorded
@@ -247,7 +247,7 @@ fn pi2_override_grants_then_expires() {
     // Without override: agent denied on reference.
     let no_ov = Overrides::default();
     assert!(matches!(
-        check_permission(&DocType::Reference, &agent("test"), &Action::Modify, &no_ov, Some(&path)),
+        check_permission(&DocType::Reference, &agent("test"), &no_ov, Some(&path)),
         PermissionResult::Denied { .. }
     ));
 
@@ -262,7 +262,7 @@ fn pi2_override_grants_then_expires() {
         granted_by: "user".into(),
     }).unwrap();
     assert_eq!(
-        check_permission(&DocType::Reference, &agent("test"), &Action::Modify, &ov, Some(&path)),
+        check_permission(&DocType::Reference, &agent("test"), &ov, Some(&path)),
         PermissionResult::Allowed
     );
 
@@ -277,7 +277,7 @@ fn pi2_override_grants_then_expires() {
         granted_by: "user".into(),
     }).unwrap();
     assert!(matches!(
-        check_permission(&DocType::Reference, &agent("test"), &Action::Modify, &ov_expired, Some(&path)),
+        check_permission(&DocType::Reference, &agent("test"), &ov_expired, Some(&path)),
         PermissionResult::Denied { .. }
     ));
 }

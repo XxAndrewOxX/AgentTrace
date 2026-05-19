@@ -16,10 +16,12 @@ pub enum PermissionResult {
 // ── Core Permission Check ─────────────────────────────────────────────────────
 
 /// Encoding of the permission table from PRD 4.2.2.
+///
+/// Permissions are currently checked by (actor, doc_type) only.
+/// Action-level granularity (create vs modify vs delete) is not yet implemented.
 pub fn check_permission(
     doc_type: &DocType,
     actor: &Actor,
-    _action: &Action,
     overrides: &Overrides,
     path: Option<&Path>,
 ) -> PermissionResult {
@@ -122,7 +124,7 @@ impl Overrides {
         let path = overrides_path(store_root);
         std::fs::create_dir_all(path.parent().unwrap())?;
         let contents = toml::to_string_pretty(self)?;
-        std::fs::write(&path, contents)?;
+        crate::util::atomic_write(&path, &contents)?;
         Ok(())
     }
 
@@ -171,41 +173,41 @@ mod tests {
     #[test]
     fn test_plan_permissions() {
         let o = Overrides::default();
-        assert_eq!(check_permission(&DocType::Plan, &Actor::User, &Action::Modify, &o, None), PermissionResult::Allowed);
-        assert_eq!(check_permission(&DocType::Plan, &agent("claude"), &Action::Modify, &o, None), PermissionResult::Allowed);
-        assert!(matches!(check_permission(&DocType::Plan, &Actor::System, &Action::Modify, &o, None), PermissionResult::Denied { .. }));
+        assert_eq!(check_permission(&DocType::Plan, &Actor::User, &o, None), PermissionResult::Allowed);
+        assert_eq!(check_permission(&DocType::Plan, &agent("claude"), &o, None), PermissionResult::Allowed);
+        assert!(matches!(check_permission(&DocType::Plan, &Actor::System, &o, None), PermissionResult::Denied { .. }));
     }
 
     #[test]
     fn test_context_permissions() {
         let o = Overrides::default();
-        assert_eq!(check_permission(&DocType::Context, &Actor::System, &Action::Modify, &o, None), PermissionResult::Allowed);
-        assert!(matches!(check_permission(&DocType::Context, &agent("aider"), &Action::Modify, &o, None), PermissionResult::Denied { .. }));
-        assert!(matches!(check_permission(&DocType::Context, &Actor::User, &Action::Modify, &o, None), PermissionResult::RequiresConfirmation { .. }));
+        assert_eq!(check_permission(&DocType::Context, &Actor::System, &o, None), PermissionResult::Allowed);
+        assert!(matches!(check_permission(&DocType::Context, &agent("aider"), &o, None), PermissionResult::Denied { .. }));
+        assert!(matches!(check_permission(&DocType::Context, &Actor::User, &o, None), PermissionResult::RequiresConfirmation { .. }));
     }
 
     #[test]
     fn test_log_permissions() {
         let o = Overrides::default();
-        assert_eq!(check_permission(&DocType::Log, &Actor::System, &Action::Modify, &o, None), PermissionResult::Allowed);
-        assert!(matches!(check_permission(&DocType::Log, &agent("x"), &Action::Modify, &o, None), PermissionResult::Denied { .. }));
-        assert!(matches!(check_permission(&DocType::Log, &Actor::User, &Action::Modify, &o, None), PermissionResult::RequiresConfirmation { .. }));
+        assert_eq!(check_permission(&DocType::Log, &Actor::System, &o, None), PermissionResult::Allowed);
+        assert!(matches!(check_permission(&DocType::Log, &agent("x"), &o, None), PermissionResult::Denied { .. }));
+        assert!(matches!(check_permission(&DocType::Log, &Actor::User, &o, None), PermissionResult::RequiresConfirmation { .. }));
     }
 
     #[test]
     fn test_reference_permissions() {
         let o = Overrides::default();
-        assert_eq!(check_permission(&DocType::Reference, &Actor::User, &Action::Modify, &o, None), PermissionResult::Allowed);
-        assert!(matches!(check_permission(&DocType::Reference, &agent("x"), &Action::Modify, &o, None), PermissionResult::Denied { .. }));
-        assert!(matches!(check_permission(&DocType::Reference, &Actor::System, &Action::Modify, &o, None), PermissionResult::Denied { .. }));
+        assert_eq!(check_permission(&DocType::Reference, &Actor::User, &o, None), PermissionResult::Allowed);
+        assert!(matches!(check_permission(&DocType::Reference, &agent("x"), &o, None), PermissionResult::Denied { .. }));
+        assert!(matches!(check_permission(&DocType::Reference, &Actor::System, &o, None), PermissionResult::Denied { .. }));
     }
 
     #[test]
     fn test_scratch_permissions() {
         let o = Overrides::default();
-        assert_eq!(check_permission(&DocType::Scratch, &Actor::User, &Action::Modify, &o, None), PermissionResult::Allowed);
-        assert_eq!(check_permission(&DocType::Scratch, &agent("x"), &Action::Modify, &o, None), PermissionResult::Allowed);
-        assert_eq!(check_permission(&DocType::Scratch, &Actor::System, &Action::Modify, &o, None), PermissionResult::Allowed);
+        assert_eq!(check_permission(&DocType::Scratch, &Actor::User, &o, None), PermissionResult::Allowed);
+        assert_eq!(check_permission(&DocType::Scratch, &agent("x"), &o, None), PermissionResult::Allowed);
+        assert_eq!(check_permission(&DocType::Scratch, &Actor::System, &o, None), PermissionResult::Allowed);
     }
 
     #[test]
@@ -221,7 +223,7 @@ mod tests {
             granted_by: "user".into(),
         }).unwrap();
         assert_eq!(
-            check_permission(&DocType::Reference, &agent("claude"), &Action::Modify, &o, Some(&path)),
+            check_permission(&DocType::Reference, &agent("claude"), &o, Some(&path)),
             PermissionResult::Allowed
         );
     }
@@ -239,7 +241,7 @@ mod tests {
             granted_by: "user".into(),
         }).unwrap();
         assert!(matches!(
-            check_permission(&DocType::Reference, &agent("claude"), &Action::Modify, &o, Some(&path)),
+            check_permission(&DocType::Reference, &agent("claude"), &o, Some(&path)),
             PermissionResult::Denied { .. }
         ));
     }
@@ -259,7 +261,7 @@ mod tests {
         }).unwrap();
         // Override for a.md doesn't affect b.md
         assert!(matches!(
-            check_permission(&DocType::Reference, &agent("x"), &Action::Modify, &o, Some(&path_b)),
+            check_permission(&DocType::Reference, &agent("x"), &o, Some(&path_b)),
             PermissionResult::Denied { .. }
         ));
     }

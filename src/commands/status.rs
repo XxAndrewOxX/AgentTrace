@@ -13,7 +13,7 @@ pub fn run(store_root: &Path) -> Result<()> {
     if changes.is_empty() {
         println!(
             "Store is clean. {} document(s) tracked.",
-            manifest.documents.len()
+            manifest.len()
         );
         return Ok(());
     }

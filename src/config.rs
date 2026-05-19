@@ -1,3 +1,4 @@
+use crate::types::DocType;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -53,7 +54,7 @@ impl Default for UiConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DefaultsConfig {
     /// Default doc type for newly added files.
-    pub default_doc_type: String,
+    pub default_doc_type: DocType,
     /// Default agent name when --agent flag is not provided.
     pub default_agent_name: Option<String>,
 }
@@ -61,7 +62,7 @@ pub struct DefaultsConfig {
 impl Default for DefaultsConfig {
     fn default() -> Self {
         Self {
-            default_doc_type: "scratch".to_string(),
+            default_doc_type: DocType::Scratch,
             default_agent_name: None,
         }
     }
@@ -98,7 +99,7 @@ impl GlobalConfig {
             std::fs::create_dir_all(parent)?;
         }
         let contents = toml::to_string_pretty(self)?;
-        std::fs::write(&path, contents)?;
+        crate::util::atomic_write(&path, &contents)?;
         Ok(())
     }
 }
@@ -169,7 +170,7 @@ impl StoreConfig {
     pub fn save(&self, store_root: &Path) -> Result<()> {
         let path = store_config_path(store_root);
         let contents = toml::to_string_pretty(self)?;
-        std::fs::write(&path, contents)?;
+        crate::util::atomic_write(&path, &contents)?;
         Ok(())
     }
 }
