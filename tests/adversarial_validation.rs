@@ -1326,7 +1326,7 @@ fn di4_restore_does_not_corrupt_subsequent_versions() {
 
     // Restore to v1.
     let git2 = GitStore::open(root).unwrap();
-    git2.restore_file(&PathBuf::from("doc.md"), 1).unwrap();
+    git2.restore_file(&PathBuf::from("doc.md"), 1, DocType::Scratch).unwrap();
     // File on disk is now "v1 content" again; run poll to commit the restore.
     proc.run_poll_cycle().unwrap();
 

@@ -236,7 +236,26 @@ impl GitStore {
 
     #[allow(dead_code)]
     pub fn version_count(&self, path: &Path) -> Result<u32> {
-        Ok(self.log_file(path, usize::MAX)?.len() as u32)
+        Ok(self.count_file_commits(path)? as u32)
+    }
+
+    /// Count the number of commits that touched `path` without loading them into memory.
+    pub fn count_file_commits(&self, path: &Path) -> Result<usize> {
+        let mut walk = self.repo.revwalk()?;
+        walk.push_head()?;
+        walk.set_sorting(git2::Sort::TIME)?;
+
+        let path_str = path.to_string_lossy().to_string();
+        let mut count = 0usize;
+
+        for oid_result in walk {
+            let oid = oid_result?;
+            let commit = self.repo.find_commit(oid)?;
+            if commit_touches_file(&self.repo, &commit, &path_str)? {
+                count += 1;
+            }
+        }
+        Ok(count)
     }
 
     // ── Diff Operations ───────────────────────────────────────────────────
@@ -355,7 +374,7 @@ impl GitStore {
 
     // ── Restore / Revert ──────────────────────────────────────────────────
 
-    pub fn restore_file(&self, path: &Path, version: u32) -> Result<Oid> {
+    pub fn restore_file(&self, path: &Path, version: u32, doc_type: DocType) -> Result<Oid> {
         let content = self.show_file_at_version(path, version)?;
         let full_path = self.workdir.join(path);
         if let Some(parent) = full_path.parent() {
@@ -363,12 +382,11 @@ impl GitStore {
         }
         std::fs::write(&full_path, &content)?;
 
-        let doc_type = DocType::Scratch; // best-effort; caller can update
         let info = CommitInfo {
             action: Action::Restore,
             files: vec![(path.to_path_buf(), Action::Modify, doc_type)],
             actor: Actor::System,
-            summary: format!("restore {}: {}", path.display(), path.display()),
+            summary: format!("restore {}: from version {}", path.display(), version),
             agent_name: None,
             session_id: None,
         };
@@ -425,7 +443,7 @@ fn build_commit_message(info: &CommitInfo) -> String {
         body.push_str(&format!("session: {}\n", session));
     }
     for (path, action, doc_type) in &info.files {
-        body.push_str(&format!("file: {} {} {}\n", path.display(), action, doc_type));
+        body.push_str(&format!("file:\t{}\t{}\t{}\n", path.display(), action, doc_type));
     }
 
     format!("{}\n\n{}", subject, body)
@@ -481,7 +499,7 @@ fn parse_structured_message(message: &str) -> ParsedCommit {
             actor = parse_actor_str(val);
         } else if let Some(val) = line.strip_prefix("agent: ") {
             agent_name = Some(val.to_string());
-        } else if let Some(val) = line.strip_prefix("file: ") {
+        } else if let Some(val) = line.strip_prefix("file:") {
             if let Some(entry) = parse_file_line(val) {
                 files.push(entry);
             }
@@ -504,14 +522,24 @@ fn parse_actor_str(s: &str) -> Actor {
 }
 
 fn parse_file_line(s: &str) -> Option<(PathBuf, Action, DocType)> {
-    // "path/to/file.md modify plan"
-    let parts: Vec<&str> = s.splitn(3, ' ').collect();
+    // Tab-delimited: "{path}\t{action}\t{doc_type}"
+    // Note: the "file:\t" prefix is already stripped by strip_prefix("file: ") ... wait,
+    // actually strip_prefix("file: ") won't match "file:\t". The caller uses
+    // strip_prefix("file: ") but we changed the format to "file:\t". We need to handle
+    // the raw value after the "file:\t" prefix, which means s here is already the remainder.
+    // The format written is "file:\t{path}\t{action}\t{doc_type}\n"
+    // The body line is "file:\t{path}\t{action}\t{doc_type}"
+    // strip_prefix("file: ") won't match, so we handle stripping in parse_structured_message.
+    // s here is whatever comes after "file:" is stripped — so s = "\t{path}\t{action}\t{doc_type}"
+    // We split on '\t', skip the first empty/whitespace element from the leading tab.
+    let s = s.trim_start_matches('\t');
+    let parts: Vec<&str> = s.splitn(3, '\t').collect();
     if parts.len() < 3 {
         return None;
     }
     let path = PathBuf::from(parts[0]);
-    let action = parts[1].parse().ok()?;
-    let doc_type = parts[2].parse().ok()?;
+    let action = parts[1].parse().unwrap_or(Action::Unknown);
+    let doc_type = parts[2].trim_end().parse().unwrap_or(DocType::Scratch);
     Some((path, action, doc_type))
 }
 
@@ -709,5 +737,85 @@ mod tests {
         let msg = head.message().unwrap();
         assert!(msg.contains("[agent-trace] modify plan: prd.md"), "Got: {}", msg);
         assert!(msg.contains("actor: user"));
+    }
+
+    // ── parse_file_line unit tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_parse_file_line_normal() {
+        // Round-trip: path without spaces
+        let s = "\tprd.md\tmodify\tplan";
+        let result = parse_file_line(s);
+        assert!(result.is_some(), "Expected Some, got None");
+        let (path, action, doc_type) = result.unwrap();
+        assert_eq!(path, PathBuf::from("prd.md"));
+        assert!(matches!(action, Action::Modify), "action = {:?}", action);
+        assert!(matches!(doc_type, DocType::Plan), "doc_type = {:?}", doc_type);
+    }
+
+    #[test]
+    fn test_parse_file_line_path_with_spaces() {
+        // Path containing spaces must round-trip correctly with tab delimiter
+        let s = "\tmy plan.md\tcreate\tplan";
+        let result = parse_file_line(s);
+        assert!(result.is_some(), "Expected Some for path-with-spaces, got None");
+        let (path, action, doc_type) = result.unwrap();
+        assert_eq!(path, PathBuf::from("my plan.md"));
+        assert!(matches!(action, Action::Create), "action = {:?}", action);
+        assert!(matches!(doc_type, DocType::Plan), "doc_type = {:?}", doc_type);
+    }
+
+    #[test]
+    fn test_parse_file_line_unknown_action() {
+        // Unknown action string should fall back to Action::Unknown gracefully
+        let s = "\tnotes.md\tfrob\tscratch";
+        let result = parse_file_line(s);
+        assert!(result.is_some(), "Expected Some even with unknown action");
+        let (path, action, _doc_type) = result.unwrap();
+        assert_eq!(path, PathBuf::from("notes.md"));
+        assert!(matches!(action, Action::Unknown), "Expected Unknown, got {:?}", action);
+    }
+
+    #[test]
+    fn test_parse_file_line_unknown_doc_type() {
+        // Unknown doc_type string should fall back to DocType::Scratch gracefully
+        let s = "\tnotes.md\tmodify\tfluxcapacitor";
+        let result = parse_file_line(s);
+        assert!(result.is_some(), "Expected Some even with unknown doc_type");
+        let (_path, _action, doc_type) = result.unwrap();
+        assert!(matches!(doc_type, DocType::Scratch), "Expected Scratch fallback, got {:?}", doc_type);
+    }
+
+    #[test]
+    fn test_parse_file_line_roundtrip_via_commit() {
+        // Full round-trip: write a commit with a path containing spaces, read it back
+        let (tmp, store) = setup_store();
+        let rel = write_md(&store, "my plan.md", "content with spaces in name");
+        let info = CommitInfo {
+            action: Action::Create,
+            files: vec![(rel.clone(), Action::Create, DocType::Plan)],
+            actor: Actor::User,
+            summary: "add my plan".into(),
+            agent_name: None,
+            session_id: None,
+        };
+        store.commit(&info).unwrap();
+        let entries = store.log_file(&rel, 5).unwrap();
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!(entry.files.len(), 1);
+        assert_eq!(entry.files[0].0, PathBuf::from("my plan.md"));
+        assert!(matches!(entry.files[0].2, DocType::Plan));
+    }
+
+    #[test]
+    fn test_count_file_commits() {
+        let (tmp, store) = setup_store();
+        let rel = write_md(&store, "prd.md", "v1");
+        commit_file(&store, &rel, Action::Create);
+        std::fs::write(store.workdir.join("prd.md"), "v2").unwrap();
+        commit_file(&store, &rel, Action::Modify);
+        let count = store.count_file_commits(&PathBuf::from("prd.md")).unwrap();
+        assert_eq!(count, 2);
     }
 }
