@@ -921,7 +921,7 @@ fn ts1_changelog_panel_entry_eviction() {
     // Push 300 entries — must not grow past MAX_CHANGELOG_ENTRIES (200).
     for i in 0..300 {
         changelog.push(LogEntry {
-            commit_id: format!("{:040x}", i),
+            commit_id: agent_trace::types::CommitId(format!("{:040x}", i)),
             timestamp: Utc::now(),
             action: Action::Modify,
             actor: Actor::User,

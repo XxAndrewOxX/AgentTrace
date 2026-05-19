@@ -214,7 +214,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         run(tmp.path(), false).unwrap();
         let cfg = crate::config::StoreConfig::load(tmp.path()).unwrap();
-        assert!(cfg.store.id.parse::<uuid::Uuid>().is_ok());
+        assert!(cfg.store.id.0.parse::<uuid::Uuid>().is_ok());
         assert!(!cfg.store.agent_trace_version.is_empty());
     }
 

@@ -1,9 +1,8 @@
-use crate::types::DocType;
+use crate::types::{DocType, StoreId};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
 
 // ── LLM Config ──────────────────────────────────────────────────────────────
 
@@ -115,7 +114,7 @@ pub fn global_config_path() -> PathBuf {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StoreInfo {
-    pub id: String,
+    pub id: StoreId,
     pub name: String,
     pub created: DateTime<Utc>,
     pub agent_trace_version: String,
@@ -124,7 +123,7 @@ pub struct StoreInfo {
 impl StoreInfo {
     pub fn new(name: String) -> Self {
         Self {
-            id: Uuid::new_v4().to_string(),
+            id: StoreId::new(),
             name,
             created: Utc::now(),
             agent_trace_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -293,10 +292,10 @@ mod tests {
     #[test]
     fn test_store_info_has_uuid() {
         let info = StoreInfo::new("my-store".into());
-        assert!(!info.id.is_empty());
+        assert!(!info.id.0.is_empty());
         assert_eq!(info.name, "my-store");
         assert_eq!(info.agent_trace_version, env!("CARGO_PKG_VERSION"));
         // Validate UUID format
-        assert!(info.id.parse::<uuid::Uuid>().is_ok());
+        assert!(info.id.0.parse::<uuid::Uuid>().is_ok());
     }
 }

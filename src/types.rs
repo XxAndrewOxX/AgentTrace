@@ -5,6 +5,76 @@ use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+/// Newtype wrapper for a document UUID string.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DocId(pub String);
+
+impl DocId {
+    pub fn new() -> Self {
+        DocId(uuid::Uuid::new_v4().to_string())
+    }
+}
+
+impl fmt::Display for DocId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for DocId {
+    fn from(s: String) -> Self { DocId(s) }
+}
+
+impl From<&str> for DocId {
+    fn from(s: &str) -> Self { DocId(s.to_string()) }
+}
+
+impl AsRef<str> for DocId {
+    fn as_ref(&self) -> &str { &self.0 }
+}
+
+/// Newtype wrapper for a store UUID string.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoreId(pub String);
+
+impl StoreId {
+    pub fn new() -> Self {
+        StoreId(uuid::Uuid::new_v4().to_string())
+    }
+}
+
+impl fmt::Display for StoreId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for StoreId {
+    fn from(s: String) -> Self { StoreId(s) }
+}
+
+/// Newtype wrapper for a git commit OID string.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommitId(pub String);
+
+impl fmt::Display for CommitId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for CommitId {
+    fn from(s: String) -> Self { CommitId(s) }
+}
+
+impl From<&str> for CommitId {
+    fn from(s: &str) -> Self { CommitId(s.to_string()) }
+}
+
+impl AsRef<str> for CommitId {
+    fn as_ref(&self) -> &str { &self.0 }
+}
+
 /// The semantic type of a document, which determines write permissions.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
@@ -182,7 +252,7 @@ impl FileChange {
 /// A parsed git log entry for a document change.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
-    pub commit_id: String,
+    pub commit_id: CommitId,
     pub timestamp: DateTime<Utc>,
     pub action: Action,
     pub actor: Actor,

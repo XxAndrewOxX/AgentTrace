@@ -1,4 +1,4 @@
-use crate::types::{Action, Actor, DocType, DiffStats, FileChange, LogEntry};
+use crate::types::{Action, Actor, CommitId, DocType, DiffStats, FileChange, LogEntry};
 
 type ParsedCommit = (Action, String, Actor, Option<String>, Vec<(PathBuf, Action, DocType)>);
 use anyhow::{bail, Context, Result};
@@ -321,7 +321,7 @@ impl GitStore {
         // history is newest-first; version 1 = oldest
         let idx = history.len() - version as usize;
         let commit_id = &history[idx].commit_id;
-        let oid = Oid::from_str(commit_id)?;
+        let oid = Oid::from_str(&commit_id.0)?;
         let commit = self.repo.find_commit(oid)?;
         let tree = commit.tree()?;
 
@@ -347,7 +347,7 @@ impl GitStore {
                 bail!("Version {} does not exist", v);
             }
             let idx = n - v as usize;
-            let oid = Oid::from_str(&history[idx].commit_id)?;
+            let oid = Oid::from_str(&history[idx].commit_id.0)?;
             let commit = self.repo.find_commit(oid)?;
             Ok(commit.tree()?)
         };
@@ -474,7 +474,7 @@ fn build_commit_message(info: &CommitInfo) -> String {
 fn parse_commit(commit: &git2::Commit<'_>) -> Option<LogEntry> {
     let message = commit.message().unwrap_or("");
     let timestamp = Utc.timestamp_opt(commit.time().seconds(), 0).single()?;
-    let commit_id = commit.id().to_string();
+    let commit_id = CommitId(commit.id().to_string());
 
     // Try to parse structured message.
     let lines: Vec<&str> = message.lines().collect();

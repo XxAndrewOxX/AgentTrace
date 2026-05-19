@@ -16,7 +16,7 @@ pub fn run(store_root: &Path, file: &Path, for_actor: &str, duration_minutes: u3
     let expires = now + Duration::minutes(duration_minutes as i64);
 
     overrides.add(OverrideEntry {
-        doc_id: entry.id.clone(),
+        doc_id: entry.id.0.clone(),
         path: file.to_path_buf(),
         allow_actor: for_actor.to_string(),
         granted_at: now,

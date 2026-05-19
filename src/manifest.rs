@@ -1,16 +1,15 @@
 use crate::config::StoreInfo;
-use crate::types::DocType;
+use crate::types::{DocId, DocType};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
 
 // ── Document Entry ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DocumentEntry {
-    pub id: String,
+    pub id: DocId,
     pub path: PathBuf,
     pub doc_type: DocType,
     #[serde(default)]
@@ -24,7 +23,7 @@ pub struct DocumentEntry {
 impl DocumentEntry {
     pub fn new(path: PathBuf, doc_type: DocType, agent_name: &str) -> Self {
         Self {
-            id: Uuid::new_v4().to_string(),
+            id: DocId::new(),
             path,
             doc_type,
             tags: Vec::new(),
@@ -52,13 +51,13 @@ pub struct Manifest {
     /// path → index into `documents`
     by_path: HashMap<PathBuf, usize>,
     /// id → index into `documents`
-    by_id: HashMap<String, usize>,
+    by_id: HashMap<DocId, usize>,
 }
 
 impl Manifest {
     // ── Construction ─────────────────────────────────────────────────────
 
-    fn build_indices(documents: &[DocumentEntry]) -> (HashMap<PathBuf, usize>, HashMap<String, usize>) {
+    fn build_indices(documents: &[DocumentEntry]) -> (HashMap<PathBuf, usize>, HashMap<DocId, usize>) {
         let mut by_path = HashMap::new();
         let mut by_id = HashMap::new();
         for (i, doc) in documents.iter().enumerate() {
@@ -136,7 +135,7 @@ impl Manifest {
     }
 
     #[allow(dead_code)]
-    pub fn find_by_id(&self, id: &str) -> Option<&DocumentEntry> {
+    pub fn find_by_id(&self, id: &DocId) -> Option<&DocumentEntry> {
         self.by_id.get(id).map(|&i| &self.documents[i])
     }
 
@@ -245,7 +244,7 @@ mod tests {
 
         let entry = m.find_by_path(&path).unwrap();
         assert_eq!(entry.doc_type, DocType::Plan);
-        assert!(entry.id.parse::<uuid::Uuid>().is_ok());
+        assert!(entry.id.0.parse::<uuid::Uuid>().is_ok());
 
         let by_id = m.find_by_id(&entry.id.clone()).unwrap();
         assert_eq!(by_id.path, path);

@@ -219,7 +219,7 @@ impl ChangeProcessor {
                     // Persist the manifest now that git is consistent.
                     let _ = manifest.save(&store_root);
                     let entry = LogEntry {
-                        commit_id: oid.to_string(),
+                        commit_id: crate::types::CommitId(oid.to_string()),
                         timestamp: Utc::now(),
                         action: info.action,
                         actor: actor.clone(),
