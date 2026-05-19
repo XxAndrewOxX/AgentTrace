@@ -139,7 +139,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let (root, mut manifest) = setup(&tmp);
         manifest.register(&std::path::PathBuf::from("prd.md"), DocType::Plan, "").unwrap();
-        manifest.documents[0].description = "Product requirements".into();
+        manifest.update_description(&std::path::PathBuf::from("prd.md"), "Product requirements").unwrap();
         let ctx = synthesize_no_llm(&root, &manifest).unwrap();
         assert!(ctx.contains("prd.md"));
         assert!(ctx.contains("Product requirements"));

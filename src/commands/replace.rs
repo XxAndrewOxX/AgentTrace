@@ -47,7 +47,7 @@ pub fn run(
 
     for (path, doc_type, content) in matches {
         // Check permission.
-        let perm = check_permission(&doc_type, &Actor::User, &Action::Modify, &overrides, Some(&path));
+        let perm = check_permission(&doc_type, &Actor::User, &overrides, Some(&path));
         if let PermissionResult::Denied { reason } = perm {
             eprintln!("Skipping {} (denied): {}", path.display(), reason);
             continue;

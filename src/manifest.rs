@@ -48,7 +48,7 @@ struct ManifestFile {
 
 pub struct Manifest {
     pub store: StoreInfo,
-    pub documents: Vec<DocumentEntry>,
+    documents: Vec<DocumentEntry>,
     /// path → index into `documents`
     by_path: HashMap<PathBuf, usize>,
     /// id → index into `documents`
@@ -179,6 +179,26 @@ impl Manifest {
     pub fn is_tracked(&self, path: &Path) -> bool {
         self.by_path.contains_key(path)
     }
+
+    /// Update the description of a tracked document.
+    pub fn update_description(&mut self, path: &Path, description: &str) -> Result<()> {
+        let idx = *self.by_path.get(path)
+            .with_context(|| format!("Path not tracked: {}", path.display()))?;
+        self.documents[idx].description = description.to_string();
+        Ok(())
+    }
+
+    pub fn documents(&self) -> &[DocumentEntry] {
+        &self.documents
+    }
+
+    pub fn len(&self) -> usize {
+        self.documents.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.documents.is_empty()
+    }
 }
 
 fn manifest_path(store_root: &Path) -> PathBuf {
@@ -207,10 +227,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let (root, info) = make_store(&tmp);
         let m = Manifest::create_empty(info, &root).unwrap();
-        assert!(m.documents.is_empty());
+        assert!(m.is_empty());
 
         let loaded = Manifest::load(&root).unwrap();
-        assert!(loaded.documents.is_empty());
+        assert!(loaded.is_empty());
         assert_eq!(loaded.store.name, "test");
     }
 
@@ -274,7 +294,7 @@ mod tests {
         m.register(&path, DocType::Scratch, "").unwrap();
         m.untrack(&path).unwrap();
         assert!(!m.is_tracked(&path));
-        assert!(m.documents.is_empty());
+        assert!(m.is_empty());
     }
 
     #[test]
@@ -300,9 +320,9 @@ mod tests {
         m.save(&root).unwrap();
 
         let loaded = Manifest::load(&root).unwrap();
-        assert_eq!(loaded.documents.len(), 1);
-        assert_eq!(loaded.documents[0].doc_type, DocType::Plan);
-        assert_eq!(loaded.documents[0].agent_name, "agent-x");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded.documents()[0].doc_type, DocType::Plan);
+        assert_eq!(loaded.documents()[0].agent_name, "agent-x");
     }
 
     #[test]

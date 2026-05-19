@@ -127,7 +127,7 @@ impl ChangeProcessor {
                 .map(|d| d.doc_type.clone())
                 .unwrap_or(DocType::Scratch);
 
-            let perm = check_permission(&doc_type, &actor, &action, &overrides, Some(&path));
+            let perm = check_permission(&doc_type, &actor, &overrides, Some(&path));
 
             match perm {
                 PermissionResult::Allowed => {

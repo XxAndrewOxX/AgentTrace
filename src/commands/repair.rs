@@ -32,7 +32,7 @@ pub fn run(store_root: &Path) -> Result<()> {
     }
 
     // Remove manifest entries whose files are gone.
-    let stale: Vec<PathBuf> = manifest.documents.iter()
+    let stale: Vec<PathBuf> = manifest.documents().iter()
         .filter(|d| !store_root.join(&d.path).exists())
         .map(|d| d.path.clone())
         .collect();
@@ -44,7 +44,7 @@ pub fn run(store_root: &Path) -> Result<()> {
     manifest.save(store_root)?;
     println!(
         "Repair complete: {} added, {} removed. {} documents tracked.",
-        added, removed, manifest.documents.len()
+        added, removed, manifest.len()
     );
     Ok(())
 }

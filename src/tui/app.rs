@@ -141,7 +141,7 @@ impl App {
         match parts.as_slice() {
             ["ls"] | ["ls", ..] => {
                 let m = self.manifest.lock().unwrap();
-                let lines: Vec<String> = m.documents.iter()
+                let lines: Vec<String> = m.documents().iter()
                     .map(|d| format!("[{}] {}", d.doc_type.indicator(), d.path.display()))
                     .collect();
                 self.chat.output = Some(if lines.is_empty() {

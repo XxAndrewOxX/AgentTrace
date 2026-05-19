@@ -14,13 +14,13 @@ pub struct TreeState {
 impl TreeState {
     pub fn new(manifest: &Manifest) -> Self {
         Self {
-            documents: manifest.documents.clone(),
+            documents: manifest.documents().to_vec(),
             list_state: ListState::default(),
         }
     }
 
     pub fn update(&mut self, manifest: &Manifest) {
-        self.documents = manifest.documents.clone();
+        self.documents = manifest.documents().to_vec();
     }
 
     pub fn scroll_up(&mut self) {

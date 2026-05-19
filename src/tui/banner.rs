@@ -16,7 +16,7 @@ pub fn print_banner(manifest: &Manifest, llm: &dyn LlmEngine, ascii: bool) {
     println!("{}  agent-trace v{}  —  Agent Document Manager{:>width$}{side}", side, version, "", width = width - 18 - version.len());
     println!("{}{}{}", bottom, hr_line, if ascii { "+" } else { "╝" });
     println!();
-    println!("  Documents tracked : {}", manifest.documents.len());
+    println!("  Documents tracked : {}", manifest.len());
     println!("  LLM               : {}", if llm.is_loaded() { "loaded" } else { "not configured" });
     println!();
 }
