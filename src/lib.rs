@@ -8,6 +8,7 @@ pub mod log_synth;
 pub mod manifest;
 pub mod permissions;
 pub mod poll;
+pub mod store;
 pub mod tui;
 pub mod types;
 pub mod util;

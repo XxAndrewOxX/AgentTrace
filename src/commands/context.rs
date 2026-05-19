@@ -1,5 +1,5 @@
 use crate::context::{load_pending_updates, synthesize_no_llm, write_context};
-use crate::manifest::Manifest;
+use crate::store::Store;
 use anyhow::Result;
 use chrono::Utc;
 use clap::Subcommand;
@@ -60,11 +60,11 @@ pub fn run(store_root: &Path, cmd: ContextCmd) -> Result<()> {
             }
         }
         ContextCmd::Refresh => {
-            let manifest = Manifest::load(store_root)?;
-            let content = synthesize_no_llm(store_root, &manifest)?;
+            let store = Store::open(store_root)?;
+            let content = synthesize_no_llm(store_root, &store.manifest)?;
             write_context(store_root, &content)?;
-            let plans = manifest.list(Some(&crate::types::DocType::Plan));
-            let refs = manifest.list(Some(&crate::types::DocType::Reference));
+            let plans = store.manifest.list(Some(&crate::types::DocType::Plan));
+            let refs = store.manifest.list(Some(&crate::types::DocType::Reference));
             println!("context.md refreshed ({} plans, {} reference docs).", plans.len(), refs.len());
         }
     }

@@ -1,6 +1,6 @@
-use crate::git_store::{CommitInfo, GitStore};
-use crate::manifest::Manifest;
-use crate::permissions::{check_permission, Overrides, PermissionResult};
+use crate::git_store::CommitInfo;
+use crate::store::Store;
+use crate::permissions::{check_permission, PermissionResult};
 use crate::types::{Action, Actor, DocType};
 use anyhow::Result;
 use std::path::Path;
@@ -12,9 +12,8 @@ pub fn run(
     type_filter: Option<&DocType>,
     dry_run: bool,
 ) -> Result<()> {
-    let manifest = Manifest::load(store_root)?;
-    let overrides = Overrides::load(store_root)?;
-    let docs = manifest.list(type_filter);
+    let store = Store::open(store_root)?;
+    let docs = store.manifest.list(type_filter);
 
     let mut matches: Vec<(std::path::PathBuf, DocType, String)> = Vec::new();
 
@@ -42,12 +41,11 @@ pub fn run(
         return Ok(());
     }
 
-    let git = GitStore::open(store_root)?;
     let mut committed: Vec<(std::path::PathBuf, Action, DocType)> = Vec::new();
 
     for (path, doc_type, content) in matches {
         // Check permission.
-        let perm = check_permission(&doc_type, &Actor::User, &overrides, Some(&path));
+        let perm = check_permission(&doc_type, &Actor::User, &store.overrides, Some(&path));
         if let PermissionResult::Denied { reason } = perm {
             eprintln!("Skipping {} (denied): {}", path.display(), reason);
             continue;
@@ -67,7 +65,7 @@ pub fn run(
             agent_name: None,
             session_id: None,
         };
-        git.commit(&info)?;
+        store.commit(&info)?;
         println!("Changes applied.");
     }
 

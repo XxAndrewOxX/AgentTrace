@@ -1,19 +1,17 @@
-use crate::git_store::GitStore;
-use crate::manifest::Manifest;
+use crate::store::Store;
 use crate::types::FileChange;
 use anyhow::Result;
 use std::path::Path;
 
 pub fn run(store_root: &Path) -> Result<()> {
-    let git = GitStore::open(store_root)?;
-    let manifest = Manifest::load(store_root)?;
+    let store = Store::open(store_root)?;
 
-    let changes = git.detect_changes()?;
+    let changes = store.git.detect_changes()?;
 
     if changes.is_empty() {
         println!(
             "Store is clean. {} document(s) tracked.",
-            manifest.len()
+            store.manifest.len()
         );
         return Ok(());
     }
@@ -22,7 +20,7 @@ pub fn run(store_root: &Path) -> Result<()> {
     for change in &changes {
         match change {
             FileChange::New(p) => {
-                let indicator = if manifest.is_tracked(p) { "+" } else { "?" };
+                let indicator = if store.manifest.is_tracked(p) { "+" } else { "?" };
                 println!("  [{}] {}", indicator, p.display());
             }
             FileChange::Modified(p) => println!("  [~] {}", p.display()),
@@ -35,7 +33,7 @@ pub fn run(store_root: &Path) -> Result<()> {
 
     let untracked = changes.iter().filter(|c| {
         if let FileChange::New(p) = c {
-            !manifest.is_tracked(p)
+            !store.manifest.is_tracked(p)
         } else {
             false
         }

@@ -1,4 +1,4 @@
-use crate::git_store::GitStore;
+use crate::store::Store;
 use crate::types::{Actor, DocType};
 use anyhow::Result;
 use std::path::Path;
@@ -10,13 +10,13 @@ pub fn run(
     actor_filter: Option<&str>,
     type_filter: Option<&DocType>,
 ) -> Result<()> {
-    let git = GitStore::open(store_root)?;
+    let store = Store::open(store_root)?;
     let limit = limit.unwrap_or(50);
 
     let entries = if let Some(f) = file {
-        git.log_file(f, limit)?
+        store.git.log_file(f, limit)?
     } else {
-        git.log(limit)?
+        store.git.log(limit)?
     };
 
     let entries: Vec<_> = entries

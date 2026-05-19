@@ -1,12 +1,12 @@
-use crate::git_store::GitStore;
+use crate::store::Store;
 use crate::types::Action;
 use anyhow::Result;
 use std::path::Path;
 
 pub fn run(store_root: &Path, limit: Option<usize>) -> Result<()> {
-    let git = GitStore::open(store_root)?;
+    let store = Store::open(store_root)?;
     // Load ALL log entries — violations must never be silently truncated.
-    let all = git.log(usize::MAX)?;
+    let all = store.git.log(usize::MAX)?;
     let violations: Vec<_> = all
         .into_iter()
         .filter(|e| matches!(e.action, Action::Violation))

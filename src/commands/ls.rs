@@ -1,11 +1,11 @@
-use crate::manifest::Manifest;
+use crate::store::Store;
 use crate::types::DocType;
 use anyhow::Result;
 use std::path::Path;
 
 pub fn run(store_root: &Path, type_filter: Option<&DocType>, json: bool) -> Result<()> {
-    let manifest = Manifest::load(store_root)?;
-    let docs = manifest.list(type_filter);
+    let store = Store::open(store_root)?;
+    let docs = store.manifest.list(type_filter);
 
     if json {
         let entries: Vec<serde_json::Value> = docs.iter().map(|d| {

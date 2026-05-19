@@ -1,5 +1,5 @@
-use crate::git_store::{CommitInfo, GitStore};
-use crate::manifest::Manifest;
+use crate::git_store::CommitInfo;
+use crate::store::Store;
 use crate::types::{Action, Actor, DocType};
 use anyhow::{bail, Result};
 use std::path::Path;
@@ -18,18 +18,17 @@ pub fn run(store_root: &Path, doc_type: DocType, file: &Path) -> Result<()> {
         file.to_path_buf()
     };
 
-    let git = GitStore::open(store_root)?;
-    let mut manifest = Manifest::load(store_root)?;
+    let mut store = Store::open(store_root)?;
 
-    if manifest.is_tracked(&rel) {
+    if store.manifest.is_tracked(&rel) {
         bail!("File is already tracked: {}", rel.display());
     }
 
-    manifest.register(&rel, doc_type.clone(), "")?;
-    manifest.save(store_root)?;
+    store.manifest.register(&rel, doc_type.clone(), "")?;
+    store.manifest.save(store_root)?;
 
     // Regenerate AGENT-TRACE.md so the new document appears.
-    let agent_trace_content = crate::agent_trace_md::generate(store_root, &manifest);
+    let agent_trace_content = crate::agent_trace_md::generate(store_root, &store.manifest);
     std::fs::write(store_root.join("AGENT-TRACE.md"), &agent_trace_content)?;
 
     let info = CommitInfo {
@@ -43,7 +42,7 @@ pub fn run(store_root: &Path, doc_type: DocType, file: &Path) -> Result<()> {
         agent_name: None,
         session_id: None,
     };
-    git.commit(&info)?;
+    store.commit(&info)?;
 
     println!("Added {} as {}", rel.display(), doc_type);
     Ok(())

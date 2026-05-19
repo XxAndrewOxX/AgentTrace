@@ -1,23 +1,25 @@
 use crate::config::StoreConfig;
 use crate::git_store::GitStore;
 use crate::manifest::Manifest;
+use crate::store::Store;
 use crate::types::DocType;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 pub fn run(store_root: &Path) -> Result<()> {
-    let git = GitStore::open(store_root)?;
-    let config = StoreConfig::load(store_root)?;
+    // Try Store::open first; if manifest is corrupt, fall back to rebuilding.
+    let (git, mut manifest) = match Store::open(store_root) {
+        Ok(store) => (store.git, store.manifest),
+        Err(_) => {
+            let git = GitStore::open(store_root)?;
+            let config = StoreConfig::load(store_root)?;
+            let manifest = Manifest::create_empty(config.store, store_root)?;
+            (git, manifest)
+        }
+    };
 
     // Get all files tracked in git HEAD.
-    let head = git_head_files(&git, store_root)?;
-
-    // Rebuild manifest from git state.
-    let mut manifest = if Manifest::load(store_root).is_ok() {
-        Manifest::load(store_root)?
-    } else {
-        Manifest::create_empty(config.store, store_root)?
-    };
+    let head = git.head_md_files()?;
 
     let mut added = 0;
     let mut removed = 0;
@@ -47,9 +49,4 @@ pub fn run(store_root: &Path) -> Result<()> {
         added, removed, manifest.len()
     );
     Ok(())
-}
-
-fn git_head_files(git: &GitStore, _store_root: &Path) -> Result<Vec<PathBuf>> {
-    // Walk the git HEAD tree to get tracked .md files (relative paths).
-    git.head_md_files()
 }
