@@ -24,7 +24,7 @@ ratatui = "=0.29.0"
 crossterm = "=0.28.1"
 dirs-next = "2"
 libc = "0.2"
-reqwest = { version = "0.12", features = ["blocking", "stream"] }
+reqwest = { version = "0.12", features = ["blocking", "json", "stream"] }
 indicatif = "0.17"
 candle-core = { version = "0.8", optional = true }
 candle-transformers = { version = "0.8", optional = true }
