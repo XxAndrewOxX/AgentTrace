@@ -1,8 +1,6 @@
 use crate::config::MergedConfig;
-use crate::context::{synthesize_no_llm, write_context};
-use crate::agent_trace_md;
+use crate::data_plane::apply_trace_hooks;
 use crate::git_store::{CommitInfo, GitStore};
-use crate::log_synth::{append_agent_log, summarize_change_no_llm, LogSynthEntry};
 use crate::manifest::Manifest;
 use crate::permissions::{check_permission, Overrides, PermissionResult, Violation};
 use crate::types::{Action, Actor, DocType, FileChange, LogEntry};
@@ -204,46 +202,15 @@ impl ChangeProcessor {
                 }
             }
 
-            // If agent made changes, synthesize log entries.
-            if actor.is_agent() {
-                let agent_name = actor.agent_name().unwrap_or("unknown");
-                let log_entries: Vec<LogSynthEntry> = allowed
-                    .iter()
-                    .map(|(path, _, doc_type)| {
-                        let stats = self.git
-                            .diff_stats(path, None, None)
-                            .unwrap_or_default();
-                        let summary = summarize_change_no_llm(path, doc_type, &stats, agent_name);
-                        LogSynthEntry { timestamp: Utc::now(), path: path.clone(), summary }
-                    })
-                    .collect();
-                if let Err(e) = append_agent_log(&store_root, &self.git, agent_name, &self.session_id, &log_entries) {
-                    tracing::warn!("append_agent_log failed: {}", e);
-                }
-            }
-
-            // Regenerate AGENT-TRACE.md atomically (tmp → rename so readers never see a partial file).
-            let agent_trace_content = agent_trace_md::generate(&store_root, &manifest);
-            let agent_trace_tmp = store_root.join(".agent-trace").join("AGENT-TRACE.md.tmp");
-            if let Err(e) = std::fs::write(&agent_trace_tmp, &agent_trace_content)
-                .and_then(|_| std::fs::rename(&agent_trace_tmp, store_root.join("AGENT-TRACE.md")))
-            {
-                tracing::warn!("AGENT-TRACE.md write failed: {}", e);
-            }
-
-            // If a plan or reference changed, re-synthesize context.md.
-            let context_trigger = allowed.iter().any(|(_, _, dt)| {
-                matches!(dt, DocType::Plan | DocType::Reference)
-            });
-            if context_trigger {
-                match synthesize_no_llm(&store_root, &manifest) {
-                    Ok(content) => {
-                        if let Err(e) = write_context(&store_root, &content) {
-                            tracing::warn!("write_context failed: {}", e);
-                        }
-                    }
-                    Err(e) => tracing::warn!("synthesize_no_llm failed: {}", e),
-                }
+            if let Err(e) = apply_trace_hooks(
+                &store_root,
+                &self.git,
+                &manifest,
+                &actor,
+                Some(&self.session_id),
+                &allowed,
+            ) {
+                tracing::warn!("post-write trace hooks failed: {}", e);
             }
         }
 
@@ -355,7 +322,7 @@ mod tests {
         // Simulate `agent-trace connect my-agent` (no PID field)
         std::fs::write(
             root.join(".agent-trace/locks/agent-lock.toml"),
-            "[agent]\nname = \"my-agent\"\n",
+            "[agent]\nname=\"my-agent\"\nsession_id=\"s1\"\ntransport=\"cli\"\nstarted_at=\"2026-01-01T00:00:00Z\"\nlast_heartbeat=\"2099-01-01T00:00:00Z\"\n",
         ).unwrap();
         let state = AgentState::new(None);
         assert_eq!(state.current_actor(root), Actor::Agent { name: "my-agent".into() });

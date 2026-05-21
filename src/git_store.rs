@@ -192,7 +192,7 @@ impl GitStore {
     pub fn log(&self, limit: usize) -> Result<Vec<LogEntry>> {
         let mut walk = self.repo.revwalk()?;
         walk.push_head()?;
-        walk.set_sorting(git2::Sort::TIME)?;
+        walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
 
         let mut entries = Vec::new();
         for oid_result in walk {
@@ -211,7 +211,7 @@ impl GitStore {
     pub fn log_file(&self, path: &Path, limit: usize) -> Result<Vec<LogEntry>> {
         let mut walk = self.repo.revwalk()?;
         walk.push_head()?;
-        walk.set_sorting(git2::Sort::TIME)?;
+        walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
 
         let path_str = path.to_string_lossy().to_string();
         let mut entries = Vec::new();
@@ -243,7 +243,7 @@ impl GitStore {
     pub fn count_file_commits(&self, path: &Path) -> Result<usize> {
         let mut walk = self.repo.revwalk()?;
         walk.push_head()?;
-        walk.set_sorting(git2::Sort::TIME)?;
+        walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
 
         let path_str = path.to_string_lossy().to_string();
         let mut count = 0usize;

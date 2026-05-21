@@ -72,9 +72,8 @@ fn ai1_agent_lock_file_attribution() {
         m.register(&PathBuf::from("plan.md"), DocType::Plan, "").unwrap();
     }
 
-    // Write agent-lock.toml with current PID (so is_pid_alive returns true).
-    let pid = std::process::id();
-    let lock_content = format!("[agent]\npid = {}\nname = \"test-agent\"\n", pid);
+    // Write agent-lock.toml with session metadata.
+    let lock_content = "[agent]\nname=\"test-agent\"\nsession_id=\"sess1\"\ntransport=\"cli\"\nstarted_at=\"2026-01-01T00:00:00Z\"\nlast_heartbeat=\"2099-01-01T00:00:00Z\"\n".to_string();
     std::fs::write(root.join(".agent-trace/locks/agent-lock.toml"), lock_content).unwrap();
 
     let agent = AgentState::new(None);
@@ -242,8 +241,12 @@ fn ai8_agent_lock_file_actor_detection() {
 
     let lock_path = root.join(".agent-trace/locks/agent-lock.toml");
 
-    // New connect format: name only, no PID.
-    std::fs::write(&lock_path, "[agent]\nname = \"connected-agent\"\n").unwrap();
+    // Session lock contains lineage metadata used for stale detection.
+    std::fs::write(
+        &lock_path,
+        "[agent]\nname=\"connected-agent\"\nsession_id=\"sess2\"\ntransport=\"cli\"\nstarted_at=\"2026-01-01T00:00:00Z\"\nlast_heartbeat=\"2099-01-01T00:00:00Z\"\n",
+    )
+    .unwrap();
     let state = AgentState::new(None);
     assert_eq!(
         state.current_actor(root),

@@ -1,8 +1,10 @@
 use crate::agent_trace_md;
 use crate::git_store::CommitInfo;
+use crate::log_synth::{append_agent_log, summarize_change_no_llm, LogSynthEntry};
 use crate::permissions::{check_permission, PermissionResult};
 use crate::store::Store;
 use crate::types::{Action, Actor, DocType};
+use chrono::Utc;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -20,6 +22,7 @@ pub fn write_document(
     content: &str,
     actor: &Actor,
     summary_prefix: &str,
+    session_id: Option<&str>,
 ) -> std::result::Result<PathBuf, WriteDocumentError> {
     let rel = if file.is_absolute() {
         file.strip_prefix(root).unwrap_or(file).to_path_buf()
@@ -56,7 +59,7 @@ pub fn write_document(
     };
     std::fs::write(&full_path, content).map_err(|e| WriteDocumentError::Other(e.into()))?;
 
-    let mut files_to_commit = vec![(rel.clone(), action, doc_type)];
+    let files_to_commit = vec![(rel.clone(), action, doc_type)];
 
     if !was_tracked {
         store
@@ -64,16 +67,6 @@ pub fn write_document(
             .register(&rel, DocType::Scratch, actor.agent_name().unwrap_or(""))
             .map_err(WriteDocumentError::Other)?;
         store.manifest.save(root).map_err(WriteDocumentError::Other)?;
-        let at_content = agent_trace_md::generate(root, &store.manifest);
-        let at_tmp = root.join(".agent-trace").join("AGENT-TRACE.md.tmp");
-        std::fs::write(&at_tmp, &at_content).map_err(|e| WriteDocumentError::Other(e.into()))?;
-        std::fs::rename(&at_tmp, root.join("AGENT-TRACE.md"))
-            .map_err(|e| WriteDocumentError::Other(e.into()))?;
-        files_to_commit.push((
-            PathBuf::from("AGENT-TRACE.md"),
-            Action::Modify,
-            DocType::Reference,
-        ));
     }
 
     let info = CommitInfo {
@@ -82,16 +75,118 @@ pub fn write_document(
         actor: actor.clone(),
         summary: format!("{}: {}", summary_prefix, rel.display()),
         agent_name: actor.agent_name().map(String::from),
-        session_id: None,
+        session_id: session_id.map(String::from),
     };
     store.commit(&info).map_err(WriteDocumentError::Other)?;
 
-    // Keep context synthesis consistent for synchronous writes too.
-    if matches!(info.files[0].2, DocType::Plan | DocType::Reference) {
-        if let Ok(content) = crate::context::synthesize_no_llm(root, &store.manifest) {
-            let _ = crate::context::write_context(root, &content);
+    apply_trace_hooks(
+        root,
+        &store.git,
+        &store.manifest,
+        actor,
+        session_id,
+        &info.files,
+    )
+    .map_err(WriteDocumentError::Other)?;
+
+    Ok(rel)
+}
+
+pub fn apply_trace_hooks(
+    store_root: &Path,
+    git: &crate::git_store::GitStore,
+    manifest: &crate::manifest::Manifest,
+    actor: &Actor,
+    session_id: Option<&str>,
+    changed_files: &[(PathBuf, Action, DocType)],
+) -> anyhow::Result<()> {
+    if changed_files.is_empty() {
+        return Ok(());
+    }
+
+    if actor.is_agent() {
+        if let (Some(agent_name), Some(sid)) = (actor.agent_name(), session_id) {
+            let entries: Vec<LogSynthEntry> = changed_files
+                .iter()
+                .map(|(path, _, doc_type)| {
+                    let stats = git.diff_stats(path, None, None).unwrap_or_default();
+                    let summary = summarize_change_no_llm(path, doc_type, &stats, agent_name);
+                    LogSynthEntry {
+                        timestamp: Utc::now(),
+                        path: path.clone(),
+                        summary,
+                    }
+                })
+                .collect();
+            append_agent_log(store_root, git, agent_name, sid, &entries)?;
         }
     }
 
-    Ok(rel)
+    sync_agent_trace_md(store_root, git, manifest)?;
+
+    let refresh_context = changed_files
+        .iter()
+        .any(|(_, _, doc_type)| matches!(doc_type, DocType::Plan | DocType::Reference));
+    if refresh_context {
+        sync_context_md(store_root, git, manifest)?;
+    }
+
+    Ok(())
+}
+
+fn sync_agent_trace_md(
+    store_root: &Path,
+    git: &crate::git_store::GitStore,
+    manifest: &crate::manifest::Manifest,
+) -> anyhow::Result<()> {
+    let new_content = agent_trace_md::generate(store_root, manifest);
+    let target = store_root.join("AGENT-TRACE.md");
+    let existing = std::fs::read_to_string(&target).unwrap_or_default();
+    if existing == new_content {
+        return Ok(());
+    }
+
+    let tmp = store_root.join(".agent-trace").join("AGENT-TRACE.md.tmp");
+    std::fs::write(&tmp, &new_content)?;
+    std::fs::rename(&tmp, &target)?;
+
+    let info = CommitInfo {
+        action: Action::Modify,
+        files: vec![(
+            PathBuf::from("AGENT-TRACE.md"),
+            Action::Modify,
+            DocType::Reference,
+        )],
+        actor: Actor::System,
+        summary: "update AGENT-TRACE.md index".into(),
+        agent_name: None,
+        session_id: None,
+    };
+    git.commit(&info)?;
+    Ok(())
+}
+
+fn sync_context_md(
+    store_root: &Path,
+    git: &crate::git_store::GitStore,
+    manifest: &crate::manifest::Manifest,
+) -> anyhow::Result<()> {
+    let new_content = crate::context::synthesize_no_llm(store_root, manifest)?;
+    let target = store_root.join("context.md");
+    let existing = std::fs::read_to_string(&target).unwrap_or_default();
+    if existing == new_content {
+        return Ok(());
+    }
+
+    crate::context::write_context(store_root, &new_content)?;
+    let info = CommitInfo {
+        action: Action::Modify,
+        files: vec![(PathBuf::from("context.md"), Action::Modify, DocType::Context)],
+        actor: Actor::System,
+        summary: "refresh synthesized context".into(),
+        agent_name: None,
+        session_id: None,
+    };
+    git.commit(&info)?;
+    Ok(())
 }

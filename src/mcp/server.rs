@@ -2,7 +2,7 @@ use crate::agent_trace_md;
 use crate::data_plane::{self, WriteDocumentError};
 use crate::git_store::CommitInfo;
 use crate::permissions::{check_permission, Overrides, PermissionResult};
-use crate::session::AgentState;
+use crate::session::{self, AgentState};
 use crate::store::Store;
 use crate::types::{Action, Actor, DocType};
 use anyhow::Result;
@@ -13,6 +13,17 @@ use std::path::{Path, PathBuf};
 pub fn run(root: &Path, actor_name: Option<String>) -> Result<()> {
     let agent_state = AgentState::new(actor_name);
     let actor = agent_state.current_actor(root);
+    let mut session_id = session::session_id_for_actor(root, &actor);
+    if let Some(name) = actor.agent_name() {
+        if session_id.is_none() {
+            // MCP with explicit actor should create a durable session lineage.
+            if let Ok(s) = session::start_session(root, name, "mcp") {
+                session_id = Some(s.session_id);
+            }
+        } else {
+            let _ = session::touch_session(root, name);
+        }
+    }
 
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -52,7 +63,10 @@ pub fn run(root: &Path, actor_name: Option<String>) -> Result<()> {
         };
 
         let method = msg.get("method").and_then(|v| v.as_str()).unwrap_or("");
-        let mut response = dispatch(&msg, method, root, &actor);
+        if let Some(name) = actor.agent_name() {
+            let _ = session::touch_session(root, name);
+        }
+        let mut response = dispatch(&msg, method, root, &actor, session_id.as_deref());
         response["id"] = id;
 
         writeln!(out, "{}", response)?;
@@ -61,7 +75,13 @@ pub fn run(root: &Path, actor_name: Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn dispatch(msg: &Value, method: &str, root: &Path, actor: &Actor) -> Value {
+fn dispatch(
+    msg: &Value,
+    method: &str,
+    root: &Path,
+    actor: &Actor,
+    session_id: Option<&str>,
+) -> Value {
     match method {
         "initialize" => handle_initialize(),
         "tools/list" => handle_tools_list(),
@@ -71,7 +91,7 @@ fn dispatch(msg: &Value, method: &str, root: &Path, actor: &Actor) -> Value {
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
             match name {
                 "read_file" => handle_read_file(root, &args),
-                "write_file" => handle_write_file(root, &args, actor),
+                "write_file" => handle_write_file(root, &args, actor, session_id),
                 "list_documents" => handle_list_documents(root, &args),
                 "get_permissions" => handle_get_permissions(root, actor),
                 "add_document" => handle_add_document(root, &args),
@@ -187,7 +207,12 @@ fn handle_read_file(root: &Path, args: &Value) -> Value {
     tool_result(&format!("path: {}\ndoc_type: {}\n\n{}", path_str, doc_type, content))
 }
 
-fn handle_write_file(root: &Path, args: &Value, actor: &Actor) -> Value {
+fn handle_write_file(
+    root: &Path,
+    args: &Value,
+    actor: &Actor,
+    session_id: Option<&str>,
+) -> Value {
     let path_str = match args.get("path").and_then(|v| v.as_str()) {
         Some(p) => p,
         None => return error_response(-32602, "Missing required argument: path"),
@@ -198,7 +223,7 @@ fn handle_write_file(root: &Path, args: &Value, actor: &Actor) -> Value {
     };
 
     let rel = PathBuf::from(path_str);
-    match data_plane::write_document(root, &rel, content, actor, "mcp write") {
+    match data_plane::write_document(root, &rel, content, actor, "mcp write", session_id) {
         Ok(_) => tool_result(&format!("OK: {} written", path_str)),
         Err(WriteDocumentError::PermissionDenied { path, reason }) => {
             tool_error(&format!("Permission denied: {} — {}", path.display(), reason))
@@ -425,7 +450,7 @@ mod tests {
         store.commit(&info).unwrap();
 
         let args = json!({"path": "plan.md", "content": "# Updated Plan"});
-        let resp = handle_write_file(&root, &args, &agent("test-agent"));
+        let resp = handle_write_file(&root, &args, &agent("test-agent"), None);
         assert_eq!(resp["result"]["isError"], false);
         assert_eq!(std::fs::read_to_string(root.join("plan.md")).unwrap(), "# Updated Plan");
     }
@@ -450,7 +475,7 @@ mod tests {
 
         let original = std::fs::read_to_string(root.join("context.md")).unwrap();
         let args = json!({"path": "context.md", "content": "# Hacked"});
-        let resp = handle_write_file(&root, &args, &agent("test-agent"));
+        let resp = handle_write_file(&root, &args, &agent("test-agent"), None);
 
         assert_eq!(resp["result"]["isError"], true);
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
@@ -531,7 +556,7 @@ mod tests {
     #[test]
     fn test_unknown_method_returns_error() {
         let msg = json!({"jsonrpc":"2.0","id":1,"method":"bogus","params":{}});
-        let resp = dispatch(&msg, "bogus", Path::new("/tmp"), &Actor::User);
+        let resp = dispatch(&msg, "bogus", Path::new("/tmp"), &Actor::User, None);
         assert!(resp.get("error").is_some());
         assert_eq!(resp["error"]["code"], -32601);
     }
@@ -539,7 +564,7 @@ mod tests {
     #[test]
     fn test_unknown_tool_returns_error() {
         let msg = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fly","arguments":{}}});
-        let resp = dispatch(&msg, "tools/call", Path::new("/tmp"), &Actor::User);
+        let resp = dispatch(&msg, "tools/call", Path::new("/tmp"), &Actor::User, None);
         assert!(resp.get("error").is_some());
         assert_eq!(resp["error"]["code"], -32601);
     }
@@ -547,14 +572,14 @@ mod tests {
     #[test]
     fn test_write_file_missing_path_arg() {
         let args = json!({"content": "hello"});
-        let resp = handle_write_file(Path::new("/tmp"), &args, &Actor::User);
+        let resp = handle_write_file(Path::new("/tmp"), &args, &Actor::User, None);
         assert_eq!(resp["error"]["code"], -32602);
     }
 
     #[test]
     fn test_write_file_missing_content_arg() {
         let args = json!({"path": "plan.md"});
-        let resp = handle_write_file(Path::new("/tmp"), &args, &Actor::User);
+        let resp = handle_write_file(Path::new("/tmp"), &args, &Actor::User, None);
         assert_eq!(resp["error"]["code"], -32602);
     }
 }

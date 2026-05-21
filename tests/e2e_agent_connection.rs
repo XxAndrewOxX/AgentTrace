@@ -106,12 +106,43 @@ fn ac2_connected_agent_write_to_plan_succeeds() {
         .expect_success("write plan");
 
     assert_eq!(store.read_file("plan.md"), "# Updated by Agent");
+    assert!(
+        store.file_exists("context.md"),
+        "plan write should trigger synthesized context"
+    );
+    let logs_dir = store.root().join("logs");
+    let log_files: Vec<_> = std::fs::read_dir(&logs_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
+    assert!(
+        log_files.iter().any(|name| name.starts_with("test-agent-")),
+        "expected a session log file for connected agent, got: {:?}",
+        log_files
+    );
 
     // Verify committed to git
-    let log = store.run(&["log", "--limit=1"]).expect_success("log");
-    log.assert_stdout_contains("write");
+    let log = store.run(&["log", "--limit=10"]).expect_success("log");
+    log.assert_stdout_contains("plan.md");
 
     store.run(&["disconnect"]).expect_success("disconnect");
+}
+
+#[test]
+fn ac7_stale_lock_is_replaced_on_connect() {
+    let store = TestStore::new();
+    store.write_file(
+        ".agent-trace/locks/agent-lock.toml",
+        "[agent]\nname=\"stale-agent\"\nsession_id=\"old\"\ntransport=\"cli\"\nstarted_at=\"2020-01-01T00:00:00Z\"\nlast_heartbeat=\"2020-01-01T00:00:00Z\"\n",
+    );
+
+    store
+        .run(&["connect", "fresh-agent"])
+        .expect_success("connect replaces stale lock");
+    let lock = store.read_file(".agent-trace/locks/agent-lock.toml");
+    assert!(lock.contains("fresh-agent"));
+    assert!(lock.contains("session_id"));
 }
 
 // ── AC-3: connected agent write to context is denied ─────────────────────────
@@ -217,6 +248,21 @@ fn mc2_mcp_write_file_plan_succeeds() {
         "write should succeed: {:?}", resp
     );
     assert_eq!(store.read_file("plan.md"), "# Via MCP");
+    assert!(
+        store.file_exists("context.md"),
+        "MCP plan write should trigger synthesized context"
+    );
+    let logs_dir = store.root().join("logs");
+    let log_files: Vec<_> = std::fs::read_dir(&logs_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
+    assert!(
+        log_files.iter().any(|name| name.starts_with("test-agent-")),
+        "MCP writes should produce agent session log files, got: {:?}",
+        log_files
+    );
 }
 
 // ── MC-3: mcp write_file to context is denied ────────────────────────────────

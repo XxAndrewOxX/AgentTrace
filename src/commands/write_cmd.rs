@@ -1,5 +1,5 @@
 use crate::data_plane::{self, WriteDocumentError};
-use crate::session::AgentState;
+use crate::session::{session_id_for_actor, touch_session, AgentState};
 use anyhow::Result;
 use std::io::{self, Read};
 use std::path::Path;
@@ -16,8 +16,19 @@ pub fn run(root: &Path, file: &Path, content: Option<String>, cli_agent: Option<
 
     let agent_state = AgentState::new(cli_agent);
     let actor = agent_state.current_actor(root);
+    let session_id = session_id_for_actor(root, &actor);
+    if let Some(name) = actor.agent_name() {
+        let _ = touch_session(root, name);
+    }
 
-    let rel = match data_plane::write_document(root, file, &body, &actor, "agent write") {
+    let rel = match data_plane::write_document(
+        root,
+        file,
+        &body,
+        &actor,
+        "agent write",
+        session_id.as_deref(),
+    ) {
         Ok(path) => path,
         Err(WriteDocumentError::PermissionDenied { path, reason }) => {
             eprintln!("Permission denied: {} — {}", path.display(), reason);

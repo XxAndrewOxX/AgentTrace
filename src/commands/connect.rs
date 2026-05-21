@@ -1,57 +1,44 @@
 use anyhow::Result;
+use crate::session::{self, AgentSession};
 use std::path::Path;
 
-const LOCK_FILE: &str = ".agent-trace/locks/agent-lock.toml";
-
 pub fn run_connect(root: &Path, name: &str) -> Result<()> {
-    let lock_path = root.join(LOCK_FILE);
-    std::fs::create_dir_all(lock_path.parent().unwrap())?;
-
-    if lock_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&lock_path) {
-            if let Ok(val) = toml::from_str::<toml::Value>(&content) {
-                if let Some(existing) = val
-                    .get("agent")
-                    .and_then(|a| a.get("name"))
-                    .and_then(|v| v.as_str())
-                {
-                    anyhow::bail!(
-                        "Already connected as '{}'. Run 'agent-trace disconnect' first.",
-                        existing
-                    );
-                }
-            }
+    if let Some(existing) = session::load_session(root) {
+        if !existing.is_stale() {
+            anyhow::bail!(
+                "Already connected as '{}'. Run 'agent-trace disconnect' first.",
+                existing.name
+            );
         }
     }
 
-    let content = format!("[agent]\nname = \"{}\"\n", name);
-    std::fs::write(&lock_path, content)?;
-    println!("Connected as '{}'. Agent writes will be permission-checked.", name);
+    let started = session::start_session(root, name, "cli")?;
+    print_connect_message(&started);
     Ok(())
 }
 
 pub fn run_disconnect(root: &Path) -> Result<()> {
-    let lock_path = root.join(LOCK_FILE);
-    if lock_path.exists() {
-        let name = std::fs::read_to_string(&lock_path)
-            .ok()
-            .and_then(|c| toml::from_str::<toml::Value>(&c).ok())
-            .and_then(|v| v.get("agent")?.get("name")?.as_str().map(String::from));
-        std::fs::remove_file(&lock_path)?;
-        match name {
-            Some(n) => println!("Disconnected '{}'. Actor reverts to User.", n),
-            None => println!("Disconnected."),
-        }
+    if let Some(existing) = session::load_session(root) {
+        session::remove_session(root)?;
+        println!("Disconnected '{}'. Actor reverts to User.", existing.name);
     } else {
         println!("Not connected (no agent session active).");
     }
     Ok(())
 }
 
+fn print_connect_message(s: &AgentSession) {
+    println!(
+        "Connected as '{}'. Session {} (transport: {}).",
+        s.name, s.session_id, s.transport
+    );
+    println!("Agent writes will be permission-checked and trace-linked.");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::AgentState;
+    use crate::session::{AgentState, LOCK_FILE};
     use crate::types::Actor;
     use tempfile::TempDir;
 
