@@ -286,10 +286,10 @@ fn pi2_override_grants_then_expires() {
 fn pi2_override_via_cli() {
     let store = TestStore::new();
     store.write_file("api.md", "# API");
-    store.docmgr(&["add", "reference", "api.md"]).expect_success("add ref");
+    store.run(&["add", "reference", "api.md"]).expect_success("add ref");
 
     // Grant override via CLI.
-    let out = store.docmgr(&["unlock", "api.md", "--for=agent", "--duration=5"]).expect_success("unlock");
+    let out = store.run(&["unlock", "api.md", "--for=agent", "--duration=5"]).expect_success("unlock");
     out.assert_stdout_contains("Override granted");
     out.assert_stdout_contains("agent");
     out.assert_stdout_contains("api.md");

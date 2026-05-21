@@ -201,7 +201,7 @@ fn ai6_agent_new_file_registered_as_scratch() {
 // ── AI-7: AGENT-TRACE.md Agent Discovery ──────────────────────────────────────────
 
 #[test]
-fn ai7_docmgr_md_discovery() {
+fn ai7_agent_trace_md_discovery() {
     let store = TestStore::new();
 
     store.write_file("prd.md", "# PRD");
@@ -210,42 +210,50 @@ fn ai7_docmgr_md_discovery() {
     store.write_file("notes.md", "# Notes");
     store.write_file("logs/session.md", "# Log");
 
-    store.docmgr(&["add", "plan", "prd.md"]).expect_success("add plan");
-    store.docmgr(&["add", "plan", "arch.md"]).expect_success("add plan2");
-    store.docmgr(&["add", "reference", "api.md"]).expect_success("add ref");
-    store.docmgr(&["add", "scratch", "notes.md"]).expect_success("add scratch");
-    store.docmgr(&["add", "log", "logs/session.md"]).expect_success("add log");
+    store.run(&["add", "plan", "prd.md"]).expect_success("add plan");
+    store.run(&["add", "plan", "arch.md"]).expect_success("add plan2");
+    store.run(&["add", "reference", "api.md"]).expect_success("add ref");
+    store.run(&["add", "scratch", "notes.md"]).expect_success("add scratch");
+    store.run(&["add", "log", "logs/session.md"]).expect_success("add log");
 
-    let docmgr = store.read_file("AGENT-TRACE.md");
-    assert!(docmgr.contains("How to Use This Store"), "AGENT-TRACE.md should have how-to section");
-    assert!(docmgr.contains("Write Permission Rules"), "AGENT-TRACE.md should have permission rules");
-    assert!(docmgr.contains("Plans"), "AGENT-TRACE.md should list plans");
-    assert!(docmgr.contains("Reference"), "AGENT-TRACE.md should list references");
-    assert!(docmgr.contains("Scratch"), "AGENT-TRACE.md should list scratch");
-    assert!(docmgr.contains("Logs"), "AGENT-TRACE.md should list logs");
-    assert!(docmgr.contains("prd.md"), "prd.md in AGENT-TRACE");
-    assert!(docmgr.contains("api.md"), "api.md in AGENT-TRACE");
-    assert!(docmgr.contains("plan"), "plan row in AGENT-TRACE");
+    let at_md = store.read_file("AGENT-TRACE.md");
+    assert!(at_md.contains("How to Use This Store"), "AGENT-TRACE.md should have how-to section");
+    assert!(at_md.contains("Write Permission Rules"), "AGENT-TRACE.md should have permission rules");
+    assert!(at_md.contains("Plans"), "AGENT-TRACE.md should list plans");
+    assert!(at_md.contains("Reference"), "AGENT-TRACE.md should list references");
+    assert!(at_md.contains("Scratch"), "AGENT-TRACE.md should list scratch");
+    assert!(at_md.contains("Logs"), "AGENT-TRACE.md should list logs");
+    assert!(at_md.contains("prd.md"), "prd.md in AGENT-TRACE");
+    assert!(at_md.contains("api.md"), "api.md in AGENT-TRACE");
+    assert!(at_md.contains("plan"), "plan row in AGENT-TRACE");
 }
 
-// ── AI-8: Stale Agent Lock Cleanup ───────────────────────────────────────────
+// ── AI-8: Agent Lock File Actor Detection ─────────────────────────────────────
+//
+// The new connect mechanism writes a lock file without a PID field.
+// AgentState reads the name and returns Actor::Agent. Lifecycle is explicit:
+// `agent-trace connect` creates it, `agent-trace disconnect` removes it.
 
 #[test]
-fn ai8_stale_agent_lock_cleaned_up() {
+fn ai8_agent_lock_file_actor_detection() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
 
     let lock_path = root.join(".agent-trace/locks/agent-lock.toml");
-    // PID 9999999 — almost certainly not running.
-    let lock_content = "[agent]\npid = 9999999\nname = \"ghost-agent\"\n";
-    std::fs::write(&lock_path, lock_content).unwrap();
-    assert!(lock_path.exists(), "lock should exist before test");
 
-    // AgentState with no CLI flag — should detect stale lock, remove it, act as User.
-    let agent = AgentState::new(None);
-    let actor = agent.current_actor(root);
-    assert_eq!(actor, Actor::User, "stale lock should be ignored → User actor");
-    assert!(!lock_path.exists(), "stale lock file should be removed");
+    // New connect format: name only, no PID.
+    std::fs::write(&lock_path, "[agent]\nname = \"connected-agent\"\n").unwrap();
+    let state = AgentState::new(None);
+    assert_eq!(
+        state.current_actor(root),
+        Actor::Agent { name: "connected-agent".into() },
+        "lock file presence → Agent actor"
+    );
+
+    // Removing the lock file (disconnect) → User actor.
+    std::fs::remove_file(&lock_path).unwrap();
+    let state2 = AgentState::new(None);
+    assert_eq!(state2.current_actor(root), Actor::User, "no lock file → User actor");
 }
 

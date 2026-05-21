@@ -13,7 +13,7 @@ impl TestStore {
         let dir = TempDir::new().expect("create tempdir");
         let bin = PathBuf::from(env!("CARGO_BIN_EXE_agent-trace"));
         let s = Self { dir, bin };
-        s.docmgr(&["init", s.dir.path().to_str().unwrap()])
+        s.run(&["init", s.dir.path().to_str().unwrap()])
             .expect_success("init");
         s
     }
@@ -30,26 +30,26 @@ impl TestStore {
             }
             std::fs::write(&path, content).unwrap();
         }
-        s.docmgr(&["init", s.dir.path().to_str().unwrap(), "--scan"])
+        s.run(&["init", s.dir.path().to_str().unwrap(), "--scan"])
             .expect_success("init --scan");
         s
     }
 
     /// Run agent-trace with given args from the store directory.
-    pub fn docmgr(&self, args: &[&str]) -> DocmgrOutput {
+    pub fn run(&self, args: &[&str]) -> CmdOutput {
         let output = Command::new(&self.bin)
             .args(args)
             .current_dir(self.dir.path())
             .output()
             .expect("run agent-trace");
-        DocmgrOutput { output }
+        CmdOutput { output }
     }
 
     /// Run agent-trace with --agent flag.
-    pub fn docmgr_as_agent<'a>(&self, agent: &'a str, args: &[&str]) -> DocmgrOutput {
+    pub fn run_as_agent<'a>(&self, agent: &'a str, args: &[&str]) -> CmdOutput {
         let mut full_args = vec!["--agent", agent];
         full_args.extend_from_slice(args);
-        self.docmgr(&full_args)
+        self.run(&full_args)
     }
 
     pub fn write_file(&self, name: &str, content: &str) {
@@ -73,11 +73,11 @@ impl TestStore {
     }
 }
 
-pub struct DocmgrOutput {
+pub struct CmdOutput {
     pub output: Output,
 }
 
-impl DocmgrOutput {
+impl CmdOutput {
     pub fn stdout(&self) -> String {
         String::from_utf8_lossy(&self.output.stdout).to_string()
     }
@@ -134,5 +134,19 @@ impl DocmgrOutput {
             s
         );
         self
+    }
+}
+
+impl TestStore {
+    /// Spawn agent-trace as a child process with piped stdin/stdout (for MCP tests).
+    pub fn spawn_child(&self, args: &[&str]) -> std::process::Child {
+        std::process::Command::new(&self.bin)
+            .args(args)
+            .current_dir(self.dir.path())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn agent-trace")
     }
 }

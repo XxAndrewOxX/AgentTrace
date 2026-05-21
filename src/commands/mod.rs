@@ -17,3 +17,5 @@ pub mod model;
 pub mod rm;
 pub mod untrack;
 pub mod show;
+pub mod connect;
+pub mod write_cmd;

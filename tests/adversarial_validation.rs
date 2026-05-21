@@ -193,7 +193,7 @@ fn rc3b_commit_failure_rolls_back_manifest_registration() {
     // (Delete is an allowed action for User actor.)
     let m2 = manifest.lock().unwrap();
     // NOTE: the poll tracks deletes through allowed changes but doesn't untrack from manifest.
-    // The manifest entry remains until `docmgr untrack` or `repair`. This is expected behavior.
+    // The manifest entry remains until `agent-trace untrack` or `repair`. This is expected behavior.
     // We just verify no panic occurred.
     let _ = m2.is_tracked(&PathBuf::from("doomed.md"));
 }
@@ -766,7 +766,7 @@ fn gs6_symlinks_in_store_directory() {
 
 /// DC-1: Rapid operations — AGENT-TRACE.md stays consistent with manifest.
 #[test]
-fn dc1_docmgr_md_consistency_under_rapid_changes() {
+fn dc1_agent_trace_md_consistency_under_rapid_changes() {
     let tmp = TempDir::new().unwrap();
     let (git, manifest) = setup_store(&tmp);
     let root = tmp.path();
@@ -791,15 +791,15 @@ fn dc1_docmgr_md_consistency_under_rapid_changes() {
     }
 
     // After settling, AGENT-TRACE.md must list exactly the files in the manifest.
-    let docmgr_content = std::fs::read_to_string(root.join("AGENT-TRACE.md")).unwrap();
+    let at_md_content = std::fs::read_to_string(root.join("AGENT-TRACE.md")).unwrap();
     let m = manifest.lock().unwrap();
     for doc in m.list(None) {
         let filename = doc.path.file_name().unwrap().to_string_lossy();
         assert!(
-            docmgr_content.contains(filename.as_ref()),
+            at_md_content.contains(filename.as_ref()),
             "AGENT-TRACE.md must list {}; content snippet: {}",
             filename,
-            &docmgr_content[..200.min(docmgr_content.len())]
+            &at_md_content[..200.min(at_md_content.len())]
         );
     }
 }
@@ -850,11 +850,11 @@ fn dc3_context_synthesis_large_document_set() {
     // Create 50 plan files.
     for i in 0..50 {
         store.write_file(&format!("plan-{:02}.md", i), &format!("# Plan {}\n\n{}", i, "Content. ".repeat(200)));
-        store.docmgr(&["add", "plan", &format!("plan-{:02}.md", i)]).expect_success("add plan");
+        store.run(&["add", "plan", &format!("plan-{:02}.md", i)]).expect_success("add plan");
     }
 
     let t0 = Instant::now();
-    store.docmgr(&["context", "refresh"]).expect_success("context refresh with 50 plans");
+    store.run(&["context", "refresh"]).expect_success("context refresh with 50 plans");
     let elapsed = t0.elapsed().as_secs();
 
     assert!(elapsed < 10, "context refresh with 50 plans must complete in < 10s; took {}s", elapsed);
@@ -865,7 +865,7 @@ fn dc3_context_synthesis_large_document_set() {
 
 /// DC-4: AGENT-TRACE.md is written atomically — readers never see a partial file.
 #[test]
-fn dc4_docmgr_md_written_atomically() {
+fn dc4_agent_trace_md_written_atomically() {
     let tmp = TempDir::new().unwrap();
     let (git, manifest) = setup_store(&tmp);
     let root = tmp.path();
@@ -1303,7 +1303,7 @@ fn di3_rename_preserves_full_history() {
     // The manifest must track new-name.md.
     // NOTE: git2 rename detection is similarity-based. If not detected as Renamed,
     // it appears as Delete(old) + New(new). Deleted files are intentionally not
-    // auto-untracked (user must run `docmgr untrack` or `repair`). So old-name.md
+    // auto-untracked (user must run `agent-trace untrack` or `repair`). So old-name.md
     // may still appear in the manifest — that is expected behaviour.
     let m = manifest.lock().unwrap();
     assert!(m.is_tracked(&PathBuf::from("new-name.md")), "new-name.md must be in manifest");

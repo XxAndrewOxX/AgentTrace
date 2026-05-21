@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex};
 //   - test_app_renders_without_panic: verifies TB-1/TB-2 (renders at normal sizes)
 //   - test_tab_cycles_focus: verifies panel navigation
 //
-// Manual verification: Opening docmgr in various terminal sizes confirmed:
+// Manual verification: Opening agent-trace in various terminal sizes confirmed:
 //   TB-1: At 80x24, all 3 panels visible, no artifacts — PASS
 //   TB-2: At 200x60, panels scale proportionally — PASS
 //   TB-3: At 60x20, "Terminal too small (need 80x24)" displayed — PASS
@@ -188,7 +188,7 @@ fn tb9_startup_banner_content() {
     // Verify it doesn't panic and that the LLM engine is not reported as loaded.
     assert!(!no_llm.is_loaded());
 
-    // The banner should contain version info (docmgr v0.1.0) and document count.
+    // The banner should contain version info (agent-trace v0.1.0) and document count.
     // We test the banner function compiles and runs without panicking.
     // It writes to stdout which we can't easily capture in a library test,
     // so we just call it and verify no panic.
@@ -218,9 +218,9 @@ fn tb10_command_history_persistence() {
     // The history save/load functions work correctly (tested at unit level).
     // We can verify that after CLI commands, the store root has expected structure.
     store.write_file("a.md", "# A");
-    store.docmgr(&["add", "plan", "a.md"]).expect_success("add");
+    store.run(&["add", "plan", "a.md"]).expect_success("add");
 
-    // The command_history.txt is only written by docmgr open, not CLI commands.
+    // The command_history.txt is only written by agent-trace open, not CLI commands.
     // Verify the .agent-trace directory has the expected structure.
     assert!(store.file_exists(".agent-trace/config.toml"), ".agent-trace/config.toml");
     assert!(store.file_exists(".agent-trace/manifest.toml"), ".agent-trace/manifest.toml");

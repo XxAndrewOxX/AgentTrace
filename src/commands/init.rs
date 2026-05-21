@@ -9,11 +9,11 @@ pub fn run(path: &Path, scan: bool) -> Result<()> {
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
     // Check if already initialised.
-    let docmgr_dir = path.join(".agent-trace");
-    if docmgr_dir.join("config.toml").exists() {
+    let store_dir = path.join(".agent-trace");
+    if store_dir.join("config.toml").exists() {
         println!("Store already initialised at {}", path.display());
-        println!("  Config: {}", docmgr_dir.join("config.toml").display());
-        println!("  Manifest: {}", docmgr_dir.join("manifest.toml").display());
+        println!("  Config: {}", store_dir.join("config.toml").display());
+        println!("  Manifest: {}", store_dir.join("manifest.toml").display());
         return Ok(());
     }
 
@@ -24,22 +24,22 @@ pub fn run(path: &Path, scan: bool) -> Result<()> {
         std::fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
-            .create(&docmgr_dir)?;
+            .create(&store_dir)?;
     }
     #[cfg(not(unix))]
     {
-        std::fs::create_dir_all(&docmgr_dir)?;
+        std::fs::create_dir_all(&store_dir)?;
     }
 
     // Create subdirectories.
-    std::fs::create_dir_all(docmgr_dir.join("locks"))?;
+    std::fs::create_dir_all(store_dir.join("locks"))?;
 
     // Create empty files.
-    let context_updates = docmgr_dir.join("context_updates.jsonl");
+    let context_updates = store_dir.join("context_updates.jsonl");
     if !context_updates.exists() {
         std::fs::write(&context_updates, "")?;
     }
-    let cmd_history = docmgr_dir.join("command_history.txt");
+    let cmd_history = store_dir.join("command_history.txt");
     if !cmd_history.exists() {
         std::fs::write(&cmd_history, "")?;
     }

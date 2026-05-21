@@ -11,6 +11,8 @@ use chrono::Utc;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+pub use crate::session::AgentState;
+
 // ── UI Event channel ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -19,48 +21,6 @@ pub enum UiEvent {
     NewCommit(LogEntry),
     Violation(String),
     StatusMessage(String),
-}
-
-// ── Agent State ───────────────────────────────────────────────────────────────
-
-pub struct AgentState {
-    pub cli_agent: Option<String>,
-}
-
-impl AgentState {
-    pub fn new(cli_agent: Option<String>) -> Self {
-        Self { cli_agent }
-    }
-
-    pub fn current_actor(&self, store_root: &Path) -> Actor {
-        // 1. Check agent-lock file.
-        let lock_path = store_root.join(".agent-trace").join("locks").join("agent-lock.toml");
-        if lock_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&lock_path) {
-                if let Ok(value) = toml::from_str::<toml::Value>(&content) {
-                    let agent_section = value.get("agent");
-                    let pid = agent_section.and_then(|a| a.get("pid")).and_then(|v| v.as_integer());
-                    let name = agent_section.and_then(|a| a.get("name")).and_then(|v| v.as_str()).map(String::from);
-
-                    if let (Some(pid), Some(name)) = (pid, name) {
-                        if is_pid_alive(pid as u32) {
-                            return Actor::Agent { name };
-                        } else {
-                            // Stale lock — remove it.
-                            let _ = std::fs::remove_file(&lock_path);
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. Check CLI --agent flag.
-        if let Some(name) = &self.cli_agent {
-            return Actor::Agent { name: name.clone() };
-        }
-
-        Actor::User
-    }
 }
 
 fn is_pid_alive(pid: u32) -> bool {
@@ -333,6 +293,7 @@ impl Drop for InstanceLock {
 mod tests {
     use super::*;
     use crate::config::{MergedConfig, GlobalConfig, StoreConfig, StoreInfo, PollingConfig};
+    use crate::session::AgentState;
     use tempfile::TempDir;
 
     fn setup(tmp: &TempDir) -> (GitStore, Arc<Mutex<Manifest>>, MergedConfig) {
@@ -384,6 +345,28 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let state = AgentState::new(Some("aider".into()));
         assert_eq!(state.current_actor(tmp.path()), Actor::Agent { name: "aider".into() });
+    }
+
+    #[test]
+    fn test_agent_state_connect_lock_file() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
+        // Simulate `agent-trace connect my-agent` (no PID field)
+        std::fs::write(
+            root.join(".agent-trace/locks/agent-lock.toml"),
+            "[agent]\nname = \"my-agent\"\n",
+        ).unwrap();
+        let state = AgentState::new(None);
+        assert_eq!(state.current_actor(root), Actor::Agent { name: "my-agent".into() });
+    }
+
+    #[test]
+    fn test_agent_state_cli_flag_takes_priority_over_no_lock() {
+        let tmp = TempDir::new().unwrap();
+        // No lock file, but CLI flag set — should be Agent
+        let state = AgentState::new(Some("cli-agent".into()));
+        assert_eq!(state.current_actor(tmp.path()), Actor::Agent { name: "cli-agent".into() });
     }
 
     #[test]

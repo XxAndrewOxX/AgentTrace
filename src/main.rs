@@ -1,6 +1,7 @@
 use agent_trace::commands;
 use agent_trace::commands::context::ContextCmd;
 use agent_trace::commands::model::ModelCmd;
+use agent_trace::mcp;
 use agent_trace::types::DocType;
 
 use anyhow::Result;
@@ -189,6 +190,34 @@ pub enum Commands {
         #[command(subcommand)]
         subcommand: ModelCmd,
     },
+
+    /// Register an agent session (writes lock file, no PID required).
+    Connect {
+        /// Agent name to register.
+        name: String,
+    },
+
+    /// End the current agent session (removes lock file).
+    Disconnect,
+
+    /// Write content to a tracked document with synchronous permission enforcement.
+    Write {
+        /// File to write (relative to store root).
+        file: PathBuf,
+        /// Content to write. Reads from stdin if omitted.
+        #[arg(long)]
+        content: Option<String>,
+    },
+
+    /// Start the MCP server on stdio (JSON-RPC 2.0).
+    Mcp {
+        /// Store root (defaults to current directory).
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        /// Agent name for this MCP session.
+        #[arg(long)]
+        actor: Option<String>,
+    },
 }
 
 // ── Dispatch ──────────────────────────────────────────────────────────────────
@@ -257,5 +286,17 @@ fn main() -> Result<()> {
             dry_run,
         ),
         Commands::Model { subcommand } => commands::model::run(subcommand),
+        Commands::Connect { name } => {
+            commands::connect::run_connect(&PathBuf::from("."), &name)
+        }
+        Commands::Disconnect => {
+            commands::connect::run_disconnect(&PathBuf::from("."))
+        }
+        Commands::Write { file, content } => {
+            commands::write_cmd::run(&PathBuf::from("."), &file, content, cli.agent)
+        }
+        Commands::Mcp { path, actor } => {
+            mcp::server::run(&path, actor)
+        }
     }
 }
