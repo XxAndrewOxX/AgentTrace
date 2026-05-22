@@ -361,7 +361,6 @@ fn pi4_violation_accumulation() {
     proc.run_poll_cycle().unwrap();
 
     // Check violations via CLI.
-    let store = TestStore { dir: tempfile::Builder::new().tempdir_in(tmp.path().parent().unwrap()).unwrap(), bin: std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/release/agent-trace") };
     // Actually we need to query the git log directly.
     let git2 = GitStore::open(tmp.path()).unwrap();
     let log = git2.log(100).unwrap();

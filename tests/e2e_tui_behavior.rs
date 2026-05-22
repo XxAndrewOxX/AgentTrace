@@ -12,7 +12,7 @@ mod helpers;
 use helpers::TestStore;
 
 use agent_trace::tui::app::App;
-use agent_trace::tui::panels::{ChangelogState, ChatState, Focus, TreeState};
+use agent_trace::tui::panels::{ChatState, Focus};
 use agent_trace::manifest::Manifest;
 use agent_trace::config::StoreInfo;
 use agent_trace::llm::LlmEngine;
@@ -34,7 +34,6 @@ use std::sync::{Arc, Mutex};
 fn tb3_below_minimum_shows_message() {
     // Mirrors the unit test in app.rs — validates the TUI error message logic.
     use ratatui::{backend::TestBackend, Terminal};
-    use agent_trace::types::LogEntry;
 
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();
@@ -174,7 +173,6 @@ fn tb8_no_llm_engine_is_not_loaded() {
 fn tb9_startup_banner_content() {
     use agent_trace::tui::banner;
     use agent_trace::llm::NoLlm;
-    use std::io::BufWriter;
 
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();

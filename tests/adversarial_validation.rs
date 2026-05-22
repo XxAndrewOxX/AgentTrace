@@ -10,7 +10,7 @@ use agent_trace::git_store::{CommitInfo, GitStore};
 use agent_trace::manifest::Manifest;
 use agent_trace::permissions::{OverrideEntry, Overrides};
 use agent_trace::poll::{AgentState, ChangeProcessor};
-use agent_trace::tui::panels::{ChangelogState, ChatState, TreeState};
+use agent_trace::tui::panels::{ChangelogState, ChatState};
 use agent_trace::types::{Action, Actor, DocType, LogEntry};
 use chrono::Utc;
 use std::path::PathBuf;

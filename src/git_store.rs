@@ -636,7 +636,7 @@ mod tests {
 
     #[test]
     fn test_detect_changes_new_md() {
-        let (tmp, store) = setup_store();
+        let (_tmp, store) = setup_store();
         write_md(&store, "notes.md", "# hello");
         let changes = store.detect_changes().unwrap();
         assert_eq!(changes.len(), 1);
@@ -645,7 +645,7 @@ mod tests {
 
     #[test]
     fn test_detect_changes_no_non_md() {
-        let (tmp, store) = setup_store();
+        let (_tmp, store) = setup_store();
         std::fs::write(store.workdir.join("file.txt"), "ignored").unwrap();
         let changes = store.detect_changes().unwrap();
         assert!(changes.is_empty());
@@ -653,7 +653,7 @@ mod tests {
 
     #[test]
     fn test_detect_changes_modified() {
-        let (tmp, store) = setup_store();
+        let (_tmp, store) = setup_store();
         let rel = write_md(&store, "plan.md", "v1");
         commit_file(&store, &rel, Action::Create);
         std::fs::write(store.workdir.join("plan.md"), "v2").unwrap();
@@ -663,7 +663,7 @@ mod tests {
 
     #[test]
     fn test_commit_attribution() {
-        let (tmp, store) = setup_store();
+        let (_tmp, store) = setup_store();
         let rel = write_md(&store, "prd.md", "content");
         let info = CommitInfo {
             action: Action::Create,
@@ -682,7 +682,7 @@ mod tests {
 
     #[test]
     fn test_log_returns_entries() {
-        let (tmp, store) = setup_store();
+        let (_tmp, store) = setup_store();
         let r1 = write_md(&store, "a.md", "a");
         commit_file(&store, &r1, Action::Create);
         let r2 = write_md(&store, "b.md", "b");
@@ -695,7 +695,7 @@ mod tests {
 
     #[test]
     fn test_log_file_filters() {
-        let (tmp, store) = setup_store();
+        let (_tmp, store) = setup_store();
         let r1 = write_md(&store, "prd.md", "v1");
         commit_file(&store, &r1, Action::Create);
         let r2 = write_md(&store, "other.md", "x");
@@ -709,7 +709,7 @@ mod tests {
 
     #[test]
     fn test_version_count() {
-        let (tmp, store) = setup_store();
+        let (_tmp, store) = setup_store();
         let rel = write_md(&store, "prd.md", "v1");
         commit_file(&store, &rel, Action::Create);
         std::fs::write(store.workdir.join("prd.md"), "v2").unwrap();
@@ -719,7 +719,7 @@ mod tests {
 
     #[test]
     fn test_show_file_at_version() {
-        let (tmp, store) = setup_store();
+        let (_tmp, store) = setup_store();
         let rel = write_md(&store, "prd.md", "version one");
         commit_file(&store, &rel, Action::Create);
         std::fs::write(store.workdir.join("prd.md"), "version two").unwrap();
@@ -733,7 +733,7 @@ mod tests {
 
     #[test]
     fn test_revert_file() {
-        let (tmp, store) = setup_store();
+        let (_tmp, store) = setup_store();
         let rel = write_md(&store, "prd.md", "original");
         commit_file(&store, &rel, Action::Create);
         std::fs::write(store.workdir.join("prd.md"), "unauthorized change").unwrap();
@@ -744,7 +744,7 @@ mod tests {
 
     #[test]
     fn test_commit_message_format() {
-        let (tmp, store) = setup_store();
+        let (_tmp, store) = setup_store();
         let rel = write_md(&store, "prd.md", "content");
         let info = CommitInfo {
             action: Action::Modify,
@@ -811,7 +811,7 @@ mod tests {
     #[test]
     fn test_parse_file_line_roundtrip_via_commit() {
         // Full round-trip: write a commit with a path containing spaces, read it back
-        let (tmp, store) = setup_store();
+        let (_tmp, store) = setup_store();
         let rel = write_md(&store, "my plan.md", "content with spaces in name");
         let info = CommitInfo {
             action: Action::Create,
@@ -832,7 +832,7 @@ mod tests {
 
     #[test]
     fn test_count_file_commits() {
-        let (tmp, store) = setup_store();
+        let (_tmp, store) = setup_store();
         let rel = write_md(&store, "prd.md", "v1");
         commit_file(&store, &rel, Action::Create);
         std::fs::write(store.workdir.join("prd.md"), "v2").unwrap();

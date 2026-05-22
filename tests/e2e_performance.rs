@@ -1,7 +1,6 @@
 /// E2E tests: Performance & Scale (PS-1 through PS-5)
 #[path = "helpers.rs"]
 mod helpers;
-use helpers::TestStore;
 
 use agent_trace::config::{GlobalConfig, MergedConfig, PollingConfig, StoreConfig, StoreInfo};
 use agent_trace::git_store::{CommitInfo, GitStore};

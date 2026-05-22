@@ -315,6 +315,7 @@ pub fn agent_tools() -> Vec<Value> {
 // ── Agent Driver Loop ─────────────────────────────────────────────────────────
 
 /// Outcome of a driver loop run.
+#[allow(dead_code)]
 pub struct DriverResult {
     pub trajectory: Trajectory,
     /// true if turn limit was hit before `done` was called

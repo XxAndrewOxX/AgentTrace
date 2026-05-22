@@ -4,6 +4,7 @@ use serde_json::Value;
 
 // ── Tool Call ─────────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ToolCall {
     pub turn: usize,
@@ -22,6 +23,7 @@ pub struct Trajectory {
     pub calls: Vec<ToolCall>,
 }
 
+#[allow(dead_code)]
 impl Trajectory {
     pub fn record(&mut self, call: ToolCall) {
         self.calls.push(call);

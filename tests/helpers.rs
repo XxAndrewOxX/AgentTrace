@@ -1,4 +1,6 @@
-/// Shared test helpers for E2E tests.
+// Shared test helpers for E2E tests.
+#![allow(dead_code)]
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use tempfile::TempDir;
