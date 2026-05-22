@@ -1,11 +1,12 @@
 /// Records every tool call made by the agent during a live test run.
 /// Pure data — no network, no filesystem, no side effects.
 use serde_json::Value;
+use serde::{Deserialize, Serialize};
 
 // ── Tool Call ─────────────────────────────────────────────────────────────────
 
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
     pub turn: usize,
     pub tool_name: String,
@@ -18,7 +19,7 @@ pub struct ToolCall {
 
 // ── Trajectory ────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Trajectory {
     pub calls: Vec<ToolCall>,
 }

@@ -3,15 +3,16 @@
 /// single entry point that test functions call.
 pub mod assertions;
 pub mod driver;
+pub mod logging;
 pub mod scenario;
 pub mod trajectory;
 
 use std::path::PathBuf;
 
 use driver::{BackendConfig, McpBridge, run_driver_loop, setup_store};
+use logging::log_parent;
 use scenario::AgentScenario;
 use trajectory::Trajectory;
-
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -39,7 +40,7 @@ pub fn run_live_scenario(
     let client = cfg.build_client();
 
     let actor = format!("live-test-{}", scenario.name);
-    let mut mcp = McpBridge::spawn(&bin, &store_root, &actor)?;
+    let mut mcp = McpBridge::spawn(&bin, &store_root, &actor, scenario.name)?;
 
     let result = run_driver_loop(
         &client,
@@ -48,7 +49,11 @@ pub fn run_live_scenario(
         scenario.prompt,
         scenario.max_turns,
         scenario.temperature,
+        scenario.name,
     )?;
+    if result.aborted {
+        log_parent(scenario.name, "warning: runner aborted after max turns");
+    }
 
     Ok((tmp, store_root, result.trajectory))
 }

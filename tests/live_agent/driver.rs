@@ -4,9 +4,11 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Stdio};
+use std::thread;
 
 use serde_json::{json, Value};
 
+use super::logging::{log_parent, spawn_stream_logger};
 use super::trajectory::{ToolCall, Trajectory};
 
 // ── MCP Bridge ────────────────────────────────────────────────────────────────
@@ -15,33 +17,43 @@ use super::trajectory::{ToolCall, Trajectory};
 /// Translates tool calls into JSON-RPC 2.0 messages, records results to
 /// a Trajectory.
 pub struct McpBridge {
-    _child: Child,
+    child: Child,
     stdin: ChildStdin,
     reader: BufReader<ChildStdout>,
     next_id: u64,
+    stderr_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl McpBridge {
     /// Spawn `agent-trace mcp --actor=<actor>` and perform the MCP initialize
     /// handshake. Returns an initialized bridge ready for `tools/call`.
-    pub fn spawn(bin: &Path, store_root: &Path, actor: &str) -> anyhow::Result<Self> {
+    pub fn spawn(
+        bin: &Path,
+        store_root: &Path,
+        actor: &str,
+        scenario_name: &str,
+    ) -> anyhow::Result<Self> {
         let mut child = std::process::Command::new(bin)
             .args(["mcp", &format!("--actor={}", actor)])
             .current_dir(store_root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()?;
 
         let stdin = child.stdin.take().expect("stdin");
         let stdout = child.stdout.take().expect("stdout");
+        let stderr = child.stderr.take().expect("stderr");
+        let (stderr_handle, _stderr_rx) =
+            spawn_stream_logger(stderr, "mcp", scenario_name.to_string());
         let reader = BufReader::new(stdout);
 
         let mut bridge = McpBridge {
-            _child: child,
+            child,
             stdin,
             reader,
             next_id: 1,
+            stderr_handle: Some(stderr_handle),
         };
 
         // MCP initialize handshake.
@@ -58,7 +70,7 @@ impl McpBridge {
         bridge.send(&init_req)?;
         bridge.recv()?; // discard initialize result
 
-        // Send initialized notification (no id → no response expected).
+        // Send initialized notification (no id -> no response expected).
         let notif = json!({
             "jsonrpc": "2.0",
             "method": "initialized",
@@ -134,6 +146,16 @@ impl McpBridge {
         self.reader.read_line(&mut line)?;
         let v = serde_json::from_str(line.trim())?;
         Ok(v)
+    }
+}
+
+impl Drop for McpBridge {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        if let Some(handle) = self.stderr_handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -331,6 +353,7 @@ pub fn run_driver_loop(
     task_prompt: &str,
     max_turns: usize,
     temperature: f32,
+    scenario_name: &str,
 ) -> anyhow::Result<DriverResult> {
     let tools = agent_tools();
     let mut messages: Vec<Value> = vec![
@@ -340,6 +363,7 @@ pub fn run_driver_loop(
     let mut trajectory = Trajectory::default();
 
     for turn in 0..max_turns {
+        log_parent(scenario_name, &format!("agent turn {}", turn + 1));
         let resp = client.chat(&messages, &tools, temperature)?;
 
         let choice = resp
@@ -391,7 +415,10 @@ pub fn run_driver_loop(
                     }));
                     // Flush results then exit.
                     messages.extend(tool_results);
-                    return Ok(DriverResult { trajectory, aborted: false });
+                    return Ok(DriverResult {
+                        trajectory,
+                        aborted: false,
+                    });
                 }
 
                 let args: Value = tc
@@ -401,8 +428,8 @@ pub fn run_driver_loop(
                     .and_then(|s| serde_json::from_str(s).ok())
                     .unwrap_or(json!({}));
 
-                let (result_text, _is_error) =
-                    mcp.call_tool(tool_name, args, turn, &mut trajectory)?;
+                log_parent(scenario_name, &format!("agent calling tool {tool_name}"));
+                let (result_text, _is_error) = mcp.call_tool(tool_name, args, turn, &mut trajectory)?;
 
                 tool_results.push(json!({
                     "role": "tool",
@@ -412,14 +439,14 @@ pub fn run_driver_loop(
             }
 
             messages.extend(tool_results);
-        } else {
-            // Text-only response: model is thinking out loud.
-            // Continue to next turn so it can call tools.
         }
     }
 
     // Turn limit reached without `done`.
-    Ok(DriverResult { trajectory, aborted: true })
+    Ok(DriverResult {
+        trajectory,
+        aborted: true,
+    })
 }
 
 // ── Backend Config ────────────────────────────────────────────────────────────
@@ -436,8 +463,7 @@ impl BackendConfig {
         let backend = std::env::var("AGENT_TRACE_MODEL_BACKEND").unwrap_or_else(|_| "groq".into());
         match backend.as_str() {
             "ollama" => {
-                let model = std::env::var("AGENT_TRACE_MODEL")
-                    .unwrap_or_else(|_| "qwen2.5:7b".into());
+                let model = std::env::var("AGENT_TRACE_MODEL").unwrap_or_else(|_| "qwen2.5:7b".into());
                 Ok(BackendConfig {
                     api_key: "ollama".into(), // Ollama doesn't need a key
                     model,
@@ -449,16 +475,16 @@ impl BackendConfig {
             }
             _ => {
                 // groq (default)
-                let api_key = std::env::var("GROQ_API_KEY")
-                    .map_err(|_| anyhow::anyhow!("GROQ_API_KEY not set"))?;
+                let api_key =
+                    std::env::var("GROQ_API_KEY").map_err(|_| anyhow::anyhow!("GROQ_API_KEY not set"))?;
                 // Live tests depend on robust function/tool calling. We intentionally
                 // default to a model that has been more stable for tool-call formatting
                 // in this harness than llama-3.3-70b-versatile.
                 //
                 // You can always override this explicitly:
                 //   AGENT_TRACE_MODEL=<your-model>
-                let model = std::env::var("AGENT_TRACE_MODEL")
-                    .unwrap_or_else(|_| "qwen/qwen3-32b".into());
+                let model =
+                    std::env::var("AGENT_TRACE_MODEL").unwrap_or_else(|_| "qwen/qwen3-32b".into());
                 Ok(BackendConfig {
                     api_key,
                     model,
