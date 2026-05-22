@@ -1,5 +1,7 @@
 use crate::agent_trace_md;
+use crate::context::load_pending_updates;
 use crate::git_store::CommitInfo;
+use crate::llm::trace_insights::{TraceDocument, TraceInsightsFacade};
 use crate::log_synth::{append_agent_log, summarize_change_no_llm, LogSynthEntry};
 use crate::permissions::{check_permission, PermissionResult};
 use crate::store::Store;
@@ -39,10 +41,7 @@ pub fn write_document(
 
     match check_permission(&doc_type, actor, &store.overrides, Some(&rel)) {
         PermissionResult::Denied { reason } => {
-            return Err(WriteDocumentError::PermissionDenied {
-                path: rel,
-                reason,
-            });
+            return Err(WriteDocumentError::PermissionDenied { path: rel, reason });
         }
         PermissionResult::Allowed | PermissionResult::RequiresConfirmation { .. } => {}
     }
@@ -66,7 +65,10 @@ pub fn write_document(
             .manifest
             .register(&rel, DocType::Scratch, actor.agent_name().unwrap_or(""))
             .map_err(WriteDocumentError::Other)?;
-        store.manifest.save(root).map_err(WriteDocumentError::Other)?;
+        store
+            .manifest
+            .save(root)
+            .map_err(WriteDocumentError::Other)?;
     }
 
     let info = CommitInfo {
@@ -103,6 +105,8 @@ pub fn apply_trace_hooks(
     if changed_files.is_empty() {
         return Ok(());
     }
+    let trace_insights = TraceInsightsFacade::from_store_root(store_root)
+        .map_err(|e| anyhow::anyhow!("failed to initialize LLM trace_insights API: {}", e))?;
 
     if actor.is_agent() {
         if let (Some(agent_name), Some(sid)) = (actor.agent_name(), session_id) {
@@ -110,14 +114,28 @@ pub fn apply_trace_hooks(
                 .iter()
                 .map(|(path, _, doc_type)| {
                     let stats = git.diff_stats(path, None, None).unwrap_or_default();
-                    let summary = summarize_change_no_llm(path, doc_type, &stats, agent_name);
-                    LogSynthEntry {
+                    let summary = if let Some(api) = trace_insights.as_ref() {
+                        let diff = format!(
+                            "+{} lines\n-{} lines\n",
+                            stats.lines_added, stats.lines_removed
+                        );
+                        api.summarize_change(path, doc_type, &diff).map_err(|e| {
+                            anyhow::anyhow!(
+                                "LLM trace_insights summarize_change failed for {}: {}",
+                                path.display(),
+                                e
+                            )
+                        })
+                    } else {
+                        Ok(summarize_change_no_llm(path, doc_type, &stats, agent_name))
+                    };
+                    Ok(LogSynthEntry {
                         timestamp: Utc::now(),
                         path: path.clone(),
-                        summary,
-                    }
+                        summary: summary?,
+                    })
                 })
-                .collect();
+                .collect::<anyhow::Result<Vec<_>>>()?;
             append_agent_log(store_root, git, agent_name, sid, &entries)?;
         }
     }
@@ -128,7 +146,7 @@ pub fn apply_trace_hooks(
         .iter()
         .any(|(_, _, doc_type)| matches!(doc_type, DocType::Plan | DocType::Reference));
     if refresh_context {
-        sync_context_md(store_root, git, manifest)?;
+        sync_context_md(store_root, git, manifest, trace_insights.as_ref())?;
     }
 
     Ok(())
@@ -170,8 +188,19 @@ fn sync_context_md(
     store_root: &Path,
     git: &crate::git_store::GitStore,
     manifest: &crate::manifest::Manifest,
+    trace_insights: Option<&TraceInsightsFacade>,
 ) -> anyhow::Result<()> {
-    let new_content = crate::context::synthesize_no_llm(store_root, manifest)?;
+    let new_content = if let Some(api) = trace_insights {
+        let docs = build_trace_documents(store_root, manifest);
+        let updates = load_pending_updates(store_root)?
+            .into_iter()
+            .map(|u| u.update)
+            .collect::<Vec<_>>();
+        api.synthesize_context(&docs, &updates)
+            .map_err(|e| anyhow::anyhow!("LLM trace_insights synthesize_context failed: {}", e))?
+    } else {
+        crate::context::synthesize_no_llm(store_root, manifest)?
+    };
     let target = store_root.join("context.md");
     let existing = std::fs::read_to_string(&target).unwrap_or_default();
     if existing == new_content {
@@ -181,7 +210,11 @@ fn sync_context_md(
     crate::context::write_context(store_root, &new_content)?;
     let info = CommitInfo {
         action: Action::Modify,
-        files: vec![(PathBuf::from("context.md"), Action::Modify, DocType::Context)],
+        files: vec![(
+            PathBuf::from("context.md"),
+            Action::Modify,
+            DocType::Context,
+        )],
         actor: Actor::System,
         summary: "refresh synthesized context".into(),
         agent_name: None,
@@ -189,4 +222,29 @@ fn sync_context_md(
     };
     git.commit(&info)?;
     Ok(())
+}
+
+fn build_trace_documents(
+    store_root: &Path,
+    manifest: &crate::manifest::Manifest,
+) -> Vec<TraceDocument> {
+    manifest
+        .documents()
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.doc_type,
+                DocType::Plan | DocType::Reference | DocType::Scratch
+            )
+        })
+        .map(|d| {
+            let content = std::fs::read_to_string(store_root.join(&d.path)).unwrap_or_default();
+            let snippet: String = content.chars().take(2000).collect();
+            TraceDocument {
+                path: d.path.display().to_string(),
+                doc_type: d.doc_type.clone(),
+                content_snippet: snippet,
+            }
+        })
+        .collect()
 }

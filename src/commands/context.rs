@@ -1,4 +1,5 @@
 use crate::context::{load_pending_updates, synthesize_no_llm, write_context};
+use crate::llm::trace_insights::{TraceDocument, TraceInsightsFacade};
 use crate::store::Store;
 use anyhow::Result;
 use chrono::Utc;
@@ -32,7 +33,9 @@ pub fn run(store_root: &Path, cmd: ContextCmd) -> Result<()> {
             print!("{}", content);
         }
         ContextCmd::Update { statement } => {
-            let updates_file = store_root.join(".agent-trace").join("context_updates.jsonl");
+            let updates_file = store_root
+                .join(".agent-trace")
+                .join("context_updates.jsonl");
             let entry = serde_json::json!({
                 "timestamp": Utc::now().to_rfc3339(),
                 "update": statement,
@@ -61,11 +64,51 @@ pub fn run(store_root: &Path, cmd: ContextCmd) -> Result<()> {
         }
         ContextCmd::Refresh => {
             let store = Store::open(store_root)?;
-            let content = synthesize_no_llm(store_root, &store.manifest)?;
+            let content = if let Some(api) = TraceInsightsFacade::from_store_root(store_root)
+                .map_err(|e| {
+                    anyhow::anyhow!("failed to initialize LLM trace_insights API: {}", e)
+                })? {
+                let docs = store
+                    .manifest
+                    .documents()
+                    .iter()
+                    .filter(|d| {
+                        matches!(
+                            d.doc_type,
+                            crate::types::DocType::Plan
+                                | crate::types::DocType::Reference
+                                | crate::types::DocType::Scratch
+                        )
+                    })
+                    .map(|d| {
+                        let content =
+                            std::fs::read_to_string(store_root.join(&d.path)).unwrap_or_default();
+                        let snippet: String = content.chars().take(2000).collect();
+                        TraceDocument {
+                            path: d.path.display().to_string(),
+                            doc_type: d.doc_type.clone(),
+                            content_snippet: snippet,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let updates = load_pending_updates(store_root)?
+                    .into_iter()
+                    .map(|u| u.update)
+                    .collect::<Vec<_>>();
+                api.synthesize_context(&docs, &updates).map_err(|e| {
+                    anyhow::anyhow!("LLM trace_insights synthesize_context failed: {}", e)
+                })?
+            } else {
+                synthesize_no_llm(store_root, &store.manifest)?
+            };
             write_context(store_root, &content)?;
             let plans = store.manifest.list(Some(&crate::types::DocType::Plan));
             let refs = store.manifest.list(Some(&crate::types::DocType::Reference));
-            println!("context.md refreshed ({} plans, {} reference docs).", plans.len(), refs.len());
+            println!(
+                "context.md refreshed ({} plans, {} reference docs).",
+                plans.len(),
+                refs.len()
+            );
         }
     }
     Ok(())

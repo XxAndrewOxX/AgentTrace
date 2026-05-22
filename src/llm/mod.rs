@@ -1,4 +1,6 @@
 pub mod candle;
+pub mod llama_cpp;
+pub mod trace_insights;
 
 use crate::types::DocType;
 use anyhow::Result;
@@ -30,19 +32,47 @@ pub struct DocSummary {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum LlmRequest {
-    Classify { id: u64, content: String },
-    SummarizeChange { id: u64, path: String, doc_type: String, diff: String },
-    ParseCommand { id: u64, input: String, manifest_summary: String },
-    SynthesizeContext { id: u64, documents: Vec<DocSummary>, updates: Vec<String> },
+    Classify {
+        id: u64,
+        content: String,
+    },
+    SummarizeChange {
+        id: u64,
+        path: String,
+        doc_type: String,
+        diff: String,
+    },
+    ParseCommand {
+        id: u64,
+        input: String,
+        manifest_summary: String,
+    },
+    SynthesizeContext {
+        id: u64,
+        documents: Vec<DocSummary>,
+        updates: Vec<String>,
+    },
 }
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum LlmResponse {
-    Classification { id: u64, result: Result<Classification, String> },
-    Summary { id: u64, result: Result<String, String> },
-    ParsedCommand { id: u64, result: Result<ParsedCommand, String> },
-    Context { id: u64, result: Result<String, String> },
+    Classification {
+        id: u64,
+        result: Result<Classification, String>,
+    },
+    Summary {
+        id: u64,
+        result: Result<String, String>,
+    },
+    ParsedCommand {
+        id: u64,
+        result: Result<ParsedCommand, String>,
+    },
+    Context {
+        id: u64,
+        result: Result<String, String>,
+    },
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
@@ -64,7 +94,10 @@ pub struct NoLlm;
 
 impl LlmEngine for NoLlm {
     fn classify(&self, _content: &str) -> Result<Classification> {
-        Ok(Classification { doc_type: DocType::Scratch, confidence: 0.0 })
+        Ok(Classification {
+            doc_type: DocType::Scratch,
+            confidence: 0.0,
+        })
     }
 
     fn summarize_change(&self, path: &str, _doc_type: &str, diff: &str) -> Result<String> {
@@ -81,7 +114,8 @@ impl LlmEngine for NoLlm {
     }
 
     fn synthesize_context(&self, documents: &[DocSummary], _updates: &[String]) -> Result<String> {
-        let mut out = String::from("# Project Context\n\n*(Generated without LLM)*\n\n## Documents\n\n");
+        let mut out =
+            String::from("# Project Context\n\n*(Generated without LLM)*\n\n## Documents\n\n");
         for doc in documents {
             out.push_str(&format!("- `{}` [{}]\n", doc.path, doc.doc_type));
         }
@@ -114,19 +148,32 @@ pub fn spawn_llm_task(
                         let result = engine.classify(&content).map_err(|e| e.to_string());
                         LlmResponse::Classification { id, result }
                     }
-                    LlmRequest::SummarizeChange { id, path, doc_type, diff } => {
+                    LlmRequest::SummarizeChange {
+                        id,
+                        path,
+                        doc_type,
+                        diff,
+                    } => {
                         let result = engine
                             .summarize_change(&path, &doc_type, &diff)
                             .map_err(|e| e.to_string());
                         LlmResponse::Summary { id, result }
                     }
-                    LlmRequest::ParseCommand { id, input, manifest_summary } => {
+                    LlmRequest::ParseCommand {
+                        id,
+                        input,
+                        manifest_summary,
+                    } => {
                         let result = engine
                             .parse_command(&input, &manifest_summary)
                             .map_err(|e| e.to_string());
                         LlmResponse::ParsedCommand { id, result }
                     }
-                    LlmRequest::SynthesizeContext { id, documents, updates } => {
+                    LlmRequest::SynthesizeContext {
+                        id,
+                        documents,
+                        updates,
+                    } => {
                         let result = engine
                             .synthesize_context(&documents, &updates)
                             .map_err(|e| e.to_string());
@@ -165,19 +212,32 @@ pub fn spawn_candle_task(
                         let result = m.classify(&content).map_err(|e| e.to_string());
                         LlmResponse::Classification { id, result }
                     }
-                    LlmRequest::SummarizeChange { id, path, doc_type, diff } => {
+                    LlmRequest::SummarizeChange {
+                        id,
+                        path,
+                        doc_type,
+                        diff,
+                    } => {
                         let result = m
                             .summarize_change(&path, &doc_type, &diff)
                             .map_err(|e| e.to_string());
                         LlmResponse::Summary { id, result }
                     }
-                    LlmRequest::ParseCommand { id, input, manifest_summary } => {
+                    LlmRequest::ParseCommand {
+                        id,
+                        input,
+                        manifest_summary,
+                    } => {
                         let result = m
                             .parse_command(&input, &manifest_summary)
                             .map_err(|e| e.to_string());
                         LlmResponse::ParsedCommand { id, result }
                     }
-                    LlmRequest::SynthesizeContext { id, documents, updates } => {
+                    LlmRequest::SynthesizeContext {
+                        id,
+                        documents,
+                        updates,
+                    } => {
                         let result = m
                             .synthesize_context(&documents, &updates)
                             .map_err(|e| e.to_string());
@@ -240,17 +300,17 @@ mod tests {
         spawn_llm_task(engine, req_rx, res_tx);
 
         req_tx
-            .send(LlmRequest::Classify { id: 42, content: "hello".into() })
+            .send(LlmRequest::Classify {
+                id: 42,
+                content: "hello".into(),
+            })
             .await
             .unwrap();
 
-        let response = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            res_rx.recv(),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        let response = tokio::time::timeout(std::time::Duration::from_secs(2), res_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
 
         match response {
             LlmResponse::Classification { id, result } => {
@@ -269,20 +329,38 @@ mod tests {
 
         spawn_llm_task(engine, req_rx, res_tx);
 
-        req_tx.send(LlmRequest::SummarizeChange {
-            id: 1, path: "f.md".into(), doc_type: "plan".into(), diff: "+a\n-b".into(),
-        }).await.unwrap();
-        req_tx.send(LlmRequest::ParseCommand {
-            id: 2, input: "list all plans".into(), manifest_summary: "".into(),
-        }).await.unwrap();
-        req_tx.send(LlmRequest::SynthesizeContext {
-            id: 3, documents: vec![], updates: vec![],
-        }).await.unwrap();
+        req_tx
+            .send(LlmRequest::SummarizeChange {
+                id: 1,
+                path: "f.md".into(),
+                doc_type: "plan".into(),
+                diff: "+a\n-b".into(),
+            })
+            .await
+            .unwrap();
+        req_tx
+            .send(LlmRequest::ParseCommand {
+                id: 2,
+                input: "list all plans".into(),
+                manifest_summary: "".into(),
+            })
+            .await
+            .unwrap();
+        req_tx
+            .send(LlmRequest::SynthesizeContext {
+                id: 3,
+                documents: vec![],
+                updates: vec![],
+            })
+            .await
+            .unwrap();
 
         let mut ids_seen = std::collections::HashSet::new();
         for _ in 0..3 {
             let r = tokio::time::timeout(std::time::Duration::from_secs(2), res_rx.recv())
-                .await.unwrap().unwrap();
+                .await
+                .unwrap()
+                .unwrap();
             let id = match &r {
                 LlmResponse::Summary { id, .. } => *id,
                 LlmResponse::ParsedCommand { id, .. } => *id,

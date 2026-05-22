@@ -33,6 +33,7 @@ tokenizers = { version = "0.21", optional = true }
 
 [features]
 llm = ["candle-core", "candle-transformers", "candle-nn", "tokenizers"]
+llama_cpp_backend = []
 
 [dev-dependencies]
 tempfile = "3"
