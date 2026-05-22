@@ -182,20 +182,61 @@ impl GroqClient {
             "temperature": temperature,
         });
 
-        let resp = self
-            .client
-            .post(format!("{}/chat/completions", self.base_url))
-            .bearer_auth(&self.api_key)
-            .json(&body)
-            .send()?;
+        // Retries for 429 token/rate limits only.
+        let max_retries = std::env::var("AGENT_TRACE_GROQ_MAX_RETRIES")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(4);
+        let base_backoff_ms = std::env::var("AGENT_TRACE_GROQ_BACKOFF_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(750);
 
-        let status = resp.status();
-        let text = resp.text()?;
-        if !status.is_success() {
-            anyhow::bail!("Groq API error {}: {}", status, text);
+        for attempt in 0..=max_retries {
+            let resp = self
+                .client
+                .post(format!("{}/chat/completions", self.base_url))
+                .bearer_auth(&self.api_key)
+                .json(&body)
+                .send()?;
+
+            let status = resp.status();
+            let retry_after = resp
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok());
+            let text = resp.text()?;
+
+            if status.is_success() {
+                let v: Value = serde_json::from_str(&text)?;
+                return Ok(v);
+            }
+
+            let should_retry = status.as_u16() == 429 && attempt < max_retries;
+            if should_retry {
+                // Honor Retry-After when present, otherwise use exponential backoff.
+                let delay_ms = retry_after
+                    .map(|s| s * 1000)
+                    .unwrap_or_else(|| {
+                        let exp = 2u64.saturating_pow(attempt);
+                        base_backoff_ms.saturating_mul(exp)
+                    })
+                    .min(30_000);
+                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                continue;
+            }
+
+            anyhow::bail!(
+                "Groq API error {} (attempt {}/{}): {}",
+                status,
+                attempt + 1,
+                max_retries + 1,
+                text
+            );
         }
-        let v: Value = serde_json::from_str(&text)?;
-        Ok(v)
+
+        anyhow::bail!("Groq API request failed after retries")
     }
 }
 
@@ -409,8 +450,14 @@ impl BackendConfig {
                 // groq (default)
                 let api_key = std::env::var("GROQ_API_KEY")
                     .map_err(|_| anyhow::anyhow!("GROQ_API_KEY not set"))?;
+                // Live tests depend on robust function/tool calling. We intentionally
+                // default to a model that has been more stable for tool-call formatting
+                // in this harness than llama-3.3-70b-versatile.
+                //
+                // You can always override this explicitly:
+                //   AGENT_TRACE_MODEL=<your-model>
                 let model = std::env::var("AGENT_TRACE_MODEL")
-                    .unwrap_or_else(|_| "llama-3.3-70b-versatile".into());
+                    .unwrap_or_else(|_| "qwen/qwen3-32b".into());
                 Ok(BackendConfig {
                     api_key,
                     model,
