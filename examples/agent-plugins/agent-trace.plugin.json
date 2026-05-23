@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "0.1",
+  "name": "agent-trace",
+  "displayName": "Agent Trace",
+  "description": "Git-backed document memory, trace continuity, and permissioned writes for agent workflows.",
+  "homepage": "https://github.com/XxAndrewOxX/AgentTrace",
+  "runtime": {
+    "type": "mcp",
+    "command": "agent-trace",
+    "args": ["mcp", "--path", "${workspaceRoot}", "--actor", "${agentName}"],
+    "transport": "stdio"
+  },
+  "install": {
+    "cargo": {
+      "package": "agent-trace",
+      "binary": "agent-trace",
+      "command": "cargo install agent-trace"
+    },
+    "githubRelease": {
+      "repository": "XxAndrewOxX/AgentTrace",
+      "artifactPattern": "agent-trace-v{version}-{target}.{archiveExt}",
+      "checksumPattern": "agent-trace-v{version}-{target}.{archiveExt}.sha256"
+    }
+  },
+  "setup": {
+    "verify": ["agent-trace", "--version"],
+    "initializeWorkspace": ["agent-trace", "init", "${workspaceRoot}"]
+  },
+  "tools": [
+    "read_file",
+    "write_file",
+    "list_documents",
+    "get_permissions",
+    "add_document"
+  ],
+  "releaseBoundary": {
+    "shipsRuntimeBinary": false,
+    "runtimeBinary": "agent-trace",
+    "excludes": ["e2e test harness", "live-agent evaluation driver"]
+  }
+}
