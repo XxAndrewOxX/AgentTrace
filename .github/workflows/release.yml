@@ -54,6 +54,11 @@ jobs:
           rustup default 1.88.0
           rustup target add "${{ matrix.target }}"
 
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
       - name: Resolve package version
         id: version
         shell: bash
@@ -129,6 +134,11 @@ PY
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
 
       - name: Resolve release version
         id: version
