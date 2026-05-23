@@ -1,6 +1,7 @@
 use crate::config::{StoreConfig, StoreInfo, PollingConfig};
 use crate::git_store::GitStore;
 use crate::manifest::Manifest;
+use crate::observability::CliOutput;
 use crate::types::DocType;
 use anyhow::Result;
 use std::path::Path;
@@ -176,12 +177,13 @@ const DEFAULT_GITIGNORE: &str = r#"# agent-trace defaults
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::observability::NoopOutput;
     use tempfile::TempDir;
 
     #[test]
     fn test_init_empty_directory() {
         let tmp = TempDir::new().unwrap();
-        run(tmp.path(), false).unwrap();
+        run(tmp.path(), false, &NoopOutput).unwrap();
         assert!(tmp.path().join(".agent-trace").exists());
         assert!(tmp.path().join(".agent-trace").join("config.toml").exists());
         assert!(tmp.path().join(".agent-trace").join("manifest.toml").exists());
@@ -193,9 +195,9 @@ mod tests {
     #[test]
     fn test_init_idempotent() {
         let tmp = TempDir::new().unwrap();
-        run(tmp.path(), false).unwrap();
+        run(tmp.path(), false, &NoopOutput).unwrap();
         // Second init should not error.
-        run(tmp.path(), false).unwrap();
+        run(tmp.path(), false, &NoopOutput).unwrap();
     }
 
     #[test]
@@ -203,7 +205,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("prd.md"), "# PRD").unwrap();
         std::fs::write(tmp.path().join("notes.md"), "notes").unwrap();
-        run(tmp.path(), true).unwrap();
+        run(tmp.path(), true, &NoopOutput).unwrap();
         let manifest = crate::manifest::Manifest::load(tmp.path()).unwrap();
         assert_eq!(manifest.len(), 2);
         assert!(manifest.documents().iter().all(|d| d.doc_type == DocType::Scratch));
@@ -212,7 +214,7 @@ mod tests {
     #[test]
     fn test_config_has_uuid() {
         let tmp = TempDir::new().unwrap();
-        run(tmp.path(), false).unwrap();
+        run(tmp.path(), false, &NoopOutput).unwrap();
         let cfg = crate::config::StoreConfig::load(tmp.path()).unwrap();
         assert!(cfg.store.id.0.parse::<uuid::Uuid>().is_ok());
         assert!(!cfg.store.agent_trace_version.is_empty());
@@ -223,7 +225,7 @@ mod tests {
     fn test_agent_trace_dir_permissions() {
         use std::os::unix::fs::MetadataExt;
         let tmp = TempDir::new().unwrap();
-        run(tmp.path(), false).unwrap();
+        run(tmp.path(), false, &NoopOutput).unwrap();
         let meta = std::fs::metadata(tmp.path().join(".agent-trace")).unwrap();
         // 0700 = rwx------
         assert_eq!(meta.mode() & 0o777, 0o700);

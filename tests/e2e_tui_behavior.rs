@@ -171,8 +171,9 @@ fn tb8_no_llm_engine_is_not_loaded() {
 
 #[test]
 fn tb9_startup_banner_content() {
-    use agent_trace::tui::banner;
     use agent_trace::llm::NoLlm;
+    use agent_trace::observability::NoopOutput;
+    use agent_trace::tui::banner;
 
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();
@@ -190,8 +191,8 @@ fn tb9_startup_banner_content() {
     // We test the banner function compiles and runs without panicking.
     // It writes to stdout which we can't easily capture in a library test,
     // so we just call it and verify no panic.
-    banner::print_banner(&manifest, &no_llm, false);
-    banner::print_banner(&manifest, &no_llm, true); // ASCII mode.
+    banner::print_banner(&manifest, &no_llm, false, &NoopOutput).unwrap();
+    banner::print_banner(&manifest, &no_llm, true, &NoopOutput).unwrap(); // ASCII mode.
 }
 
 // ── TB-10: Clean Exit States ─────────────────────────────────────────────────

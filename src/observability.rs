@@ -87,7 +87,7 @@ pub fn init_tracing(verbosity: u8) -> Result<()> {
         .with_writer(io::stderr)
         .with_env_filter(filter)
         .try_init()
-        .context("initializing tracing subscriber")
+        .map_err(|e| anyhow::anyhow!("initializing tracing subscriber: {}", e))
 }
 
 pub fn format_permission_denied(path: &Path, reason: &str) -> String {
