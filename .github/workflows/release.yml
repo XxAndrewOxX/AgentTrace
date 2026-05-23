@@ -1,0 +1,182 @@
+name: Release artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to package without a leading v. Defaults to Cargo.toml package.version."
+        required: false
+        type: string
+      publish_draft_release:
+        description: "Create or update a draft GitHub Release with the built artifacts."
+        required: false
+        default: false
+        type: boolean
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    name: Package ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: target/x86_64-unknown-linux-gnu/release/agent-trace
+          - os: macos-13
+            target: x86_64-apple-darwin
+            binary: target/x86_64-apple-darwin/release/agent-trace
+          - os: macos-14
+            target: aarch64-apple-darwin
+            binary: target/aarch64-apple-darwin/release/agent-trace
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: target/x86_64-pc-windows-msvc/release/agent-trace.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --component clippy --component rustfmt
+          rustup default 1.88.0
+          rustup target add "${{ matrix.target }}"
+
+      - name: Resolve package version
+        id: version
+        shell: bash
+        run: |
+          crate_version="$(python - <<'PY'
+import tomllib
+with open("Cargo.toml", "rb") as handle:
+    print(tomllib.load(handle)["package"]["version"])
+PY
+)"
+          requested_version=""
+          if [ -n "${{ inputs.version }}" ]; then
+            requested_version="${{ inputs.version }}"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            requested_version="${GITHUB_REF_NAME#v}"
+          fi
+          if [ -n "${requested_version}" ] && [ "${requested_version}" != "${crate_version}" ]; then
+            echo "Requested release version ${requested_version} does not match Cargo.toml version ${crate_version}." >&2
+            exit 1
+          fi
+          version="${crate_version}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build release binary
+        shell: bash
+        run: cargo build --locked --release --target "${{ matrix.target }}"
+
+      - name: Smoke test packaged binary
+        shell: bash
+        run: |
+          "${{ matrix.binary }}" --version | tee version.txt
+          grep " ${{ steps.version.outputs.version }}" version.txt
+          "${{ matrix.binary }}" --help
+
+      - name: Package artifact
+        shell: bash
+        run: python scripts/package_release.py --version "${{ steps.version.outputs.version }}" --target "${{ matrix.target }}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-trace-${{ steps.version.outputs.version }}-${{ matrix.target }}
+          path: |
+            dist/agent-trace-v${{ steps.version.outputs.version }}-${{ matrix.target }}.*
+          if-no-files-found: error
+
+  cargo-dry-run:
+    name: Cargo publish dry run
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          rustup default 1.88.0
+
+      - name: Verify Cargo package
+        shell: bash
+        run: cargo publish --dry-run
+
+  draft-release:
+    name: Draft GitHub Release
+    needs:
+      - package
+      - cargo-dry-run
+    if: github.event_name == 'push' || inputs.publish_draft_release == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          crate_version="$(python - <<'PY'
+import tomllib
+with open("Cargo.toml", "rb") as handle:
+    print(tomllib.load(handle)["package"]["version"])
+PY
+)"
+          requested_version=""
+          if [ -n "${{ inputs.version }}" ]; then
+            requested_version="${{ inputs.version }}"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            requested_version="${GITHUB_REF_NAME#v}"
+          fi
+          if [ -n "${requested_version}" ] && [ "${requested_version}" != "${crate_version}" ]; then
+            echo "Requested release version ${requested_version} does not match Cargo.toml version ${crate_version}." >&2
+            exit 1
+          fi
+          version="${crate_version}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Create or update draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            is_draft="$(gh release view "${TAG}" --json isDraft --jq '.isDraft')"
+            if [ "${is_draft}" != "true" ]; then
+              echo "Refusing to modify published release ${TAG}." >&2
+              exit 1
+            fi
+            gh release upload "${TAG}" release-artifacts/* --clobber
+          else
+            gh release create "${TAG}" release-artifacts/* \
+              --draft \
+              --verify-tag \
+              --title "Agent Trace ${TAG}" \
+              --notes-file .github/RELEASE_TEMPLATE.md
+          fi
