@@ -1,19 +1,23 @@
 use crate::git_store::CommitInfo;
+use crate::observability::CliOutput;
 use crate::store::Store;
 use crate::types::{Action, Actor, DocType};
 use anyhow::{bail, Result};
 use std::path::Path;
 
-pub fn run(store_root: &Path, doc_type: DocType, file: &Path) -> Result<()> {
+pub fn run(
+    store_root: &Path,
+    doc_type: DocType,
+    file: &Path,
+    output: &dyn CliOutput,
+) -> Result<()> {
     if !store_root.join(file).exists() && !file.exists() {
         bail!("File not found: {}", file.display());
     }
 
     // Resolve to a relative path from store root.
     let rel = if file.is_absolute() {
-        file.strip_prefix(store_root)
-            .unwrap_or(file)
-            .to_path_buf()
+        file.strip_prefix(store_root).unwrap_or(file).to_path_buf()
     } else {
         file.to_path_buf()
     };
@@ -35,7 +39,11 @@ pub fn run(store_root: &Path, doc_type: DocType, file: &Path) -> Result<()> {
         action: Action::Create,
         files: vec![
             (rel.clone(), Action::Create, doc_type.clone()),
-            (std::path::PathBuf::from("AGENT-TRACE.md"), Action::Modify, DocType::Reference),
+            (
+                std::path::PathBuf::from("AGENT-TRACE.md"),
+                Action::Modify,
+                DocType::Reference,
+            ),
         ],
         actor: Actor::User,
         summary: format!("add {}: {}", doc_type, rel.display()),
@@ -44,6 +52,6 @@ pub fn run(store_root: &Path, doc_type: DocType, file: &Path) -> Result<()> {
     };
     store.commit(&info)?;
 
-    println!("Added {} as {}", rel.display(), doc_type);
+    output.line(&format!("Added {} as {}", rel.display(), doc_type))?;
     Ok(())
 }

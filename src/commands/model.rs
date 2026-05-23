@@ -1,4 +1,5 @@
 use crate::config::GlobalConfig;
+use crate::observability::CliOutput;
 use anyhow::{bail, Context, Result};
 use clap::Subcommand;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -41,7 +42,7 @@ const MODELS: &[(&str, &str, &str)] = &[
     ),
 ];
 
-pub fn run(cmd: ModelCmd) -> Result<()> {
+pub fn run(cmd: ModelCmd, output: &dyn CliOutput) -> Result<()> {
     match cmd {
         ModelCmd::Info => {
             let config = GlobalConfig::load()?;
@@ -49,16 +50,22 @@ pub fn run(cmd: ModelCmd) -> Result<()> {
                 Some(path) => {
                     if path.exists() {
                         let meta = std::fs::metadata(path)?;
-                        println!("Model: {}", path.display());
-                        println!("Size:  {:.1} GB", meta.len() as f64 / 1_073_741_824.0);
+                        output.line(&format!("Model: {}", path.display()))?;
+                        output.line(&format!(
+                            "Size:  {:.1} GB",
+                            meta.len() as f64 / 1_073_741_824.0
+                        ))?;
                     } else {
-                        println!("Model configured but file not found: {}", path.display());
+                        output.line(&format!(
+                            "Model configured but file not found: {}",
+                            path.display()
+                        ))?;
                     }
                 }
-                None => println!(
+                None => output.line(
                     "No model configured.\n\
-                     Use `agent-trace model download` or `agent-trace model set <path>`."
-                ),
+                     Use `agent-trace model download` or `agent-trace model set <path>`.",
+                )?,
             }
         }
 
@@ -70,7 +77,7 @@ pub fn run(cmd: ModelCmd) -> Result<()> {
             let mut config = GlobalConfig::load()?;
             config.llm.model_path = Some(abs.clone());
             config.save()?;
-            println!("Model set to {}", abs.display());
+            output.line(&format!("Model set to {}", abs.display()))?;
         }
 
         ModelCmd::Download { size } => {
@@ -91,20 +98,20 @@ pub fn run(cmd: ModelCmd) -> Result<()> {
             let dest_path = dest_dir.join(filename);
 
             if dest_path.exists() {
-                println!("Model already downloaded: {}", dest_path.display());
+                output.line(&format!(
+                    "Model already downloaded: {}",
+                    dest_path.display()
+                ))?;
                 let mut config = GlobalConfig::load()?;
                 config.llm.model_path = Some(dest_path);
                 config.save()?;
                 return Ok(());
             }
 
-            let url = format!(
-                "https://huggingface.co/{}/resolve/main/{}",
-                repo, filename
-            );
+            let url = format!("https://huggingface.co/{}/resolve/main/{}", repo, filename);
 
-            println!("Downloading {} ({} model)…", filename, size);
-            println!("Source: {}", url);
+            output.line(&format!("Downloading {} ({} model)…", filename, size))?;
+            output.line(&format!("Source: {}", url))?;
 
             download_with_progress(&url, &dest_path)?;
 
@@ -112,16 +119,15 @@ pub fn run(cmd: ModelCmd) -> Result<()> {
             config.llm.model_path = Some(dest_path.clone());
             config.save()?;
 
-            println!("Saved to {}", dest_path.display());
-            println!("Global config updated — LLM will be used on next `agent-trace open`.");
+            output.line(&format!("Saved to {}", dest_path.display()))?;
+            output.line("Global config updated — LLM will be used on next `agent-trace open`.")?;
         }
     }
     Ok(())
 }
 
 fn model_dir() -> Result<PathBuf> {
-    let base = dirs_next::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."));
+    let base = dirs_next::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
     Ok(base.join("agent-trace").join("models"))
 }
 
@@ -151,8 +157,8 @@ fn download_with_progress(url: &str, dest: &std::path::Path) -> Result<()> {
 
     // Write to a temp file, then rename atomically.
     let tmp = dest.with_extension("gguf.tmp");
-    let mut file = std::fs::File::create(&tmp)
-        .with_context(|| format!("Creating {}", tmp.display()))?;
+    let mut file =
+        std::fs::File::create(&tmp).with_context(|| format!("Creating {}", tmp.display()))?;
 
     let mut downloaded: u64 = 0;
     let mut buf = [0u8; 65536];

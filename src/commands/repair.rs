@@ -1,12 +1,13 @@
 use crate::config::StoreConfig;
 use crate::git_store::GitStore;
 use crate::manifest::Manifest;
+use crate::observability::CliOutput;
 use crate::store::Store;
 use crate::types::DocType;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
-pub fn run(store_root: &Path) -> Result<()> {
+pub fn run(store_root: &Path, output: &dyn CliOutput) -> Result<()> {
     // Try Store::open first; if manifest is corrupt, fall back to rebuilding.
     let (git, mut manifest) = match Store::open(store_root) {
         Ok(store) => (store.git, store.manifest),
@@ -34,7 +35,9 @@ pub fn run(store_root: &Path) -> Result<()> {
     }
 
     // Remove manifest entries whose files are gone.
-    let stale: Vec<PathBuf> = manifest.documents().iter()
+    let stale: Vec<PathBuf> = manifest
+        .documents()
+        .iter()
         .filter(|d| !store_root.join(&d.path).exists())
         .map(|d| d.path.clone())
         .collect();
@@ -44,9 +47,11 @@ pub fn run(store_root: &Path) -> Result<()> {
     }
 
     manifest.save(store_root)?;
-    println!(
+    output.line(&format!(
         "Repair complete: {} added, {} removed. {} documents tracked.",
-        added, removed, manifest.len()
-    );
+        added,
+        removed,
+        manifest.len()
+    ))?;
     Ok(())
 }

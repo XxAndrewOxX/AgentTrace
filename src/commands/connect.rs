@@ -1,8 +1,9 @@
-use anyhow::Result;
+use crate::observability::CliOutput;
 use crate::session::{self, AgentSession};
+use anyhow::Result;
 use std::path::Path;
 
-pub fn run_connect(root: &Path, name: &str) -> Result<()> {
+pub fn run_connect(root: &Path, name: &str, output: &dyn CliOutput) -> Result<()> {
     if let Some(existing) = session::load_session(root) {
         if !existing.is_stale() {
             anyhow::bail!(
@@ -13,31 +14,33 @@ pub fn run_connect(root: &Path, name: &str) -> Result<()> {
     }
 
     let started = session::start_session(root, name, "cli")?;
-    print_connect_message(&started);
+    print_connect_message(&started, output)?;
     Ok(())
 }
 
-pub fn run_disconnect(root: &Path) -> Result<()> {
+pub fn run_disconnect(root: &Path, output: &dyn CliOutput) -> Result<()> {
     if let Some(existing) = session::load_session(root) {
         session::remove_session(root)?;
-        println!("Disconnected '{}'. Actor reverts to User.", existing.name);
+        output.line(&format!("Disconnected '{}'. Actor reverts to User.", existing.name))?;
     } else {
-        println!("Not connected (no agent session active).");
+        output.line("Not connected (no agent session active).")?;
     }
     Ok(())
 }
 
-fn print_connect_message(s: &AgentSession) {
-    println!(
+fn print_connect_message(s: &AgentSession, output: &dyn CliOutput) -> Result<()> {
+    output.line(&format!(
         "Connected as '{}'. Session {} (transport: {}).",
         s.name, s.session_id, s.transport
-    );
-    println!("Agent writes will be permission-checked and trace-linked.");
+    ))?;
+    output.line("Agent writes will be permission-checked and trace-linked.")?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::observability::NoopOutput;
     use crate::session::{AgentState, LOCK_FILE};
     use crate::types::Actor;
     use tempfile::TempDir;
@@ -52,7 +55,7 @@ mod tests {
     fn test_connect_writes_lock_file() {
         let tmp = TempDir::new().unwrap();
         let root = setup(&tmp);
-        run_connect(&root, "claude").unwrap();
+        run_connect(&root, "claude", &NoopOutput).unwrap();
         let lock = root.join(LOCK_FILE);
         assert!(lock.exists(), "lock file should exist after connect");
         let content = std::fs::read_to_string(&lock).unwrap();
@@ -64,8 +67,8 @@ mod tests {
     fn test_connect_error_if_already_connected() {
         let tmp = TempDir::new().unwrap();
         let root = setup(&tmp);
-        run_connect(&root, "claude").unwrap();
-        let result = run_connect(&root, "another");
+        run_connect(&root, "claude", &NoopOutput).unwrap();
+        let result = run_connect(&root, "another", &NoopOutput);
         assert!(result.is_err(), "double connect should fail");
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("claude"), "error should name the existing agent");
@@ -75,8 +78,8 @@ mod tests {
     fn test_disconnect_removes_lock_file() {
         let tmp = TempDir::new().unwrap();
         let root = setup(&tmp);
-        run_connect(&root, "claude").unwrap();
-        run_disconnect(&root).unwrap();
+        run_connect(&root, "claude", &NoopOutput).unwrap();
+        run_disconnect(&root, &NoopOutput).unwrap();
         assert!(!root.join(LOCK_FILE).exists(), "lock file should be gone after disconnect");
     }
 
@@ -85,14 +88,14 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let root = setup(&tmp);
         // Should not panic or error
-        run_disconnect(&root).unwrap();
+        run_disconnect(&root, &NoopOutput).unwrap();
     }
 
     #[test]
     fn test_agent_state_reads_connect_lock() {
         let tmp = TempDir::new().unwrap();
         let root = setup(&tmp);
-        run_connect(&root, "my-agent").unwrap();
+        run_connect(&root, "my-agent", &NoopOutput).unwrap();
         let state = AgentState::new(None);
         assert_eq!(
             state.current_actor(&root),
@@ -104,8 +107,8 @@ mod tests {
     fn test_agent_state_reverts_to_user_after_disconnect() {
         let tmp = TempDir::new().unwrap();
         let root = setup(&tmp);
-        run_connect(&root, "my-agent").unwrap();
-        run_disconnect(&root).unwrap();
+        run_connect(&root, "my-agent", &NoopOutput).unwrap();
+        run_disconnect(&root, &NoopOutput).unwrap();
         let state = AgentState::new(None);
         assert_eq!(state.current_actor(&root), Actor::User);
     }

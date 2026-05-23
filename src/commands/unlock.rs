@@ -1,12 +1,21 @@
+use crate::observability::CliOutput;
 use crate::permissions::OverrideEntry;
 use crate::store::Store;
 use anyhow::Result;
 use chrono::{Duration, Utc};
 use std::path::Path;
 
-pub fn run(store_root: &Path, file: &Path, for_actor: &str, duration_minutes: u32) -> Result<()> {
+pub fn run(
+    store_root: &Path,
+    file: &Path,
+    for_actor: &str,
+    duration_minutes: u32,
+    output: &dyn CliOutput,
+) -> Result<()> {
     let mut store = Store::open(store_root)?;
-    let entry = store.manifest.find_by_path(file)
+    let entry = store
+        .manifest
+        .find_by_path(file)
         .ok_or_else(|| anyhow::anyhow!("File not tracked: {}", file.display()))?;
 
     store.overrides.prune_expired();
@@ -24,12 +33,12 @@ pub fn run(store_root: &Path, file: &Path, for_actor: &str, duration_minutes: u3
     })?;
     store.overrides.save(store_root)?;
 
-    println!(
+    output.line(&format!(
         "Override granted: {} can write {} for {} minutes (expires {})",
         for_actor,
         file.display(),
         duration_minutes,
         expires.format("%H:%M:%S")
-    );
+    ))?;
     Ok(())
 }

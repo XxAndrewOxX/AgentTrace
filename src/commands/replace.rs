@@ -1,6 +1,7 @@
 use crate::git_store::CommitInfo;
-use crate::store::Store;
+use crate::observability::CliOutput;
 use crate::permissions::{check_permission, PermissionResult};
+use crate::store::Store;
 use crate::types::{Action, Actor, DocType};
 use anyhow::Result;
 use std::path::Path;
@@ -11,6 +12,7 @@ pub fn run(
     replace: &str,
     type_filter: Option<&DocType>,
     dry_run: bool,
+    output: &dyn CliOutput,
 ) -> Result<()> {
     let store = Store::open(store_root)?;
     let docs = store.manifest.list(type_filter);
@@ -19,7 +21,9 @@ pub fn run(
 
     for doc in &docs {
         let full = store_root.join(&doc.path);
-        if !full.exists() { continue; }
+        if !full.exists() {
+            continue;
+        }
         let content = std::fs::read_to_string(&full)?;
         if content.contains(find) {
             matches.push((doc.path.clone(), doc.doc_type.clone(), content));
@@ -27,17 +31,17 @@ pub fn run(
     }
 
     if matches.is_empty() {
-        println!("No matches found.");
+        output.line("No matches found.")?;
         return Ok(());
     }
 
-    println!("Found {} file(s) with matches:", matches.len());
+    output.line(&format!("Found {} file(s) with matches:", matches.len()))?;
     for (path, dt, _) in &matches {
-        println!("  [{}] {}", dt.indicator(), path.display());
+        output.line(&format!("  [{}] {}", dt.indicator(), path.display()))?;
     }
 
     if dry_run {
-        println!("(dry-run: no changes applied)");
+        output.line("(dry-run: no changes applied)")?;
         return Ok(());
     }
 
@@ -47,7 +51,7 @@ pub fn run(
         // Check permission.
         let perm = check_permission(&doc_type, &Actor::User, &store.overrides, Some(&path));
         if let PermissionResult::Denied { reason } = perm {
-            eprintln!("Skipping {} (denied): {}", path.display(), reason);
+            output.warn(&format!("Skipping {} (denied): {}", path.display(), reason))?;
             continue;
         }
 
@@ -66,7 +70,7 @@ pub fn run(
             session_id: None,
         };
         store.commit(&info)?;
-        println!("Changes applied.");
+        output.line("Changes applied.")?;
     }
 
     Ok(())

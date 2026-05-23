@@ -2,6 +2,7 @@ use crate::config::MergedConfig;
 use crate::git_store::GitStore;
 use crate::llm::{spawn_llm_task, LlmRequest, LlmResponse, NoLlm};
 use crate::manifest::Manifest;
+use crate::observability::CliOutput;
 use crate::poll::{ChangeProcessor, InstanceLock, UiEvent};
 use crate::session::AgentState;
 use crate::tui::app::App;
@@ -17,8 +18,15 @@ use std::io;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-pub fn run(store_root: &Path, agent_name: Option<String>, ascii: bool) -> Result<()> {
-    let store_root = store_root.canonicalize().unwrap_or_else(|_| store_root.to_path_buf());
+pub fn run(
+    store_root: &Path,
+    agent_name: Option<String>,
+    ascii: bool,
+    output: &dyn CliOutput,
+) -> Result<()> {
+    let store_root = store_root
+        .canonicalize()
+        .unwrap_or_else(|_| store_root.to_path_buf());
 
     // Load config and manifest.
     let config = MergedConfig::load(&store_root)?;
@@ -27,25 +35,23 @@ pub fn run(store_root: &Path, agent_name: Option<String>, ascii: bool) -> Result
 
     // Try to load LLM model if configured. Fall back to NoLlm silently.
     let llm_engine: Arc<dyn crate::llm::LlmEngine> = match &config.llm.model_path {
-        Some(path) if path.exists() => {
-            match crate::llm::candle::CandleLlm::load(path) {
-                Ok(m) => {
-                    tracing::info!("LLM loaded from {}", path.display());
-                    Arc::new(m)
-                }
-                Err(e) => {
-                    tracing::warn!("LLM load failed ({}), using NoLlm", e);
-                    Arc::new(NoLlm)
-                }
+        Some(path) if path.exists() => match crate::llm::candle::CandleLlm::load(path) {
+            Ok(m) => {
+                tracing::info!("LLM loaded from {}", path.display());
+                Arc::new(m)
             }
-        }
+            Err(e) => {
+                tracing::warn!("LLM load failed ({}), using NoLlm", e);
+                Arc::new(NoLlm)
+            }
+        },
         _ => Arc::new(NoLlm),
     };
 
     // Print startup banner before entering raw mode.
     {
         let m = manifest.lock().unwrap();
-        banner::print_banner(&m, llm_engine.as_ref(), ascii);
+        banner::print_banner(&m, llm_engine.as_ref(), ascii, output)?;
     }
 
     // Install panic hook to restore terminal on panic.
@@ -77,8 +83,8 @@ pub fn run(store_root: &Path, agent_name: Option<String>, ascii: bool) -> Result
     let _instance_lock = match InstanceLock::acquire(&store_root) {
         Ok(lock) => lock,
         Err(e) => {
-            eprintln!("Warning: {}", e);
-            eprintln!("Opening in read-only mode (poll loop disabled).");
+            output.warn(&format!("Warning: {}", e))?;
+            output.warn("Opening in read-only mode (poll loop disabled).")?;
             return run_readonly(&store_root, manifest, agent_name, ascii);
         }
     };
@@ -126,13 +132,7 @@ pub fn run(store_root: &Path, agent_name: Option<String>, ascii: bool) -> Result
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(
-        store_root.clone(),
-        manifest,
-        initial_log,
-        history,
-        ui_rx,
-    );
+    let mut app = App::new(store_root.clone(), manifest, initial_log, history, ui_rx);
 
     let result = app.run(&mut terminal);
 

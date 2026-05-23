@@ -1,6 +1,7 @@
 use crate::agent_trace_md;
 use crate::data_plane::{self, WriteDocumentError};
 use crate::git_store::CommitInfo;
+use crate::observability::format_permission_denied;
 use crate::permissions::{check_permission, Overrides, PermissionResult};
 use crate::session::{self, AgentState};
 use crate::store::Store;
@@ -226,7 +227,7 @@ fn handle_write_file(
     match data_plane::write_document(root, &rel, content, actor, "mcp write", session_id) {
         Ok(_) => tool_result(&format!("OK: {} written", path_str)),
         Err(WriteDocumentError::PermissionDenied { path, reason }) => {
-            tool_error(&format!("Permission denied: {} — {}", path.display(), reason))
+            tool_error(&format_permission_denied(&path, &reason))
         }
         Err(WriteDocumentError::Other(e)) => {
             error_response(-32603, &format!("Write failed: {}", e))

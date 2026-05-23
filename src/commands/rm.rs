@@ -1,13 +1,15 @@
 use crate::git_store::CommitInfo;
+use crate::observability::CliOutput;
 use crate::store::Store;
 use crate::types::{Action, Actor, DocType};
 use anyhow::Result;
 use std::path::Path;
 
-pub fn run(store_root: &Path, file: &Path) -> Result<()> {
+pub fn run(store_root: &Path, file: &Path, output: &dyn CliOutput) -> Result<()> {
     let mut store = Store::open(store_root)?;
 
-    let doc_type = store.manifest
+    let doc_type = store
+        .manifest
         .find_by_path(file)
         .map(|d| d.doc_type.clone())
         .unwrap_or(DocType::Scratch);
@@ -30,6 +32,6 @@ pub fn run(store_root: &Path, file: &Path) -> Result<()> {
     };
     store.commit(&info)?;
 
-    println!("Removed {}", file.display());
+    output.line(&format!("Removed {}", file.display()))?;
     Ok(())
 }
