@@ -1,14 +1,33 @@
 [package]
-name = "agent_trace"
+name = "agent-trace"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.88"
+description = "Git-backed document memory, trace continuity, and permissioned writes for agent workflows"
+readme = "README.md"
+repository = "https://github.com/XxAndrewOxX/AgentTrace"
+homepage = "https://github.com/XxAndrewOxX/AgentTrace"
+license-file = "LICENSE"
+keywords = ["agent", "trace", "cli", "mcp", "git"]
+categories = ["command-line-utilities", "development-tools"]
+include = [
+    "src/**",
+    "Cargo.toml",
+    "Cargo.lock",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "docs/INSTALL.md",
+    "docs/agent-plugin.md",
+    "examples/agent-plugins/*.json",
+]
 
 [[bin]]
 name = "agent-trace"
 path = "src/main.rs"
 
 [dependencies]
-git2 = "0.19"
+git2 = { version = "0.19", features = ["vendored-openssl"] }
 clap = { version = "=4.5.23", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -24,7 +43,7 @@ ratatui = "=0.29.0"
 crossterm = "=0.28.1"
 dirs-next = "2"
 libc = "0.2"
-reqwest = { version = "0.12", features = ["blocking", "json", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
 indicatif = "0.17"
 candle-core = { version = "0.8", optional = true }
 candle-transformers = { version = "0.8", optional = true }
