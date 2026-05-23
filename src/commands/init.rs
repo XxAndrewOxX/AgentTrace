@@ -5,15 +5,15 @@ use crate::types::DocType;
 use anyhow::Result;
 use std::path::Path;
 
-pub fn run(path: &Path, scan: bool) -> Result<()> {
+pub fn run(path: &Path, scan: bool, output: &dyn CliOutput) -> Result<()> {
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
     // Check if already initialised.
     let store_dir = path.join(".agent-trace");
     if store_dir.join("config.toml").exists() {
-        println!("Store already initialised at {}", path.display());
-        println!("  Config: {}", store_dir.join("config.toml").display());
-        println!("  Manifest: {}", store_dir.join("manifest.toml").display());
+        output.line(&format!("Store already initialised at {}", path.display()))?;
+        output.line(&format!("  Config: {}", store_dir.join("config.toml").display()))?;
+        output.line(&format!("  Manifest: {}", store_dir.join("manifest.toml").display()))?;
         return Ok(());
     }
 
@@ -115,11 +115,11 @@ pub fn run(path: &Path, scan: bool) -> Result<()> {
                 session_id: None,
             };
             git.commit(&info)?;
-            println!("Registered {} existing markdown files as scratch.", count);
+            output.line(&format!("Registered {} existing markdown files as scratch.", count))?;
         }
     }
 
-    println!("Initialised agent-trace store at {}", path.display());
+    output.line(&format!("Initialised agent-trace store at {}", path.display()))?;
     Ok(())
 }
 

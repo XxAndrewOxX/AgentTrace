@@ -1,3 +1,4 @@
+use crate::observability::CliOutput;
 use crate::store::Store;
 use crate::types::{Actor, DocType};
 use anyhow::Result;
@@ -9,6 +10,7 @@ pub fn run(
     limit: Option<usize>,
     actor_filter: Option<&str>,
     type_filter: Option<&DocType>,
+    output: &dyn CliOutput,
 ) -> Result<()> {
     let store = Store::open(store_root)?;
     let limit = limit.unwrap_or(50);
@@ -34,7 +36,7 @@ pub fn run(
         .collect();
 
     if entries.is_empty() {
-        println!("No log entries.");
+        output.line("No log entries.")?;
         return Ok(());
     }
 
@@ -46,10 +48,10 @@ pub fn run(
             .map(|(p, _, _)| p.display().to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        println!(
+        output.line(&format!(
             "{} [{}] {} {} — {}",
             time, entry.action, entry.actor, files_str, entry.summary
-        );
+        ))?;
     }
 
     Ok(())

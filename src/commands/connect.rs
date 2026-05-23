@@ -2,7 +2,7 @@ use anyhow::Result;
 use crate::session::{self, AgentSession};
 use std::path::Path;
 
-pub fn run_connect(root: &Path, name: &str) -> Result<()> {
+pub fn run_connect(root: &Path, name: &str, output: &dyn CliOutput) -> Result<()> {
     if let Some(existing) = session::load_session(root) {
         if !existing.is_stale() {
             anyhow::bail!(
@@ -13,26 +13,27 @@ pub fn run_connect(root: &Path, name: &str) -> Result<()> {
     }
 
     let started = session::start_session(root, name, "cli")?;
-    print_connect_message(&started);
+    print_connect_message(&started, output)?;
     Ok(())
 }
 
-pub fn run_disconnect(root: &Path) -> Result<()> {
+pub fn run_disconnect(root: &Path, output: &dyn CliOutput) -> Result<()> {
     if let Some(existing) = session::load_session(root) {
         session::remove_session(root)?;
-        println!("Disconnected '{}'. Actor reverts to User.", existing.name);
+        output.line(&format!("Disconnected '{}'. Actor reverts to User.", existing.name))?;
     } else {
-        println!("Not connected (no agent session active).");
+        output.line("Not connected (no agent session active).")?;
     }
     Ok(())
 }
 
-fn print_connect_message(s: &AgentSession) {
-    println!(
+fn print_connect_message(s: &AgentSession, output: &dyn CliOutput) -> Result<()> {
+    output.line(&format!(
         "Connected as '{}'. Session {} (transport: {}).",
         s.name, s.session_id, s.transport
-    );
-    println!("Agent writes will be permission-checked and trace-linked.");
+    ))?;
+    output.line("Agent writes will be permission-checked and trace-linked.")?;
+    Ok(())
 }
 
 #[cfg(test)]

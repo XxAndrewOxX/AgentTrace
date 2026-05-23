@@ -1,10 +1,17 @@
 use crate::data_plane::{self, WriteDocumentError};
+use crate::observability::{format_permission_denied, CliOutput};
 use crate::session::{session_id_for_actor, touch_session, AgentState};
 use anyhow::Result;
 use std::io::{self, Read};
 use std::path::Path;
 
-pub fn run(root: &Path, file: &Path, content: Option<String>, cli_agent: Option<String>) -> Result<()> {
+pub fn run(
+    root: &Path,
+    file: &Path,
+    content: Option<String>,
+    cli_agent: Option<String>,
+    output: &dyn CliOutput,
+) -> Result<()> {
     let body = match content {
         Some(c) => c,
         None => {
@@ -31,12 +38,12 @@ pub fn run(root: &Path, file: &Path, content: Option<String>, cli_agent: Option<
     ) {
         Ok(path) => path,
         Err(WriteDocumentError::PermissionDenied { path, reason }) => {
-            eprintln!("Permission denied: {} — {}", path.display(), reason);
+            output.error(&format_permission_denied(&path, &reason))?;
             std::process::exit(1);
         }
         Err(WriteDocumentError::Other(e)) => return Err(e),
     };
 
-    println!("OK: {} written", rel.display());
+    output.line(&format!("OK: {} written", rel.display()))?;
     Ok(())
 }

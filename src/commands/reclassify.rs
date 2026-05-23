@@ -1,10 +1,16 @@
 use crate::git_store::CommitInfo;
+use crate::observability::CliOutput;
 use crate::store::Store;
 use crate::types::{Action, Actor, DocType};
 use anyhow::Result;
 use std::path::Path;
 
-pub fn run(store_root: &Path, file: &Path, new_type: DocType) -> Result<()> {
+pub fn run(
+    store_root: &Path,
+    file: &Path,
+    new_type: DocType,
+    output: &dyn CliOutput,
+) -> Result<()> {
     let mut store = Store::open(store_root)?;
 
     if !store.manifest.is_tracked(file) {
@@ -12,7 +18,10 @@ pub fn run(store_root: &Path, file: &Path, new_type: DocType) -> Result<()> {
     }
 
     if matches!(new_type, DocType::Context | DocType::Log) {
-        eprintln!("Warning: '{}' is system-managed. Agents/system control this type.", new_type);
+        output.warn(&format!(
+            "Warning: '{}' is system-managed. Agents/system control this type.",
+            new_type
+        ))?;
     }
 
     store.manifest.reclassify(file, new_type.clone())?;
@@ -28,6 +37,6 @@ pub fn run(store_root: &Path, file: &Path, new_type: DocType) -> Result<()> {
     };
     store.commit(&info)?;
 
-    println!("Reclassified {} as {}", file.display(), new_type);
+    output.line(&format!("Reclassified {} as {}", file.display(), new_type))?;
     Ok(())
 }

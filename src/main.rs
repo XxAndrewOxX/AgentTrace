@@ -2,10 +2,11 @@ use agent_trace::commands;
 use agent_trace::commands::context::ContextCmd;
 use agent_trace::commands::model::ModelCmd;
 use agent_trace::mcp;
+use agent_trace::observability::{self, TerminalOutput};
 use agent_trace::types::DocType;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand};
 use std::path::PathBuf;
 
 // ── Top-level CLI ─────────────────────────────────────────────────────────────
@@ -15,12 +16,20 @@ use std::path::PathBuf;
     name = "agent-trace",
     version,
     about = "Agent Document Manager — git-backed document store with AI integration",
-    arg_required_else_help = true,
+    arg_required_else_help = true
 )]
 pub struct Cli {
     /// Optional agent name (overrides agent-lock file).
     #[arg(long, global = true)]
     pub agent: Option<String>,
+
+    /// Increase diagnostic logging verbosity (-v = info, -vv = debug).
+    #[arg(short, long, action = ArgAction::Count, global = true)]
+    pub verbose: u8,
+
+    /// Suppress non-essential status lines.
+    #[arg(long, global = true)]
+    pub quiet: bool,
 
     #[command(subcommand)]
     pub command: Commands,
@@ -223,80 +232,87 @@ pub enum Commands {
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::WARN.into()),
-        )
-        .init();
-
     let cli = Cli::parse();
+    observability::init_tracing(cli.verbose)?;
+    let output = TerminalOutput::new(cli.quiet);
 
     match cli.command {
-        Commands::Init { path, scan } => commands::init::run(&path, scan),
+        Commands::Init { path, scan } => commands::init::run(&path, scan, &output),
         Commands::Open { path, agent, ascii } => {
             let root = path.unwrap_or_else(|| PathBuf::from("."));
-            commands::open::run(&root, agent.or(cli.agent), ascii)
+            commands::open::run(&root, agent.or(cli.agent), ascii, &output)
         }
         Commands::Status { path } => {
             let root = path.unwrap_or_else(|| PathBuf::from("."));
-            commands::status::run(&root)
+            commands::status::run(&root, &output)
         }
-        Commands::Repair => commands::repair::run(&PathBuf::from(".")),
+        Commands::Repair => commands::repair::run(&PathBuf::from("."), &output),
         Commands::Add { doc_type, file } => {
-            commands::add::run(&PathBuf::from("."), doc_type, &file)
+            commands::add::run(&PathBuf::from("."), doc_type, &file, &output)
         }
         Commands::Ls { type_filter, json } => {
-            commands::ls::run(&PathBuf::from("."), type_filter.as_ref(), json)
+            commands::ls::run(&PathBuf::from("."), type_filter.as_ref(), json, &output)
         }
-        Commands::Info { file } => commands::info::run(&PathBuf::from("."), &file),
+        Commands::Info { file } => commands::info::run(&PathBuf::from("."), &file, &output),
         Commands::Reclassify { file, new_type } => {
-            commands::reclassify::run(&PathBuf::from("."), &file, new_type)
+            commands::reclassify::run(&PathBuf::from("."), &file, new_type, &output)
         }
-        Commands::Untrack { file } => commands::untrack::run(&PathBuf::from("."), &file),
-        Commands::Rm { file } => commands::rm::run(&PathBuf::from("."), &file),
-        Commands::Unlock { file, for_actor, duration } => {
-            commands::unlock::run(&PathBuf::from("."), &file, &for_actor, duration)
+        Commands::Untrack { file } => commands::untrack::run(&PathBuf::from("."), &file, &output),
+        Commands::Rm { file } => commands::rm::run(&PathBuf::from("."), &file, &output),
+        Commands::Unlock {
+            file,
+            for_actor,
+            duration,
+        } => commands::unlock::run(&PathBuf::from("."), &file, &for_actor, duration, &output),
+        Commands::Violations { limit } => {
+            commands::violations::run(&PathBuf::from("."), limit, &output)
         }
-        Commands::Violations { limit } => commands::violations::run(&PathBuf::from("."), limit),
         Commands::Context { subcommand } => {
-            commands::context::run(&PathBuf::from("."), subcommand)
+            commands::context::run(&PathBuf::from("."), subcommand, &output)
         }
-        Commands::Log { file, limit, actor, type_filter } => commands::log::run(
+        Commands::Log {
+            file,
+            limit,
+            actor,
+            type_filter,
+        } => commands::log::run(
             &PathBuf::from("."),
             file.as_deref(),
             limit,
             actor.as_deref(),
             type_filter.as_ref(),
+            &output,
         ),
         Commands::Diff { file, v1, v2 } => {
-            commands::diff::run(&PathBuf::from("."), &file, v1, v2)
+            commands::diff::run(&PathBuf::from("."), &file, v1, v2, &output)
         }
         Commands::Show { file, version } => {
-            commands::show::run(&PathBuf::from("."), &file, version)
+            commands::show::run(&PathBuf::from("."), &file, version, &output)
         }
         Commands::Restore { file, version } => {
-            commands::restore::run(&PathBuf::from("."), &file, version)
+            commands::restore::run(&PathBuf::from("."), &file, version, &output)
         }
-        Commands::Replace { find, replace, type_filter, dry_run } => commands::replace::run(
+        Commands::Replace {
+            find,
+            replace,
+            type_filter,
+            dry_run,
+        } => commands::replace::run(
             &PathBuf::from("."),
             &find,
             &replace,
             type_filter.as_ref(),
             dry_run,
+            &output,
         ),
-        Commands::Model { subcommand } => commands::model::run(subcommand),
+        Commands::Model { subcommand } => commands::model::run(subcommand, &output),
         Commands::Connect { name } => {
-            commands::connect::run_connect(&PathBuf::from("."), &name)
+            commands::connect::run_connect(&PathBuf::from("."), &name, &output)
         }
-        Commands::Disconnect => {
-            commands::connect::run_disconnect(&PathBuf::from("."))
-        }
+        Commands::Disconnect => commands::connect::run_disconnect(&PathBuf::from("."), &output),
         Commands::Write { file, content } => {
-            commands::write_cmd::run(&PathBuf::from("."), &file, content, cli.agent)
+            commands::write_cmd::run(&PathBuf::from("."), &file, content, cli.agent, &output)
         }
-        Commands::Mcp { path, actor } => {
-            mcp::server::run(&path, actor)
-        }
+        Commands::Mcp { path, actor } => mcp::server::run(&path, actor),
     }
 }

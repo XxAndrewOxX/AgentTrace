@@ -1,8 +1,15 @@
-use crate::manifest::Manifest;
 use crate::llm::LlmEngine;
+use crate::manifest::Manifest;
+use crate::observability::CliOutput;
+use anyhow::Result;
 
 /// Print the startup banner to stdout before entering TUI mode.
-pub fn print_banner(manifest: &Manifest, llm: &dyn LlmEngine, ascii: bool) {
+pub fn print_banner(
+    manifest: &Manifest,
+    llm: &dyn LlmEngine,
+    ascii: bool,
+    output: &dyn CliOutput,
+) -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     let border = if ascii { "+" } else { "╔" };
     let side = if ascii { "|" } else { "║" };
@@ -12,13 +19,37 @@ pub fn print_banner(manifest: &Manifest, llm: &dyn LlmEngine, ascii: bool) {
     let width = 56;
     let hr_line = hr.repeat(width);
 
-    println!("{}{}{}", border, hr_line, if ascii { "+" } else { "╗" });
-    println!("{}  agent-trace v{}  —  Agent Document Manager{:>width$}{side}", side, version, "", width = width - 18 - version.len());
-    println!("{}{}{}", bottom, hr_line, if ascii { "+" } else { "╝" });
-    println!();
-    println!("  Documents tracked : {}", manifest.len());
-    println!("  LLM               : {}", if llm.is_loaded() { "loaded" } else { "not configured" });
-    println!();
+    output.line(&format!(
+        "{}{}{}",
+        border,
+        hr_line,
+        if ascii { "+" } else { "╗" }
+    ))?;
+    output.line(&format!(
+        "{}  agent-trace v{}  —  Agent Document Manager{:>width$}{side}",
+        side,
+        version,
+        "",
+        width = width - 18 - version.len()
+    ))?;
+    output.line(&format!(
+        "{}{}{}",
+        bottom,
+        hr_line,
+        if ascii { "+" } else { "╝" }
+    ))?;
+    output.line("")?;
+    output.line(&format!("  Documents tracked : {}", manifest.len()))?;
+    output.line(&format!(
+        "  LLM               : {}",
+        if llm.is_loaded() {
+            "loaded"
+        } else {
+            "not configured"
+        }
+    ))?;
+    output.line("")?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -27,6 +58,7 @@ mod tests {
     use crate::config::StoreInfo;
     use crate::llm::NoLlm;
     use crate::manifest::Manifest;
+    use crate::observability::NoopOutput;
     use tempfile::TempDir;
 
     #[test]
@@ -37,7 +69,7 @@ mod tests {
         let info = StoreInfo::new("test".into());
         let manifest = Manifest::create_empty(info, root).unwrap();
         // Just verify it doesn't panic.
-        print_banner(&manifest, &NoLlm, false);
-        print_banner(&manifest, &NoLlm, true);
+        print_banner(&manifest, &NoLlm, false, &NoopOutput).unwrap();
+        print_banner(&manifest, &NoLlm, true, &NoopOutput).unwrap();
     }
 }

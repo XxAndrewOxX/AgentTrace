@@ -1,5 +1,6 @@
 use crate::context::{load_pending_updates, synthesize_no_llm, write_context};
 use crate::llm::trace_insights::{TraceDocument, TraceInsightsFacade};
+use crate::observability::CliOutput;
 use crate::store::Store;
 use anyhow::Result;
 use chrono::Utc;
@@ -21,16 +22,17 @@ pub enum ContextCmd {
     Updates,
 }
 
-pub fn run(store_root: &Path, cmd: ContextCmd) -> Result<()> {
+pub fn run(store_root: &Path, cmd: ContextCmd, output: &dyn CliOutput) -> Result<()> {
     match cmd {
         ContextCmd::Show => {
             let context_file = store_root.join("context.md");
             if !context_file.exists() {
-                println!("No context.md found. Run `agent-trace context refresh` to generate.");
+                output
+                    .line("No context.md found. Run `agent-trace context refresh` to generate.")?;
                 return Ok(());
             }
             let content = std::fs::read_to_string(&context_file)?;
-            print!("{}", content);
+            output.raw_stdout(&content)?;
         }
         ContextCmd::Update { statement } => {
             let updates_file = store_root
@@ -49,16 +51,16 @@ pub fn run(store_root: &Path, cmd: ContextCmd) -> Result<()> {
             content.push_str(&entry.to_string());
             content.push('\n');
             std::fs::write(&updates_file, content)?;
-            println!("Context update queued: {}", statement);
+            output.line(&format!("Context update queued: {}", statement))?;
         }
         ContextCmd::Updates => {
             let pending = load_pending_updates(store_root)?;
             if pending.is_empty() {
-                println!("No pending context updates.");
+                output.line("No pending context updates.")?;
             } else {
-                println!("{} pending update(s):", pending.len());
+                output.line(&format!("{} pending update(s):", pending.len()))?;
                 for u in &pending {
-                    println!("  [{}] {}", u.timestamp, u.update);
+                    output.line(&format!("  [{}] {}", u.timestamp, u.update))?;
                 }
             }
         }
@@ -104,11 +106,11 @@ pub fn run(store_root: &Path, cmd: ContextCmd) -> Result<()> {
             write_context(store_root, &content)?;
             let plans = store.manifest.list(Some(&crate::types::DocType::Plan));
             let refs = store.manifest.list(Some(&crate::types::DocType::Reference));
-            println!(
+            output.line(&format!(
                 "context.md refreshed ({} plans, {} reference docs).",
                 plans.len(),
                 refs.len()
-            );
+            ))?;
         }
     }
     Ok(())

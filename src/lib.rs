@@ -1,13 +1,14 @@
+pub mod agent_trace_md;
 pub mod commands;
 pub mod config;
 pub mod context;
 pub mod data_plane;
-pub mod agent_trace_md;
 pub mod git_store;
 pub mod llm;
 pub mod log_synth;
 pub mod manifest;
 pub mod mcp;
+pub mod observability;
 pub mod permissions;
 pub mod poll;
 pub mod session;
