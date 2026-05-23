@@ -1,7 +1,8 @@
-use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
-use crate::{
-    git_store::GitStore,
+use std::path::{Path, PathBuf};
+
+use super::{
+    git::{CommitInfo, GitStore},
     manifest::Manifest,
     permissions::Overrides,
 };
@@ -33,7 +34,7 @@ impl Store {
     }
 
     /// Commit changes to the store with a structured commit message.
-    pub fn commit(&self, info: &crate::git_store::CommitInfo) -> Result<git2::Oid> {
+    pub fn commit(&self, info: &CommitInfo) -> Result<git2::Oid> {
         self.git.commit(info)
     }
 }

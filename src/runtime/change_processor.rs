@@ -1,5 +1,5 @@
 use crate::config::MergedConfig;
-use crate::data_plane::apply_trace_hooks;
+use crate::trace::pipeline::apply_trace_hooks;
 use crate::git_store::{CommitInfo, GitStore};
 use crate::manifest::Manifest;
 use crate::permissions::{check_permission, Overrides, PermissionResult, Violation};
@@ -9,7 +9,7 @@ use chrono::Utc;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-pub use crate::session::AgentState;
+pub use crate::runtime::session::AgentState;
 
 // ── UI Event channel ──────────────────────────────────────────────────────────
 
