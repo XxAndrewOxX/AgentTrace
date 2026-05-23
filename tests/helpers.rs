@@ -48,7 +48,7 @@ impl TestStore {
     }
 
     /// Run agent-trace with --agent flag.
-    pub fn run_as_agent<'a>(&self, agent: &'a str, args: &[&str]) -> CmdOutput {
+    pub fn run_as_agent(&self, agent: &str, args: &[&str]) -> CmdOutput {
         let mut full_args = vec!["--agent", agent];
         full_args.extend_from_slice(args);
         self.run(&full_args)
@@ -72,6 +72,12 @@ impl TestStore {
 
     pub fn root(&self) -> &Path {
         self.dir.path()
+    }
+}
+
+impl Default for TestStore {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

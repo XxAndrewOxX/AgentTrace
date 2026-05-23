@@ -1425,7 +1425,7 @@ fn di1_manifest_git_consistency_after_1000_ops() {
 
     // Verify manifest is valid TOML on disk.
     let disk_manifest = Manifest::load(root).unwrap();
-    assert!(disk_manifest.len() > 0, "Manifest must have entries");
+    assert!(!disk_manifest.is_empty(), "Manifest must have entries");
 }
 
 /// DI-2: Version numbers are monotonic and every version is retrievable.

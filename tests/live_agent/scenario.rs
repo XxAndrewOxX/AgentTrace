@@ -1,5 +1,5 @@
-/// Declarative definition of a live agent test scenario.
-/// No logic here — just the shape of what a test requires.
+// Declarative definition of a live agent test scenario.
+// No logic here — just the shape of what a test requires.
 
 // ── Seed File ─────────────────────────────────────────────────────────────────
 

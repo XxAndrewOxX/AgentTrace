@@ -15,6 +15,12 @@ impl DocId {
     }
 }
 
+impl Default for DocId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl fmt::Display for DocId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
@@ -46,6 +52,12 @@ pub struct StoreId(pub String);
 impl StoreId {
     pub fn new() -> Self {
         StoreId(uuid::Uuid::new_v4().to_string())
+    }
+}
+
+impl Default for StoreId {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

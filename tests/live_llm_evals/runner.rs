@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use agent_trace::config::LlmConfig;
@@ -20,9 +20,9 @@ pub fn model_paths_from_env() -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
-pub fn run_model_eval(model_path: &PathBuf) -> ModelEvalReport {
+pub fn run_model_eval(model_path: &Path) -> ModelEvalReport {
     let cfg = LlmConfig {
-        model_path: Some(model_path.clone()),
+        model_path: Some(model_path.to_path_buf()),
         max_tokens: 4096,
         temperature: 0.2,
     };

@@ -438,8 +438,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let root = setup_store(&tmp);
         std::fs::write(root.join("plan.md"), "# Plan").unwrap();
-        Store::open(&root).unwrap().manifest; // ensure store opens
-                                              // Add plan.md via add command path so it's tracked
+        Store::open(&root).unwrap(); // ensure store opens
+                                     // Add plan.md via add command path so it's tracked
         let mut store = Store::open(&root).unwrap();
         store
             .manifest

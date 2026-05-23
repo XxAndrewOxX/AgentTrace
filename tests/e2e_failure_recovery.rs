@@ -118,7 +118,7 @@ fn fr4_git_corruption_reported_clearly() {
             if path.is_dir() {
                 let name = path.file_name().unwrap().to_string_lossy();
                 if name != "info" && name != "pack" && name.len() == 2 {
-                    for inner in std::fs::read_dir(&path).ok()?.flatten() {
+                    if let Some(inner) = std::fs::read_dir(&path).ok()?.flatten().next() {
                         return Some(inner.path());
                     }
                 }

@@ -56,10 +56,10 @@ impl LlamaCppBackend {
         #[cfg(not(feature = "llama_cpp_backend"))]
         {
             let _ = op;
-            return Err(
+            Err(
                 "llama.cpp backend is not compiled in. Rebuild with --features llama_cpp_backend."
                     .into(),
-            );
+            )
         }
 
         #[cfg(feature = "llama_cpp_backend")]
