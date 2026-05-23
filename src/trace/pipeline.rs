@@ -1,10 +1,12 @@
-use crate::agent_trace_md;
-use crate::context::load_pending_updates;
 use crate::git_store::CommitInfo;
 use crate::llm::trace_insights::{TraceDocument, TraceInsightsFacade};
-use crate::log_synth::{append_agent_log, summarize_change_no_llm, LogSynthEntry};
 use crate::permissions::{check_permission, PermissionResult};
 use crate::store::Store;
+use crate::trace::context::load_pending_updates;
+use crate::trace::{
+    agent_trace_md,
+    logs::{append_agent_log, summarize_change_no_llm, LogSynthEntry},
+};
 use crate::types::{Action, Actor, DocType};
 use chrono::Utc;
 use std::path::{Path, PathBuf};
@@ -199,7 +201,7 @@ fn sync_context_md(
         api.synthesize_context(&docs, &updates)
             .map_err(|e| anyhow::anyhow!("LLM trace_insights synthesize_context failed: {}", e))?
     } else {
-        crate::context::synthesize_no_llm(store_root, manifest)?
+        crate::trace::context::synthesize_no_llm(store_root, manifest)?
     };
     let target = store_root.join("context.md");
     let existing = std::fs::read_to_string(&target).unwrap_or_default();
@@ -207,7 +209,7 @@ fn sync_context_md(
         return Ok(());
     }
 
-    crate::context::write_context(store_root, &new_content)?;
+    crate::trace::context::write_context(store_root, &new_content)?;
     let info = CommitInfo {
         action: Action::Modify,
         files: vec![(
