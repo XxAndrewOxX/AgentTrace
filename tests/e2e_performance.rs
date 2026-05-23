@@ -60,7 +60,11 @@ fn ps1_poll_performance_500_docs() {
 
     let global = GlobalConfig::default();
     let info = StoreInfo::new("perf-test".into());
-    let store_cfg = StoreConfig { store: info, llm: None, polling: PollingConfig::default() };
+    let store_cfg = StoreConfig {
+        store: info,
+        llm: None,
+        polling: PollingConfig::default(),
+    };
     let config = MergedConfig::merge(global, store_cfg);
     let agent = AgentState::new(None);
     let git = GitStore::open(root).unwrap();
@@ -71,7 +75,11 @@ fn ps1_poll_performance_500_docs() {
     proc.run_poll_cycle().unwrap();
     let no_change_ms = start.elapsed().as_millis();
     println!("No-change poll (500 docs): {}ms", no_change_ms);
-    assert!(no_change_ms < 500, "no-change poll should be < 500ms, got {}ms", no_change_ms);
+    assert!(
+        no_change_ms < 500,
+        "no-change poll should be < 500ms, got {}ms",
+        no_change_ms
+    );
 
     // Single file change poll.
     std::fs::write(root.join("dir00/file0001.md"), "# Modified").unwrap();
@@ -79,7 +87,11 @@ fn ps1_poll_performance_500_docs() {
     proc.run_poll_cycle().unwrap();
     let change_ms = start.elapsed().as_millis();
     println!("Single-change poll (500 docs): {}ms", change_ms);
-    assert!(change_ms < 2000, "single-change poll should be < 2000ms, got {}ms", change_ms);
+    assert!(
+        change_ms < 2000,
+        "single-change poll should be < 2000ms, got {}ms",
+        change_ms
+    );
 }
 
 // ── PS-2: Startup (manifest load) time ───────────────────────────────────────
@@ -93,7 +105,11 @@ fn ps2_startup_time_200_docs() {
     let _manifest = Manifest::load(root).unwrap();
     let load_ms = start.elapsed().as_millis();
     println!("Manifest load (200 docs): {}ms", load_ms);
-    assert!(load_ms < 500, "manifest load should be < 500ms, got {}ms", load_ms);
+    assert!(
+        load_ms < 500,
+        "manifest load should be < 500ms, got {}ms",
+        load_ms
+    );
 }
 
 // ── PS-3: Git Log Performance ─────────────────────────────────────────────────
@@ -147,7 +163,11 @@ fn ps3_git_log_performance() {
     let file_log_ms = start.elapsed().as_millis();
     println!("git.log_file() with 101 commits: {}ms", file_log_ms);
     assert!(file_log.len() >= 50, "expected many file log entries");
-    assert!(file_log_ms < 2000, "file log should be < 2000ms, got {}ms", file_log_ms);
+    assert!(
+        file_log_ms < 2000,
+        "file log should be < 2000ms, got {}ms",
+        file_log_ms
+    );
 }
 
 // ── PS-4: Manifest Parse Time ─────────────────────────────────────────────────
@@ -161,7 +181,11 @@ fn ps4_manifest_parse_500_entries() {
     let _manifest = Manifest::load(root).unwrap();
     let load_ms = start.elapsed().as_millis();
     println!("Manifest load (500 docs): {}ms", load_ms);
-    assert!(load_ms < 100, "manifest parse should be < 100ms, got {}ms", load_ms);
+    assert!(
+        load_ms < 100,
+        "manifest parse should be < 100ms, got {}ms",
+        load_ms
+    );
 }
 
 // ── PS-5: Memory Usage ────────────────────────────────────────────────────────
@@ -177,7 +201,11 @@ fn ps5_memory_usage_within_bounds() {
     let git = GitStore::open(root).unwrap();
     let global = GlobalConfig::default();
     let info = StoreInfo::new("perf".into());
-    let store_cfg = StoreConfig { store: info, llm: None, polling: PollingConfig::default() };
+    let store_cfg = StoreConfig {
+        store: info,
+        llm: None,
+        polling: PollingConfig::default(),
+    };
     let config = MergedConfig::merge(global, store_cfg);
     let agent = AgentState::new(None);
     let mut proc = ChangeProcessor::new(git, manifest, config, agent, None);
@@ -189,5 +217,9 @@ fn ps5_memory_usage_within_bounds() {
     }
     let total_ms = start.elapsed().as_millis();
     println!("5 poll cycles (200 docs): {}ms total", total_ms);
-    assert!(total_ms < 5000, "5 poll cycles should complete in < 5s, took {}ms", total_ms);
+    assert!(
+        total_ms < 5000,
+        "5 poll cycles should complete in < 5s, took {}ms",
+        total_ms
+    );
 }

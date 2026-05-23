@@ -23,7 +23,12 @@ impl McpHarness {
         let mut child = store.spawn_child(&["mcp", "--path", ".", "--actor", actor]);
         let stdin = std::io::BufWriter::new(child.stdin.take().unwrap());
         let reader = BufReader::new(child.stdout.take().unwrap());
-        let mut h = Self { child, stdin, reader, next_id: 1 };
+        let mut h = Self {
+            child,
+            stdin,
+            reader,
+            next_id: 1,
+        };
         // Initialize the MCP session
         h.send(json!({
             "jsonrpc": "2.0",
@@ -82,15 +87,23 @@ fn ac1_connect_creates_lock_disconnect_removes_it() {
 
     assert!(!store.file_exists(lock), "no lock before connect");
 
-    store.run(&["connect", "test-agent"]).expect_success("connect");
+    store
+        .run(&["connect", "test-agent"])
+        .expect_success("connect");
     assert!(store.file_exists(lock), "lock should exist after connect");
 
     let content = store.read_file(lock);
-    assert!(content.contains("test-agent"), "lock should contain agent name");
+    assert!(
+        content.contains("test-agent"),
+        "lock should contain agent name"
+    );
     assert!(!content.contains("pid"), "lock should not contain pid");
 
     store.run(&["disconnect"]).expect_success("disconnect");
-    assert!(!store.file_exists(lock), "lock should be gone after disconnect");
+    assert!(
+        !store.file_exists(lock),
+        "lock should be gone after disconnect"
+    );
 }
 
 // ── AC-2: connected agent write to plan succeeds ─────────────────────────────
@@ -99,10 +112,15 @@ fn ac1_connect_creates_lock_disconnect_removes_it() {
 fn ac2_connected_agent_write_to_plan_succeeds() {
     let store = TestStore::new();
     store.write_file("plan.md", "# Original");
-    store.run(&["add", "plan", "plan.md"]).expect_success("add plan");
+    store
+        .run(&["add", "plan", "plan.md"])
+        .expect_success("add plan");
 
-    store.run(&["connect", "test-agent"]).expect_success("connect");
-    store.run(&["write", "plan.md", "--content=# Updated by Agent"])
+    store
+        .run(&["connect", "test-agent"])
+        .expect_success("connect");
+    store
+        .run(&["write", "plan.md", "--content=# Updated by Agent"])
         .expect_success("write plan");
 
     assert_eq!(store.read_file("plan.md"), "# Updated by Agent");
@@ -151,9 +169,13 @@ fn ac7_stale_lock_is_replaced_on_connect() {
 fn ac3_connected_agent_write_to_context_is_denied() {
     let store = TestStore::new();
     store.write_file("context.md", "# Context");
-    store.run(&["add", "context", "context.md"]).expect_success("add context");
+    store
+        .run(&["add", "context", "context.md"])
+        .expect_success("add context");
 
-    store.run(&["connect", "test-agent"]).expect_success("connect");
+    store
+        .run(&["connect", "test-agent"])
+        .expect_success("connect");
     let out = store.run(&["write", "context.md", "--content=# Hacked"]);
     assert!(!out.success(), "write to context should fail for agent");
     out.assert_stderr_contains("Permission denied");
@@ -170,15 +192,20 @@ fn ac3_connected_agent_write_to_context_is_denied() {
 fn ac4_disconnect_reverts_actor_to_user() {
     let store = TestStore::new();
 
-    store.run(&["connect", "test-agent"]).expect_success("connect");
+    store
+        .run(&["connect", "test-agent"])
+        .expect_success("connect");
     store.run(&["disconnect"]).expect_success("disconnect");
 
     // Now no agent is connected — actor is User.
     // User writing plan.md is allowed (no lock file, User actor by default).
     store.write_file("plan.md", "# Plan");
-    store.run(&["add", "plan", "plan.md"]).expect_success("add plan");
+    store
+        .run(&["add", "plan", "plan.md"])
+        .expect_success("add plan");
     // Writing via CLI write with no agent flag → User actor → allowed
-    store.run(&["write", "plan.md", "--content=# Updated as User"])
+    store
+        .run(&["write", "plan.md", "--content=# Updated as User"])
         .expect_success("write as user after disconnect");
 
     assert_eq!(store.read_file("plan.md"), "# Updated as User");
@@ -190,10 +217,18 @@ fn ac4_disconnect_reverts_actor_to_user() {
 fn ac5_agent_flag_one_off_write() {
     let store = TestStore::new();
     store.write_file("plan.md", "# Original");
-    store.run(&["add", "plan", "plan.md"]).expect_success("add plan");
+    store
+        .run(&["add", "plan", "plan.md"])
+        .expect_success("add plan");
 
     // No connect call — use --agent flag directly
-    store.run(&["--agent=one-off-agent", "write", "plan.md", "--content=# One-off write"])
+    store
+        .run(&[
+            "--agent=one-off-agent",
+            "write",
+            "plan.md",
+            "--content=# One-off write",
+        ])
         .expect_success("write with --agent flag");
 
     assert_eq!(store.read_file("plan.md"), "# One-off write");
@@ -205,7 +240,9 @@ fn ac5_agent_flag_one_off_write() {
 fn ac6_double_connect_returns_error() {
     let store = TestStore::new();
 
-    store.run(&["connect", "first-agent"]).expect_success("first connect");
+    store
+        .run(&["connect", "first-agent"])
+        .expect_success("first connect");
     let out = store.run(&["connect", "second-agent"]);
     assert!(!out.success(), "second connect should fail");
     out.assert_stderr_contains("first-agent");
@@ -227,7 +264,11 @@ fn mc1_mcp_initialize_returns_capabilities() {
         "method": "tools/list",
         "params": {}
     }));
-    assert!(resp.get("error").is_none(), "tools/list should not error: {:?}", resp);
+    assert!(
+        resp.get("error").is_none(),
+        "tools/list should not error: {:?}",
+        resp
+    );
     let tools = resp["result"]["tools"].as_array().unwrap();
     assert_eq!(tools.len(), 5, "should have 5 tools");
 }
@@ -238,14 +279,20 @@ fn mc1_mcp_initialize_returns_capabilities() {
 fn mc2_mcp_write_file_plan_succeeds() {
     let store = TestStore::new();
     store.write_file("plan.md", "# Original");
-    store.run(&["add", "plan", "plan.md"]).expect_success("add plan");
+    store
+        .run(&["add", "plan", "plan.md"])
+        .expect_success("add plan");
 
     let mut h = McpHarness::new(&store, "test-agent");
-    let resp = h.call_tool("write_file", json!({"path": "plan.md", "content": "# Via MCP"}));
+    let resp = h.call_tool(
+        "write_file",
+        json!({"path": "plan.md", "content": "# Via MCP"}),
+    );
 
     assert_eq!(
         resp["result"]["isError"], false,
-        "write should succeed: {:?}", resp
+        "write should succeed: {:?}",
+        resp
     );
     assert_eq!(store.read_file("plan.md"), "# Via MCP");
     assert!(
@@ -271,17 +318,27 @@ fn mc2_mcp_write_file_plan_succeeds() {
 fn mc3_mcp_write_file_context_denied() {
     let store = TestStore::new();
     store.write_file("context.md", "# Context");
-    store.run(&["add", "context", "context.md"]).expect_success("add context");
+    store
+        .run(&["add", "context", "context.md"])
+        .expect_success("add context");
 
     let mut h = McpHarness::new(&store, "test-agent");
-    let resp = h.call_tool("write_file", json!({"path": "context.md", "content": "# Hacked"}));
+    let resp = h.call_tool(
+        "write_file",
+        json!({"path": "context.md", "content": "# Hacked"}),
+    );
 
     assert_eq!(
         resp["result"]["isError"], true,
-        "write to context should be denied: {:?}", resp
+        "write to context should be denied: {:?}",
+        resp
     );
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("Permission denied"), "error should say permission denied: {}", text);
+    assert!(
+        text.contains("Permission denied"),
+        "error should say permission denied: {}",
+        text
+    );
 
     // File must be unchanged — the MCP server must not have written it
     assert_eq!(store.read_file("context.md"), "# Context");
@@ -293,7 +350,9 @@ fn mc3_mcp_write_file_context_denied() {
 fn mc4_mcp_read_file_returns_content_and_metadata() {
     let store = TestStore::new();
     store.write_file("plan.md", "# My Plan\n\nDetails here.");
-    store.run(&["add", "plan", "plan.md"]).expect_success("add plan");
+    store
+        .run(&["add", "plan", "plan.md"])
+        .expect_success("add plan");
 
     let mut h = McpHarness::new(&store, "test-agent");
     let resp = h.call_tool("read_file", json!({"path": "plan.md"}));
@@ -311,8 +370,12 @@ fn mc5_mcp_list_documents_returns_tracked() {
     let store = TestStore::new();
     store.write_file("plan.md", "p");
     store.write_file("ref.md", "r");
-    store.run(&["add", "plan", "plan.md"]).expect_success("add plan");
-    store.run(&["add", "reference", "ref.md"]).expect_success("add ref");
+    store
+        .run(&["add", "plan", "plan.md"])
+        .expect_success("add plan");
+    store
+        .run(&["add", "reference", "ref.md"])
+        .expect_success("add ref");
 
     let mut h = McpHarness::new(&store, "test-agent");
     let resp = h.call_tool("list_documents", json!({}));
@@ -335,7 +398,10 @@ fn mc6_mcp_get_permissions_correct_for_agent() {
     assert_eq!(resp["result"]["isError"], false);
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("context"), "should mention context");
-    assert!(text.contains("denied"), "context should be denied for agent");
+    assert!(
+        text.contains("denied"),
+        "context should be denied for agent"
+    );
     assert!(text.contains("allowed"), "plan should be allowed for agent");
 }
 

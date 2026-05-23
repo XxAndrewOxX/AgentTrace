@@ -116,8 +116,7 @@ impl Overrides {
         }
         let contents = std::fs::read_to_string(&path)
             .with_context(|| format!("Reading overrides: {}", path.display()))?;
-        toml::from_str(&contents)
-            .with_context(|| format!("Parsing overrides: {}", path.display()))
+        toml::from_str(&contents).with_context(|| format!("Parsing overrides: {}", path.display()))
     }
 
     pub fn save(&self, store_root: &Path) -> Result<()> {
@@ -134,9 +133,9 @@ impl Overrides {
     }
 
     pub fn is_overridden(&self, path: &Path, actor: &Actor) -> bool {
-        self.entries.iter().any(|e| {
-            e.path == path && e.is_active() && e.matches_actor(actor)
-        })
+        self.entries
+            .iter()
+            .any(|e| e.path == path && e.is_active() && e.matches_actor(actor))
     }
 
     pub fn prune_expired(&mut self) {
@@ -173,41 +172,86 @@ mod tests {
     #[test]
     fn test_plan_permissions() {
         let o = Overrides::default();
-        assert_eq!(check_permission(&DocType::Plan, &Actor::User, &o, None), PermissionResult::Allowed);
-        assert_eq!(check_permission(&DocType::Plan, &agent("claude"), &o, None), PermissionResult::Allowed);
-        assert!(matches!(check_permission(&DocType::Plan, &Actor::System, &o, None), PermissionResult::Denied { .. }));
+        assert_eq!(
+            check_permission(&DocType::Plan, &Actor::User, &o, None),
+            PermissionResult::Allowed
+        );
+        assert_eq!(
+            check_permission(&DocType::Plan, &agent("claude"), &o, None),
+            PermissionResult::Allowed
+        );
+        assert!(matches!(
+            check_permission(&DocType::Plan, &Actor::System, &o, None),
+            PermissionResult::Denied { .. }
+        ));
     }
 
     #[test]
     fn test_context_permissions() {
         let o = Overrides::default();
-        assert_eq!(check_permission(&DocType::Context, &Actor::System, &o, None), PermissionResult::Allowed);
-        assert!(matches!(check_permission(&DocType::Context, &agent("aider"), &o, None), PermissionResult::Denied { .. }));
-        assert!(matches!(check_permission(&DocType::Context, &Actor::User, &o, None), PermissionResult::RequiresConfirmation { .. }));
+        assert_eq!(
+            check_permission(&DocType::Context, &Actor::System, &o, None),
+            PermissionResult::Allowed
+        );
+        assert!(matches!(
+            check_permission(&DocType::Context, &agent("aider"), &o, None),
+            PermissionResult::Denied { .. }
+        ));
+        assert!(matches!(
+            check_permission(&DocType::Context, &Actor::User, &o, None),
+            PermissionResult::RequiresConfirmation { .. }
+        ));
     }
 
     #[test]
     fn test_log_permissions() {
         let o = Overrides::default();
-        assert_eq!(check_permission(&DocType::Log, &Actor::System, &o, None), PermissionResult::Allowed);
-        assert!(matches!(check_permission(&DocType::Log, &agent("x"), &o, None), PermissionResult::Denied { .. }));
-        assert!(matches!(check_permission(&DocType::Log, &Actor::User, &o, None), PermissionResult::RequiresConfirmation { .. }));
+        assert_eq!(
+            check_permission(&DocType::Log, &Actor::System, &o, None),
+            PermissionResult::Allowed
+        );
+        assert!(matches!(
+            check_permission(&DocType::Log, &agent("x"), &o, None),
+            PermissionResult::Denied { .. }
+        ));
+        assert!(matches!(
+            check_permission(&DocType::Log, &Actor::User, &o, None),
+            PermissionResult::RequiresConfirmation { .. }
+        ));
     }
 
     #[test]
     fn test_reference_permissions() {
         let o = Overrides::default();
-        assert_eq!(check_permission(&DocType::Reference, &Actor::User, &o, None), PermissionResult::Allowed);
-        assert!(matches!(check_permission(&DocType::Reference, &agent("x"), &o, None), PermissionResult::Denied { .. }));
-        assert!(matches!(check_permission(&DocType::Reference, &Actor::System, &o, None), PermissionResult::Denied { .. }));
+        assert_eq!(
+            check_permission(&DocType::Reference, &Actor::User, &o, None),
+            PermissionResult::Allowed
+        );
+        assert!(matches!(
+            check_permission(&DocType::Reference, &agent("x"), &o, None),
+            PermissionResult::Denied { .. }
+        ));
+        assert!(matches!(
+            check_permission(&DocType::Reference, &Actor::System, &o, None),
+            PermissionResult::Denied { .. }
+        ));
     }
 
     #[test]
     fn test_scratch_permissions() {
         let o = Overrides::default();
-        assert_eq!(check_permission(&DocType::Scratch, &Actor::User, &o, None), PermissionResult::Allowed);
-        assert_eq!(check_permission(&DocType::Scratch, &agent("x"), &o, None), PermissionResult::Allowed);
-        assert_eq!(check_permission(&DocType::Scratch, &Actor::System, &o, None), PermissionResult::Allowed);
+        assert_eq!(
+            check_permission(&DocType::Scratch, &Actor::User, &o, None),
+            PermissionResult::Allowed
+        );
+        assert_eq!(
+            check_permission(&DocType::Scratch, &agent("x"), &o, None),
+            PermissionResult::Allowed
+        );
+        assert_eq!(
+            check_permission(&DocType::Scratch, &Actor::System, &o, None),
+            PermissionResult::Allowed
+        );
     }
 
     #[test]
@@ -221,7 +265,8 @@ mod tests {
             granted_at: Utc::now(),
             expires_at: Utc::now() + Duration::minutes(10),
             granted_by: "user".into(),
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(
             check_permission(&DocType::Reference, &agent("claude"), &o, Some(&path)),
             PermissionResult::Allowed
@@ -239,7 +284,8 @@ mod tests {
             granted_at: Utc::now() - Duration::hours(2),
             expires_at: Utc::now() - Duration::hours(1),
             granted_by: "user".into(),
-        }).unwrap();
+        })
+        .unwrap();
         assert!(matches!(
             check_permission(&DocType::Reference, &agent("claude"), &o, Some(&path)),
             PermissionResult::Denied { .. }
@@ -258,7 +304,8 @@ mod tests {
             granted_at: Utc::now(),
             expires_at: Utc::now() + Duration::minutes(10),
             granted_by: "user".into(),
-        }).unwrap();
+        })
+        .unwrap();
         // Override for a.md doesn't affect b.md
         assert!(matches!(
             check_permission(&DocType::Reference, &agent("x"), &o, Some(&path_b)),
@@ -276,7 +323,8 @@ mod tests {
             granted_at: Utc::now() - Duration::hours(2),
             expires_at: Utc::now() - Duration::hours(1),
             granted_by: "user".into(),
-        }).unwrap();
+        })
+        .unwrap();
         o.add(OverrideEntry {
             doc_id: "id2".into(),
             path: PathBuf::from("b.md"),
@@ -284,7 +332,8 @@ mod tests {
             granted_at: Utc::now(),
             expires_at: Utc::now() + Duration::minutes(10),
             granted_by: "user".into(),
-        }).unwrap();
+        })
+        .unwrap();
         o.prune_expired();
         assert_eq!(o.entries.len(), 1);
         assert_eq!(o.entries[0].doc_id, "id2");
@@ -303,7 +352,8 @@ mod tests {
             granted_at: Utc::now(),
             expires_at: Utc::now() + Duration::minutes(10),
             granted_by: "user".into(),
-        }).unwrap();
+        })
+        .unwrap();
         o.save(root).unwrap();
         let loaded = Overrides::load(root).unwrap();
         assert_eq!(loaded.entries.len(), 1);

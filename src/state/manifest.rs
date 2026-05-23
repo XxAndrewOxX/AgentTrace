@@ -57,7 +57,9 @@ pub struct Manifest {
 impl Manifest {
     // ── Construction ─────────────────────────────────────────────────────
 
-    fn build_indices(documents: &[DocumentEntry]) -> (HashMap<PathBuf, usize>, HashMap<DocId, usize>) {
+    fn build_indices(
+        documents: &[DocumentEntry],
+    ) -> (HashMap<PathBuf, usize>, HashMap<DocId, usize>) {
         let mut by_path = HashMap::new();
         let mut by_id = HashMap::new();
         for (i, doc) in documents.iter().enumerate() {
@@ -69,7 +71,12 @@ impl Manifest {
 
     pub fn from_parts(store: StoreInfo, documents: Vec<DocumentEntry>) -> Self {
         let (by_path, by_id) = Self::build_indices(&documents);
-        Self { store, documents, by_path, by_id }
+        Self {
+            store,
+            documents,
+            by_path,
+            by_id,
+        }
     }
 
     // ── I/O ──────────────────────────────────────────────────────────────
@@ -118,7 +125,12 @@ impl Manifest {
     // ── CRUD ─────────────────────────────────────────────────────────────
 
     /// Register a new document. Returns an error if the path is already tracked.
-    pub fn register(&mut self, path: &Path, doc_type: DocType, agent_name: &str) -> Result<&DocumentEntry> {
+    pub fn register(
+        &mut self,
+        path: &Path,
+        doc_type: DocType,
+        agent_name: &str,
+    ) -> Result<&DocumentEntry> {
         if self.by_path.contains_key(path) {
             bail!("Path already tracked: {}", path.display());
         }
@@ -140,14 +152,18 @@ impl Manifest {
     }
 
     pub fn reclassify(&mut self, path: &Path, new_type: DocType) -> Result<()> {
-        let idx = *self.by_path.get(path)
+        let idx = *self
+            .by_path
+            .get(path)
             .with_context(|| format!("Path not tracked: {}", path.display()))?;
         self.documents[idx].doc_type = new_type;
         Ok(())
     }
 
     pub fn update_path(&mut self, old_path: &Path, new_path: &Path) -> Result<()> {
-        let idx = *self.by_path.get(old_path)
+        let idx = *self
+            .by_path
+            .get(old_path)
             .with_context(|| format!("Old path not tracked: {}", old_path.display()))?;
         self.by_path.remove(old_path);
         self.documents[idx].path = new_path.to_path_buf();
@@ -156,7 +172,9 @@ impl Manifest {
     }
 
     pub fn untrack(&mut self, path: &Path) -> Result<()> {
-        let idx = *self.by_path.get(path)
+        let idx = *self
+            .by_path
+            .get(path)
             .with_context(|| format!("Path not tracked: {}", path.display()))?;
         let id = self.documents[idx].id.clone();
         self.by_path.remove(path);
@@ -170,7 +188,8 @@ impl Manifest {
     }
 
     pub fn list(&self, type_filter: Option<&DocType>) -> Vec<&DocumentEntry> {
-        self.documents.iter()
+        self.documents
+            .iter()
             .filter(|d| type_filter.is_none_or(|t| &d.doc_type == t))
             .collect()
     }
@@ -181,7 +200,9 @@ impl Manifest {
 
     /// Update the description of a tracked document.
     pub fn update_description(&mut self, path: &Path, description: &str) -> Result<()> {
-        let idx = *self.by_path.get(path)
+        let idx = *self
+            .by_path
+            .get(path)
             .with_context(|| format!("Path not tracked: {}", path.display()))?;
         self.documents[idx].description = description.to_string();
         Ok(())
@@ -301,9 +322,12 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let (root, info) = make_store(&tmp);
         let mut m = Manifest::create_empty(info, &root).unwrap();
-        m.register(&PathBuf::from("prd.md"), DocType::Plan, "").unwrap();
-        m.register(&PathBuf::from("notes.md"), DocType::Scratch, "").unwrap();
-        m.register(&PathBuf::from("plan2.md"), DocType::Plan, "").unwrap();
+        m.register(&PathBuf::from("prd.md"), DocType::Plan, "")
+            .unwrap();
+        m.register(&PathBuf::from("notes.md"), DocType::Scratch, "")
+            .unwrap();
+        m.register(&PathBuf::from("plan2.md"), DocType::Plan, "")
+            .unwrap();
 
         assert_eq!(m.list(None).len(), 3);
         assert_eq!(m.list(Some(&DocType::Plan)).len(), 2);
@@ -315,7 +339,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let (root, info) = make_store(&tmp);
         let mut m = Manifest::create_empty(info, &root).unwrap();
-        m.register(&PathBuf::from("prd.md"), DocType::Plan, "agent-x").unwrap();
+        m.register(&PathBuf::from("prd.md"), DocType::Plan, "agent-x")
+            .unwrap();
         m.save(&root).unwrap();
 
         let loaded = Manifest::load(&root).unwrap();

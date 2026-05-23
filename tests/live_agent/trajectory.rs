@@ -1,7 +1,7 @@
+use serde::{Deserialize, Serialize};
 /// Records every tool call made by the agent during a live test run.
 /// Pure data — no network, no filesystem, no side effects.
 use serde_json::Value;
-use serde::{Deserialize, Serialize};
 
 // ── Tool Call ─────────────────────────────────────────────────────────────────
 
@@ -33,8 +33,7 @@ impl Trajectory {
     /// Was `tool_name` called with args["path"] == `path`?
     pub fn did_call(&self, tool_name: &str, path: &str) -> bool {
         self.calls.iter().any(|c| {
-            c.tool_name == tool_name
-                && c.args.get("path").and_then(|v| v.as_str()) == Some(path)
+            c.tool_name == tool_name && c.args.get("path").and_then(|v| v.as_str()) == Some(path)
         })
     }
 
@@ -63,7 +62,10 @@ impl Trajectory {
 
     /// All calls to a specific tool, in order.
     pub fn calls_for(&self, tool_name: &str) -> Vec<&ToolCall> {
-        self.calls.iter().filter(|c| c.tool_name == tool_name).collect()
+        self.calls
+            .iter()
+            .filter(|c| c.tool_name == tool_name)
+            .collect()
     }
 
     /// Human-readable summary for failure messages.
@@ -71,11 +73,7 @@ impl Trajectory {
         self.calls
             .iter()
             .map(|c| {
-                let path = c
-                    .args
-                    .get("path")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("—");
+                let path = c.args.get("path").and_then(|v| v.as_str()).unwrap_or("—");
                 let status = if c.is_error { "DENIED" } else { "OK" };
                 format!("  turn {}: {}({}) → {}", c.turn, c.tool_name, path, status)
             })

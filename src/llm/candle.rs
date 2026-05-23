@@ -78,7 +78,12 @@ impl CandleLlm {
 
             Ok(Self {
                 model_path: path.to_path_buf(),
-                inner: Some(CandleInner { model, tokenizer, device, eos_token }),
+                inner: Some(CandleInner {
+                    model,
+                    tokenizer,
+                    device,
+                    eos_token,
+                }),
             })
         }
     }
@@ -145,7 +150,9 @@ fn generate(inner: &mut CandleInner, prompt: &str, max_new_tokens: usize) -> Res
         let pos = all_tokens.len() - input_slice.len();
 
         let input = Tensor::new(input_slice, &inner.device)?.unsqueeze(0)?;
-        let logits = inner.model.forward(&input, pos)
+        let logits = inner
+            .model
+            .forward(&input, pos)
             .map_err(|e| anyhow::anyhow!("Forward pass: {}", e))?;
 
         // logits shape: [1, seq_len, vocab]. Take the last token's logits.
@@ -156,7 +163,8 @@ fn generate(inner: &mut CandleInner, prompt: &str, max_new_tokens: usize) -> Res
             logits
         };
 
-        let next_token = logits_processor.sample(&logits)
+        let next_token = logits_processor
+            .sample(&logits)
             .map_err(|e| anyhow::anyhow!("Sampling: {}", e))?;
 
         if next_token == inner.eos_token {
@@ -301,14 +309,28 @@ impl CandleLlmMut {
             .map_err(|e| anyhow::anyhow!("Loading weights: {}", e))?;
         let tokenizer = load_tokenizer(path)?;
         let eos_token = eos_token_id(&tokenizer);
-        Ok(Self { inner: CandleInner { model, tokenizer, device, eos_token } })
+        Ok(Self {
+            inner: CandleInner {
+                model,
+                tokenizer,
+                device,
+                eos_token,
+            },
+        })
     }
 
     pub fn classify(&mut self, content: &str) -> Result<Classification> {
         let prompt = classification_prompt(content);
         let output = generate(&mut self.inner, &prompt, 8)?;
-        let doc_type = output.trim().to_lowercase().parse::<DocType>().unwrap_or(DocType::Scratch);
-        Ok(Classification { doc_type, confidence: 0.9 })
+        let doc_type = output
+            .trim()
+            .to_lowercase()
+            .parse::<DocType>()
+            .unwrap_or(DocType::Scratch);
+        Ok(Classification {
+            doc_type,
+            confidence: 0.9,
+        })
     }
 
     pub fn summarize_change(&mut self, path: &str, doc_type: &str, diff: &str) -> Result<String> {
@@ -322,13 +344,22 @@ impl CandleLlmMut {
         let json: serde_json::Value = serde_json::from_str(output.trim())
             .unwrap_or_else(|_| serde_json::json!({"cmd": "unknown", "args": {}}));
         let command = json["cmd"].as_str().unwrap_or("unknown").to_string();
-        let args = json["args"].as_object()
-            .map(|m| m.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
+        let args = json["args"]
+            .as_object()
+            .map(|m| {
+                m.iter()
+                    .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
+                    .collect()
+            })
             .unwrap_or_default();
         Ok(ParsedCommand { command, args })
     }
 
-    pub fn synthesize_context(&mut self, documents: &[DocSummary], updates: &[String]) -> Result<String> {
+    pub fn synthesize_context(
+        &mut self,
+        documents: &[DocSummary],
+        updates: &[String],
+    ) -> Result<String> {
         let prompt = context_prompt(documents, updates);
         generate(&mut self.inner, &prompt, MAX_NEW_TOKENS * 4)
     }

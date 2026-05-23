@@ -29,16 +29,30 @@ fn setup_store(tmp: &TempDir) -> (GitStore, Arc<Mutex<Manifest>>) {
     (git, Arc::new(Mutex::new(manifest)))
 }
 
-fn make_processor(git: GitStore, manifest: Arc<Mutex<Manifest>>, agent: Option<&str>) -> ChangeProcessor {
+fn make_processor(
+    git: GitStore,
+    manifest: Arc<Mutex<Manifest>>,
+    agent: Option<&str>,
+) -> ChangeProcessor {
     let info = StoreInfo::new("test".into());
-    let store_cfg = StoreConfig { store: info, llm: None, polling: PollingConfig::default() };
+    let store_cfg = StoreConfig {
+        store: info,
+        llm: None,
+        polling: PollingConfig::default(),
+    };
     let config = MergedConfig::merge(GlobalConfig::default(), store_cfg);
     let agent_state = AgentState::new(agent.map(String::from));
     ChangeProcessor::new(git, manifest, config, agent_state, None)
 }
 
-fn commit_tracked(root: &std::path::Path, path: &str, content: &str, doc_type: DocType,
-                  manifest: &Arc<Mutex<Manifest>>, git: &GitStore) {
+fn commit_tracked(
+    root: &std::path::Path,
+    path: &str,
+    content: &str,
+    doc_type: DocType,
+    manifest: &Arc<Mutex<Manifest>>,
+    git: &GitStore,
+) {
     if let Some(parent) = root.join(path).parent() {
         std::fs::create_dir_all(parent).unwrap();
     }
@@ -81,14 +95,23 @@ fn rc1_rapid_file_creation_storm() {
 
     let m = manifest.lock().unwrap();
     let tracked = m.list(None);
-    assert_eq!(tracked.len(), 50, "All 50 files must be tracked; got {}", tracked.len());
+    assert_eq!(
+        tracked.len(),
+        50,
+        "All 50 files must be tracked; got {}",
+        tracked.len()
+    );
 
     // Verify git history has at least one commit covering the files.
     let git2 = GitStore::open(root).unwrap();
     let log = git2.log(5).unwrap();
     assert!(!log.is_empty(), "Git log should have commits");
     let total_files: usize = log.iter().map(|e| e.files.len()).sum();
-    assert!(total_files >= 50, "Git log should cover all 50 files; got {}", total_files);
+    assert!(
+        total_files >= 50,
+        "Git log should cover all 50 files; got {}",
+        total_files
+    );
 }
 
 /// RC-2: File modified 20x rapidly; poll should capture at least 1 valid version.
@@ -118,11 +141,14 @@ fn rc2_file_modified_during_poll() {
 
     // version_count() returns total versions; show_file_at_version(path, count) = newest.
     let count = git2.version_count(&PathBuf::from("rapid.md")).unwrap();
-    let latest_content = git2.show_file_at_version(&PathBuf::from("rapid.md"), count).unwrap();
+    let latest_content = git2
+        .show_file_at_version(&PathBuf::from("rapid.md"), count)
+        .unwrap();
     // Content must be a complete "version N" string.
     assert!(
         latest_content.starts_with("version "),
-        "Captured content should be a complete version string, got: {:?}", latest_content
+        "Captured content should be a complete version string, got: {:?}",
+        latest_content
     );
 }
 
@@ -181,7 +207,10 @@ fn rc3b_commit_failure_rolls_back_manifest_registration() {
 
     // File was committed successfully; manifest should have it.
     let m = manifest.lock().unwrap();
-    assert!(m.is_tracked(&PathBuf::from("doomed.md")), "File should be tracked after successful poll");
+    assert!(
+        m.is_tracked(&PathBuf::from("doomed.md")),
+        "File should be tracked after successful poll"
+    );
     drop(m);
 
     // Now delete the file from disk AND from git (simulating that it was never committed).
@@ -210,7 +239,11 @@ fn rc4_simultaneous_lock_and_file_modification() {
     // Write the lock file and modify the plan simultaneously (both happen before the poll).
     let pid = std::process::id();
     let lock_content = format!("[agent]\npid = {}\nname = \"fast-agent\"\n", pid);
-    std::fs::write(root.join(".agent-trace/locks/agent-lock.toml"), &lock_content).unwrap();
+    std::fs::write(
+        root.join(".agent-trace/locks/agent-lock.toml"),
+        &lock_content,
+    )
+    .unwrap();
     std::fs::write(root.join("plan.md"), "# Plan v2 by agent").unwrap();
 
     // Poll cycle should not crash regardless of read ordering.
@@ -220,17 +253,22 @@ fn rc4_simultaneous_lock_and_file_modification() {
     // The change is committed. No crash is the primary requirement.
     let git2 = GitStore::open(root).unwrap();
     let log = git2.log(5).unwrap();
-    let plan_commits: Vec<_> = log.iter().filter(|e| {
-        e.files.iter().any(|(p, _, _)| p == &PathBuf::from("plan.md"))
-    }).collect();
+    let plan_commits: Vec<_> = log
+        .iter()
+        .filter(|e| {
+            e.files
+                .iter()
+                .any(|(p, _, _)| p == &PathBuf::from("plan.md"))
+        })
+        .collect();
     assert!(!plan_commits.is_empty(), "plan.md change must be committed");
 
     // At least one plan.md commit must have user or agent attribution (the poll cycle commit).
     // NOTE: rapid commits may share a unix timestamp causing non-deterministic Sort::TIME
     // ordering, so we check the SET rather than assuming plan_commits[0] is the newest.
-    let has_user_or_agent = plan_commits.iter().any(|e| {
-        matches!(e.actor, Actor::User) || e.actor.is_agent()
-    });
+    let has_user_or_agent = plan_commits
+        .iter()
+        .any(|e| matches!(e.actor, Actor::User) || e.actor.is_agent());
     assert!(
         has_user_or_agent,
         "At least one plan.md commit must have user or agent actor; got: {:?}",
@@ -249,7 +287,11 @@ fn rc5_lock_removed_during_processing() {
 
     let pid = std::process::id();
     let lock_content = format!("[agent]\npid = {}\nname = \"test-agent\"\n", pid);
-    std::fs::write(root.join(".agent-trace/locks/agent-lock.toml"), &lock_content).unwrap();
+    std::fs::write(
+        root.join(".agent-trace/locks/agent-lock.toml"),
+        &lock_content,
+    )
+    .unwrap();
 
     // Modify file while lock is present → agent attribution.
     std::fs::write(root.join("plan.md"), "# Plan v2").unwrap();
@@ -266,9 +308,14 @@ fn rc5_lock_removed_during_processing() {
     // Check that both commits exist and have consistent attribution.
     let git2 = GitStore::open(root).unwrap();
     let log = git2.log(10).unwrap();
-    let plan_commits: Vec<_> = log.iter().filter(|e| {
-        e.files.iter().any(|(p, _, _)| p == &PathBuf::from("plan.md"))
-    }).collect();
+    let plan_commits: Vec<_> = log
+        .iter()
+        .filter(|e| {
+            e.files
+                .iter()
+                .any(|(p, _, _)| p == &PathBuf::from("plan.md"))
+        })
+        .collect();
     assert!(plan_commits.len() >= 2, "Need at least 2 plan.md commits");
 
     // Within each commit, all files should share the same actor (enforced by run_poll_cycle).
@@ -347,7 +394,11 @@ fn rc7_git_commit_during_active_write() {
 
     // Overwrite with "in-progress" content then immediately overwrite with final content.
     std::fs::write(root.join("big.md"), "partial content — still writing\n").unwrap();
-    std::fs::write(root.join("big.md"), "final content — complete\n".repeat(200)).unwrap();
+    std::fs::write(
+        root.join("big.md"),
+        "final content — complete\n".repeat(200),
+    )
+    .unwrap();
 
     // Poll may capture either partial or final — both are acceptable.
     // The important thing: no crash, no git repo corruption.
@@ -356,12 +407,20 @@ fn rc7_git_commit_during_active_write() {
     // Git repo must still be valid.
     let git2 = GitStore::open(root).unwrap();
     let log = git2.log(5).unwrap();
-    assert!(!log.is_empty(), "Git repo must be intact after write-during-commit");
+    assert!(
+        !log.is_empty(),
+        "Git repo must be intact after write-during-commit"
+    );
 
     // The file content at the latest version must be complete (non-empty, valid UTF-8).
     let file_log = git2.log_file(&PathBuf::from("big.md"), 10).unwrap();
-    assert!(!file_log.is_empty(), "big.md must have at least one committed version");
-    let latest = git2.show_file_at_version(&PathBuf::from("big.md"), 1).unwrap();
+    assert!(
+        !file_log.is_empty(),
+        "big.md must have at least one committed version"
+    );
+    let latest = git2
+        .show_file_at_version(&PathBuf::from("big.md"), 1)
+        .unwrap();
     assert!(!latest.is_empty(), "Committed content must be non-empty");
 }
 
@@ -380,8 +439,22 @@ fn pe1_agent_rapid_fire_protected_writes() {
     let original_ref = "# Reference — protected";
     let original_log = "# Log — protected";
 
-    commit_tracked(root, "context.md", original_context, DocType::Context, &manifest, &git);
-    commit_tracked(root, "ref.md", original_ref, DocType::Reference, &manifest, &git);
+    commit_tracked(
+        root,
+        "context.md",
+        original_context,
+        DocType::Context,
+        &manifest,
+        &git,
+    );
+    commit_tracked(
+        root,
+        "ref.md",
+        original_ref,
+        DocType::Reference,
+        &manifest,
+        &git,
+    );
     commit_tracked(root, "log.md", original_log, DocType::Log, &manifest, &git);
 
     let mut proc = make_processor(git, manifest.clone(), Some("evil-agent"));
@@ -397,7 +470,11 @@ fn pe1_agent_rapid_fire_protected_writes() {
         let ctx = std::fs::read_to_string(root.join("context.md")).unwrap();
         let rf = std::fs::read_to_string(root.join("ref.md")).unwrap();
         let lg = std::fs::read_to_string(root.join("log.md")).unwrap();
-        assert_eq!(ctx, original_context, "context.md reverted on attempt {}", i);
+        assert_eq!(
+            ctx, original_context,
+            "context.md reverted on attempt {}",
+            i
+        );
         assert_eq!(rf, original_ref, "ref.md reverted on attempt {}", i);
         assert_eq!(lg, original_log, "log.md reverted on attempt {}", i);
     }
@@ -405,7 +482,10 @@ fn pe1_agent_rapid_fire_protected_writes() {
     // Check violations were recorded in git log.
     let git2 = GitStore::open(root).unwrap();
     let log = git2.log(100).unwrap();
-    let violations: Vec<_> = log.iter().filter(|e| matches!(e.action, Action::Violation)).collect();
+    let violations: Vec<_> = log
+        .iter()
+        .filter(|e| matches!(e.action, Action::Violation))
+        .collect();
     assert!(!violations.is_empty(), "Violation commits must be recorded");
 }
 
@@ -417,7 +497,14 @@ fn pe2_agent_races_the_revert() {
     let root = tmp.path();
 
     let original = "# Reference — protected content";
-    commit_tracked(root, "ref.md", original, DocType::Reference, &manifest, &git);
+    commit_tracked(
+        root,
+        "ref.md",
+        original,
+        DocType::Reference,
+        &manifest,
+        &git,
+    );
 
     let mut proc = make_processor(git, manifest.clone(), Some("clever-agent"));
 
@@ -427,13 +514,20 @@ fn pe2_agent_races_the_revert() {
         proc.run_poll_cycle().unwrap();
         // After each poll, content must be reverted.
         let content = std::fs::read_to_string(root.join("ref.md")).unwrap();
-        assert_eq!(content, original, "After cycle {}, ref.md must be reverted", i);
+        assert_eq!(
+            content, original,
+            "After cycle {}, ref.md must be reverted",
+            i
+        );
     }
 
     // After writer stops, content is stable.
     proc.run_poll_cycle().unwrap(); // no changes this time
     let final_content = std::fs::read_to_string(root.join("ref.md")).unwrap();
-    assert_eq!(final_content, original, "After writer stops, content must match original");
+    assert_eq!(
+        final_content, original,
+        "After writer stops, content must match original"
+    );
 }
 
 /// PE-3: Override expiry — allowed before expiry, denied after.
@@ -444,18 +538,27 @@ fn pe3_override_expiry_during_session() {
     let root = tmp.path();
 
     let original = "# Reference content";
-    commit_tracked(root, "ref.md", original, DocType::Reference, &manifest, &git);
+    commit_tracked(
+        root,
+        "ref.md",
+        original,
+        DocType::Reference,
+        &manifest,
+        &git,
+    );
 
     // Create an active override (expires far in the future).
     let mut overrides = Overrides::default();
-    overrides.add(OverrideEntry {
-        doc_id: "ref".into(),
-        path: PathBuf::from("ref.md"),
-        allow_actor: "agent".into(),
-        granted_at: Utc::now(),
-        expires_at: Utc::now() + chrono::Duration::hours(1),
-        granted_by: "user".into(),
-    }).unwrap();
+    overrides
+        .add(OverrideEntry {
+            doc_id: "ref".into(),
+            path: PathBuf::from("ref.md"),
+            allow_actor: "agent".into(),
+            granted_at: Utc::now(),
+            expires_at: Utc::now() + chrono::Duration::hours(1),
+            granted_by: "user".into(),
+        })
+        .unwrap();
     overrides.save(root).unwrap();
 
     // Agent writes while override is active — should be ALLOWED.
@@ -466,19 +569,22 @@ fn pe3_override_expiry_during_session() {
     let content_after_allowed = std::fs::read_to_string(root.join("ref.md")).unwrap();
     assert!(
         content_after_allowed.contains("Agent edit"),
-        "Write within override window must be committed; got: {:?}", content_after_allowed
+        "Write within override window must be committed; got: {:?}",
+        content_after_allowed
     );
 
     // Now expire the override by setting expires_at to the past.
     let mut overrides2 = Overrides::default();
-    overrides2.add(OverrideEntry {
-        doc_id: "ref".into(),
-        path: PathBuf::from("ref.md"),
-        allow_actor: "agent".into(),
-        granted_at: Utc::now() - chrono::Duration::hours(2),
-        expires_at: Utc::now() - chrono::Duration::hours(1), // already expired
-        granted_by: "user".into(),
-    }).unwrap();
+    overrides2
+        .add(OverrideEntry {
+            doc_id: "ref".into(),
+            path: PathBuf::from("ref.md"),
+            allow_actor: "agent".into(),
+            granted_at: Utc::now() - chrono::Duration::hours(2),
+            expires_at: Utc::now() - chrono::Duration::hours(1), // already expired
+            granted_by: "user".into(),
+        })
+        .unwrap();
     overrides2.save(root).unwrap();
 
     // Agent writes after expiry — should be DENIED.
@@ -535,8 +641,11 @@ fn pe4_agent_files_faster_than_classification() {
         let entry = m.find_by_path(&PathBuf::from(*f));
         if let Some(e) = entry {
             assert_eq!(
-                e.doc_type, DocType::Scratch,
-                "Agent-created file {} must be Scratch, got {:?}", f, e.doc_type
+                e.doc_type,
+                DocType::Scratch,
+                "Agent-created file {} must be Scratch, got {:?}",
+                f,
+                e.doc_type
             );
         }
     }
@@ -584,14 +693,22 @@ fn gs1_hundreds_of_commits_log_performance() {
     let file_log = git2.log_file(&PathBuf::from("a.md"), 200).unwrap();
     let file_log_ms = t1.elapsed().as_millis();
     assert!(!file_log.is_empty(), "a.md must have commits");
-    assert!(file_log_ms < 1000, "log_file took {}ms, must be < 1s", file_log_ms);
+    assert!(
+        file_log_ms < 1000,
+        "log_file took {}ms, must be < 1s",
+        file_log_ms
+    );
 
     // info (version_count) must be < 1s.
     let t2 = Instant::now();
     let count = git2.version_count(&PathBuf::from("a.md")).unwrap();
     let count_ms = t2.elapsed().as_millis();
     assert!(count >= 20, "a.md must have >= 20 versions");
-    assert!(count_ms < 1000, "version_count took {}ms, must be < 1s", count_ms);
+    assert!(
+        count_ms < 1000,
+        "version_count took {}ms, must be < 1s",
+        count_ms
+    );
 }
 
 /// GS-2: Simulated SIGKILL — git repo must be consistent after restart.
@@ -616,7 +733,11 @@ fn gs2_integrity_after_abrupt_drop() {
     // Reopen and verify repo is healthy.
     let git2 = GitStore::open(root).unwrap();
     let log = git2.log(20).unwrap();
-    assert!(log.len() >= 10, "All commits must survive drop; got {}", log.len());
+    assert!(
+        log.len() >= 10,
+        "All commits must survive drop; got {}",
+        log.len()
+    );
 
     // No index.lock should exist.
     assert!(
@@ -652,7 +773,9 @@ fn gs3_very_long_file_paths() {
     let git2 = GitStore::open(root).unwrap();
     let file_log = git2.log_file(&PathBuf::from(&deep_path), 5).unwrap();
     assert!(!file_log.is_empty(), "Deep file must have commits");
-    let content = git2.show_file_at_version(&PathBuf::from(&deep_path), 1).unwrap();
+    let content = git2
+        .show_file_at_version(&PathBuf::from(&deep_path), 1)
+        .unwrap();
     assert_eq!(content, "# Deep", "Content at v1 must match");
 }
 
@@ -673,7 +796,10 @@ fn gs4_binary_content_in_md_file() {
 
     // File should be tracked (it has .md extension).
     let m = manifest.lock().unwrap();
-    assert!(m.is_tracked(&PathBuf::from("binary.md")), "Binary .md must be tracked");
+    assert!(
+        m.is_tracked(&PathBuf::from("binary.md")),
+        "Binary .md must be tracked"
+    );
     drop(m);
 
     // info (log_file) must work.
@@ -683,7 +809,11 @@ fn gs4_binary_content_in_md_file() {
 
     // diff_file must not panic (may return empty or binary marker).
     let diff_result = git2.diff_file(&PathBuf::from("binary.md"), None, None);
-    assert!(diff_result.is_ok(), "diff_file must not error on binary: {:?}", diff_result.err());
+    assert!(
+        diff_result.is_ok(),
+        "diff_file must not error on binary: {:?}",
+        diff_result.err()
+    );
 
     // show_file_at_version on a binary file: returns Err (UTF-8 decode failure) or empty.
     // Both are acceptable — no panic.
@@ -704,23 +834,31 @@ fn gs5_empty_md_file() {
     proc.run_poll_cycle().unwrap();
 
     let m = manifest.lock().unwrap();
-    assert!(m.is_tracked(&PathBuf::from("empty.md")), "Empty .md must be tracked");
+    assert!(
+        m.is_tracked(&PathBuf::from("empty.md")),
+        "Empty .md must be tracked"
+    );
     drop(m);
 
     let git2 = GitStore::open(root).unwrap();
 
     // Show v1: must return empty string (not panic).
-    let content = git2.show_file_at_version(&PathBuf::from("empty.md"), 1).unwrap();
+    let content = git2
+        .show_file_at_version(&PathBuf::from("empty.md"), 1)
+        .unwrap();
     assert_eq!(content, "", "Empty file at v1 must be empty string");
 
     // Modify the empty file and take a diff.
     std::fs::write(root.join("empty.md"), "now has content\n").unwrap();
     proc.run_poll_cycle().unwrap();
 
-    let diff = git2.diff_file(&PathBuf::from("empty.md"), Some(1), Some(2)).unwrap();
+    let diff = git2
+        .diff_file(&PathBuf::from("empty.md"), Some(1), Some(2))
+        .unwrap();
     assert!(
         diff.contains("now has content") || diff.contains("+"),
-        "Diff from empty to content must show addition; got: {:?}", diff
+        "Diff from empty to content must show addition; got: {:?}",
+        diff
     );
 }
 
@@ -745,7 +883,10 @@ fn gs6_symlinks_in_store_directory() {
     // System must be consistent — no panic is the primary requirement.
     let m = manifest.lock().unwrap();
     // real.md should be tracked; link.md and external.md behavior is implementation-defined.
-    assert!(m.is_tracked(&PathBuf::from("real.md")), "real.md must be tracked");
+    assert!(
+        m.is_tracked(&PathBuf::from("real.md")),
+        "real.md must be tracked"
+    );
 
     // External symlink must not have leaked /etc/hosts content into the repo.
     // If external.md is tracked, its committed content must not be /etc/hosts content.
@@ -784,8 +925,9 @@ fn dc1_agent_trace_md_consistency_under_rapid_changes() {
         for i in 0..5 {
             std::fs::write(
                 root.join(format!("doc{}.md", i)),
-                format!("# Doc {} round {}", i, round)
-            ).unwrap();
+                format!("# Doc {} round {}", i, round),
+            )
+            .unwrap();
         }
         proc.run_poll_cycle().unwrap();
     }
@@ -813,8 +955,16 @@ fn dc2_context_synthesis_with_conflicting_documents() {
     let mut proc = make_processor(git, manifest.clone(), None);
 
     // Create two plans with contradictory information.
-    std::fs::write(root.join("plan-a.md"), "# Plan A\n\nWe're building in Python.").unwrap();
-    std::fs::write(root.join("plan-b.md"), "# Plan B\n\nWe're building in Rust.").unwrap();
+    std::fs::write(
+        root.join("plan-a.md"),
+        "# Plan A\n\nWe're building in Python.",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("plan-b.md"),
+        "# Plan B\n\nWe're building in Rust.",
+    )
+    .unwrap();
     proc.run_poll_cycle().unwrap();
 
     // Reclassify both as Plan and save to disk.
@@ -838,7 +988,8 @@ fn dc2_context_synthesis_with_conflicting_documents() {
     // The no-LLM template lists all plans.
     assert!(
         context.contains("plan-a.md") || context.contains("plan-b.md"),
-        "Context must reference the plan files; got: {}", &context[..200.min(context.len())]
+        "Context must reference the plan files; got: {}",
+        &context[..200.min(context.len())]
     );
 }
 
@@ -849,15 +1000,26 @@ fn dc3_context_synthesis_large_document_set() {
 
     // Create 50 plan files.
     for i in 0..50 {
-        store.write_file(&format!("plan-{:02}.md", i), &format!("# Plan {}\n\n{}", i, "Content. ".repeat(200)));
-        store.run(&["add", "plan", &format!("plan-{:02}.md", i)]).expect_success("add plan");
+        store.write_file(
+            &format!("plan-{:02}.md", i),
+            &format!("# Plan {}\n\n{}", i, "Content. ".repeat(200)),
+        );
+        store
+            .run(&["add", "plan", &format!("plan-{:02}.md", i)])
+            .expect_success("add plan");
     }
 
     let t0 = Instant::now();
-    store.run(&["context", "refresh"]).expect_success("context refresh with 50 plans");
+    store
+        .run(&["context", "refresh"])
+        .expect_success("context refresh with 50 plans");
     let elapsed = t0.elapsed().as_secs();
 
-    assert!(elapsed < 10, "context refresh with 50 plans must complete in < 10s; took {}s", elapsed);
+    assert!(
+        elapsed < 10,
+        "context refresh with 50 plans must complete in < 10s; took {}s",
+        elapsed
+    );
 
     let context = store.read_file("context.md");
     assert!(!context.is_empty(), "context.md must not be empty");
@@ -905,7 +1067,11 @@ fn dc4_agent_trace_md_written_atomically() {
         "AGENT-TRACE.md.tmp must not persist after write"
     );
     // Ideally zero partial reads, but we accept a small race window.
-    assert!(partial == 0, "Readers saw {} empty AGENT-TRACE.md reads — atomic write may have failed", partial);
+    assert!(
+        partial == 0,
+        "Readers saw {} empty AGENT-TRACE.md reads — atomic write may have failed",
+        partial
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -933,7 +1099,8 @@ fn ts1_changelog_panel_entry_eviction() {
 
     assert!(
         changelog.entries.len() <= 200,
-        "ChangelogState must cap at 200 entries; has {}", changelog.entries.len()
+        "ChangelogState must cap at 200 entries; has {}",
+        changelog.entries.len()
     );
     // Scroll must not be out of bounds.
     assert!(
@@ -945,8 +1112,8 @@ fn ts1_changelog_panel_entry_eviction() {
 /// TS-2: Very long filenames in tree — render_widget must not panic.
 #[test]
 fn ts2_long_filenames_in_tree_panel() {
-    use ratatui::{backend::TestBackend, Terminal};
     use agent_trace::tui::app::App;
+    use ratatui::{backend::TestBackend, Terminal};
     use std::sync::{Arc, Mutex};
 
     let tmp = TempDir::new().unwrap();
@@ -957,7 +1124,9 @@ fn ts2_long_filenames_in_tree_panel() {
 
     // Register a file with a 120-character name.
     let long_name = "this-is-an-extremely-long-filename-that-should-test-the-tree-panel-rendering-boundaries-with-more-chars.md";
-    manifest.register(&PathBuf::from(long_name), DocType::Scratch, "").unwrap();
+    manifest
+        .register(&PathBuf::from(long_name), DocType::Scratch, "")
+        .unwrap();
 
     let manifest_arc = Arc::new(Mutex::new(manifest));
     let (_tx, rx) = tokio::sync::mpsc::channel(1);
@@ -973,8 +1142,8 @@ fn ts2_long_filenames_in_tree_panel() {
 /// TS-3: 500 files in tree panel — renders without panic or significant delay.
 #[test]
 fn ts3_thousands_of_files_in_tree_panel() {
-    use ratatui::{backend::TestBackend, Terminal};
     use agent_trace::tui::app::App;
+    use ratatui::{backend::TestBackend, Terminal};
     use std::sync::{Arc, Mutex};
 
     let tmp = TempDir::new().unwrap();
@@ -984,11 +1153,13 @@ fn ts3_thousands_of_files_in_tree_panel() {
     let mut manifest = Manifest::create_empty(info, root).unwrap();
 
     for i in 0..500 {
-        manifest.register(
-            &PathBuf::from(format!("dir{:02}/file{:04}.md", i % 20, i)),
-            DocType::Scratch,
-            "",
-        ).unwrap();
+        manifest
+            .register(
+                &PathBuf::from(format!("dir{:02}/file{:04}.md", i % 20, i)),
+                DocType::Scratch,
+                "",
+            )
+            .unwrap();
     }
     assert_eq!(manifest.len(), 500);
 
@@ -1003,7 +1174,11 @@ fn ts3_thousands_of_files_in_tree_panel() {
     terminal.draw(|f| app.render(f)).unwrap();
     let render_ms = t0.elapsed().as_millis();
 
-    assert!(render_ms < 500, "Render of 500 files must be < 500ms; took {}ms", render_ms);
+    assert!(
+        render_ms < 500,
+        "Render of 500 files must be < 500ms; took {}ms",
+        render_ms
+    );
 }
 
 /// TS-4: Very long chat input (500 chars) — ChatState handles without overflow.
@@ -1014,7 +1189,11 @@ fn ts4_long_chat_input() {
     for c in long_cmd.chars() {
         chat.push_char(c);
     }
-    assert_eq!(chat.input.len(), 500, "ChatState must accept 500-char input");
+    assert_eq!(
+        chat.input.len(),
+        500,
+        "ChatState must accept 500-char input"
+    );
     assert_eq!(chat.cursor, 500, "Cursor must be at end");
 
     // Take input must work.
@@ -1038,7 +1217,11 @@ fn ts5_rapid_keyboard_input() {
     for _ in 0..100 {
         chat.backspace();
     }
-    assert_eq!(chat.input.len(), 100, "100 backspaces must reduce input by 100");
+    assert_eq!(
+        chat.input.len(),
+        100,
+        "100 backspaces must reduce input by 100"
+    );
 
     // Rapid Tab (panel switch simulation) — ChatState itself doesn't handle Tab,
     // but we verify no panic from rapid push/pop.
@@ -1088,7 +1271,14 @@ fn fs3_file_permissions_changed_externally() {
     let (git, manifest) = setup_store(&tmp);
     let root = tmp.path();
 
-    commit_tracked(root, "protected.md", "# Protected", DocType::Scratch, &manifest, &git);
+    commit_tracked(
+        root,
+        "protected.md",
+        "# Protected",
+        DocType::Scratch,
+        &manifest,
+        &git,
+    );
 
     let mut proc = make_processor(git, manifest.clone(), None);
 
@@ -1097,21 +1287,26 @@ fn fs3_file_permissions_changed_externally() {
     std::fs::set_permissions(
         root.join("protected.md"),
         std::fs::Permissions::from_mode(0o000),
-    ).unwrap();
+    )
+    .unwrap();
 
     // Poll must not panic. May return an error because git2 can't read the locked file.
     let _ = proc.run_poll_cycle();
 
     // File must still be in manifest (we don't silently untrack).
     let m = manifest.lock().unwrap();
-    assert!(m.is_tracked(&PathBuf::from("protected.md")), "Unreadable file must stay in manifest");
+    assert!(
+        m.is_tracked(&PathBuf::from("protected.md")),
+        "Unreadable file must stay in manifest"
+    );
     drop(m);
 
     // Restore permissions; next poll should detect the chmod as a modify.
     std::fs::set_permissions(
         root.join("protected.md"),
         std::fs::Permissions::from_mode(0o644),
-    ).unwrap();
+    )
+    .unwrap();
     proc.run_poll_cycle().unwrap();
     // No panic = pass.
 }
@@ -1152,8 +1347,22 @@ fn fs5_gitignore_modified_while_running() {
     let root = tmp.path();
 
     // Track notes.md and secret.md.
-    commit_tracked(root, "notes.md", "# Notes", DocType::Scratch, &manifest, &git);
-    commit_tracked(root, "secret.md", "# Secret", DocType::Scratch, &manifest, &git);
+    commit_tracked(
+        root,
+        "notes.md",
+        "# Notes",
+        DocType::Scratch,
+        &manifest,
+        &git,
+    );
+    commit_tracked(
+        root,
+        "secret.md",
+        "# Secret",
+        DocType::Scratch,
+        &manifest,
+        &git,
+    );
 
     let mut proc = make_processor(git, manifest.clone(), None);
 
@@ -1201,7 +1410,8 @@ fn di1_manifest_git_consistency_after_1000_ops() {
         std::fs::write(
             root.join(format!("file{}.md", file_idx)),
             format!("round {} file {}", round, file_idx),
-        ).unwrap();
+        )
+        .unwrap();
         proc.run_poll_cycle().unwrap();
     }
 
@@ -1226,7 +1436,14 @@ fn di2_version_numbers_are_monotonic() {
     let root = tmp.path();
 
     // Create initial version.
-    commit_tracked(root, "versioned.md", "content v1", DocType::Scratch, &manifest, &git);
+    commit_tracked(
+        root,
+        "versioned.md",
+        "content v1",
+        DocType::Scratch,
+        &manifest,
+        &git,
+    );
 
     let mut proc = make_processor(git, manifest.clone(), None);
 
@@ -1249,7 +1466,9 @@ fn di2_version_numbers_are_monotonic() {
         let content = git2.show_file_at_version(&PathBuf::from("versioned.md"), v);
         assert!(
             content.is_ok(),
-            "Version {} must be retrievable; error: {:?}", v, content.err()
+            "Version {} must be retrievable; error: {:?}",
+            v,
+            content.err()
         );
         let text = content.unwrap();
         // Extract the N from "content vN".
@@ -1263,7 +1482,9 @@ fn di2_version_numbers_are_monotonic() {
     for expected in 1u32..=20 {
         assert!(
             seen_versions.contains(&expected),
-            "content v{} must appear in version history; seen: {:?}", expected, seen_versions
+            "content v{} must appear in version history; seen: {:?}",
+            expected,
+            seen_versions
         );
     }
 }
@@ -1275,7 +1496,14 @@ fn di3_rename_preserves_full_history() {
     let (git, manifest) = setup_store(&tmp);
     let root = tmp.path();
 
-    commit_tracked(root, "old-name.md", "# v1", DocType::Scratch, &manifest, &git);
+    commit_tracked(
+        root,
+        "old-name.md",
+        "# v1",
+        DocType::Scratch,
+        &manifest,
+        &git,
+    );
     let mut proc = make_processor(git, manifest.clone(), None);
 
     // 4 more modifications under old name.
@@ -1298,7 +1526,11 @@ fn di3_rename_preserves_full_history() {
 
     // new-name.md must have at least 3 versions (post-rename modifications).
     let new_log = git2.log_file(&PathBuf::from("new-name.md"), 20).unwrap();
-    assert!(new_log.len() >= 3, "new-name.md must have >= 3 commits; got {}", new_log.len());
+    assert!(
+        new_log.len() >= 3,
+        "new-name.md must have >= 3 commits; got {}",
+        new_log.len()
+    );
 
     // The manifest must track new-name.md.
     // NOTE: git2 rename detection is similarity-based. If not detected as Renamed,
@@ -1306,7 +1538,10 @@ fn di3_rename_preserves_full_history() {
     // auto-untracked (user must run `agent-trace untrack` or `repair`). So old-name.md
     // may still appear in the manifest — that is expected behaviour.
     let m = manifest.lock().unwrap();
-    assert!(m.is_tracked(&PathBuf::from("new-name.md")), "new-name.md must be in manifest");
+    assert!(
+        m.is_tracked(&PathBuf::from("new-name.md")),
+        "new-name.md must be in manifest"
+    );
 }
 
 /// DI-4: Restore doesn't corrupt subsequent versions — all versions independently retrievable.
@@ -1316,7 +1551,14 @@ fn di4_restore_does_not_corrupt_subsequent_versions() {
     let (git, manifest) = setup_store(&tmp);
     let root = tmp.path();
 
-    commit_tracked(root, "doc.md", "v1 content", DocType::Scratch, &manifest, &git);
+    commit_tracked(
+        root,
+        "doc.md",
+        "v1 content",
+        DocType::Scratch,
+        &manifest,
+        &git,
+    );
     let mut proc = make_processor(git, manifest.clone(), None);
 
     std::fs::write(root.join("doc.md"), "v2 content").unwrap();
@@ -1326,7 +1568,8 @@ fn di4_restore_does_not_corrupt_subsequent_versions() {
 
     // Restore to v1.
     let git2 = GitStore::open(root).unwrap();
-    git2.restore_file(&PathBuf::from("doc.md"), 1, DocType::Scratch).unwrap();
+    git2.restore_file(&PathBuf::from("doc.md"), 1, DocType::Scratch)
+        .unwrap();
     // File on disk is now "v1 content" again; run poll to commit the restore.
     proc.run_poll_cycle().unwrap();
 
@@ -1336,21 +1579,43 @@ fn di4_restore_does_not_corrupt_subsequent_versions() {
 
     let git3 = GitStore::open(root).unwrap();
     let count = git3.version_count(&PathBuf::from("doc.md")).unwrap();
-    assert!(count >= 4, "Must have >= 4 versions after restore + new edit; got {}", count);
+    assert!(
+        count >= 4,
+        "Must have >= 4 versions after restore + new edit; got {}",
+        count
+    );
 
     // Collect all version contents. NOTE: rapid commits share unix timestamps so
     // Sort::TIME ordering within a second is undefined. We verify the full SET of
     // distinct content values covers the expected commits.
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     for v in 1..=count {
-        let text = git3.show_file_at_version(&PathBuf::from("doc.md"), v).unwrap();
+        let text = git3
+            .show_file_at_version(&PathBuf::from("doc.md"), v)
+            .unwrap();
         seen.insert(text.trim().to_string());
     }
 
     // All distinct content variants must appear in history.
-    assert!(seen.contains("v1 content"), "v1 content must appear in history; seen: {:?}", seen);
-    assert!(seen.contains("v2 content"), "v2 content must appear in history; seen: {:?}", seen);
-    assert!(seen.contains("v3 content"), "v3 content must appear in history; seen: {:?}", seen);
+    assert!(
+        seen.contains("v1 content"),
+        "v1 content must appear in history; seen: {:?}",
+        seen
+    );
+    assert!(
+        seen.contains("v2 content"),
+        "v2 content must appear in history; seen: {:?}",
+        seen
+    );
+    assert!(
+        seen.contains("v3 content"),
+        "v3 content must appear in history; seen: {:?}",
+        seen
+    );
     // "v1 content" appears twice (original + restore), and "v5 new content" is the latest edit.
-    assert!(seen.iter().any(|s| s.contains("v5")), "v5 new content must appear; seen: {:?}", seen);
+    assert!(
+        seen.iter().any(|s| s.contains("v5")),
+        "v5 new content must appear; seen: {:?}",
+        seen
+    );
 }

@@ -19,10 +19,20 @@ fn fr1_manifest_corruption_recovery() {
 
     // Verify 5 files tracked.
     let out = store.run(&["ls"]).expect_success("ls before corrupt");
-    assert_eq!(out.stdout().lines().filter(|l| l.starts_with("[S]")).count(), 5);
+    assert_eq!(
+        out.stdout()
+            .lines()
+            .filter(|l| l.starts_with("[S]"))
+            .count(),
+        5
+    );
 
     // Corrupt the manifest.
-    std::fs::write(store.root().join(".agent-trace/manifest.toml"), "THIS IS GARBAGE !!@#$%").unwrap();
+    std::fs::write(
+        store.root().join(".agent-trace/manifest.toml"),
+        "THIS IS GARBAGE !!@#$%",
+    )
+    .unwrap();
 
     // repair should rebuild.
     let out = store.run(&["repair"]).expect_success("repair");
@@ -31,8 +41,16 @@ fn fr1_manifest_corruption_recovery() {
     // ls should work again.
     let out = store.run(&["ls"]).expect_success("ls after repair");
     // Files are re-added as scratch (types lost), count should be 5+.
-    let scratch_count = out.stdout().lines().filter(|l| l.starts_with("[S]")).count();
-    assert!(scratch_count >= 4, "Expected at least 4 scratch docs after repair, got:\n{}", out.stdout());
+    let scratch_count = out
+        .stdout()
+        .lines()
+        .filter(|l| l.starts_with("[S]"))
+        .count();
+    assert!(
+        scratch_count >= 4,
+        "Expected at least 4 scratch docs after repair, got:\n{}",
+        out.stdout()
+    );
 }
 
 // ── FR-2: Manifest Deletion Recovery ─────────────────────────────────────────
@@ -51,11 +69,15 @@ fn fr2_manifest_deletion_recovery() {
     std::fs::remove_file(store.root().join(".agent-trace/manifest.toml")).unwrap();
 
     // repair should create fresh manifest.
-    let out = store.run(&["repair"]).expect_success("repair after deletion");
+    let out = store
+        .run(&["repair"])
+        .expect_success("repair after deletion");
     out.assert_stdout_contains("Repair complete");
 
     // ls should work.
-    store.run(&["ls"]).expect_success("ls after manifest deletion repair");
+    store
+        .run(&["ls"])
+        .expect_success("ls after manifest deletion repair");
 }
 
 // ── FR-3: Interrupted Manifest Write ─────────────────────────────────────────
@@ -73,7 +95,10 @@ fn fr3_interrupted_manifest_write_cleanup() {
     store.run(&["ls"]).expect_success("ls with stale tmp");
 
     // The tmp file should be cleaned up.
-    assert!(!tmp_path.exists(), "stale .tmp file should be cleaned up on load");
+    assert!(
+        !tmp_path.exists(),
+        "stale .tmp file should be cleaned up on load"
+    );
 }
 
 // ── FR-4: Git Repository Corruption ──────────────────────────────────────────
@@ -113,7 +138,8 @@ fn fr4_git_corruption_reported_clearly() {
         let output = format!("{}{}", stdout, stderr);
         assert!(
             !output.contains("thread 'main' panicked"),
-            "should not panic on git corruption, got:\n{}", output
+            "should not panic on git corruption, got:\n{}",
+            output
         );
     }
     // If no object file found (bare pack only), skip — still a pass.
@@ -131,7 +157,10 @@ fn fr5_no_lock_left_after_normal_operation() {
     store.run(&["log"]).expect_success("log");
 
     let lock_path = store.root().join(".agent-trace/locks/instance.lock");
-    assert!(!lock_path.exists(), "no instance lock should remain after CLI operations");
+    assert!(
+        !lock_path.exists(),
+        "no instance lock should remain after CLI operations"
+    );
 }
 
 // ── FR-6: Large File Handling ─────────────────────────────────────────────────
@@ -145,19 +174,30 @@ fn fr6_large_file_tracked() {
     store.write_file("large.md", &content);
 
     let start = Instant::now();
-    store.run(&["add", "scratch", "large.md"]).expect_success("add large file");
+    store
+        .run(&["add", "scratch", "large.md"])
+        .expect_success("add large file");
     let elapsed = start.elapsed();
 
     // Should complete in reasonable time.
-    assert!(elapsed.as_secs() < 30, "large file add took too long: {:?}", elapsed);
+    assert!(
+        elapsed.as_secs() < 30,
+        "large file add took too long: {:?}",
+        elapsed
+    );
 
     // File is tracked.
     let out = store.run(&["ls"]).expect_success("ls");
     out.assert_stdout_contains("large.md");
 
     // show v1 works.
-    let out = store.run(&["show", "large.md", "1"]).expect_success("show v1");
-    assert!(out.stdout().starts_with("# Large File"), "show v1 should return file content");
+    let out = store
+        .run(&["show", "large.md", "1"])
+        .expect_success("show v1");
+    assert!(
+        out.stdout().starts_with("# Large File"),
+        "show v1 should return file content"
+    );
 }
 
 // ── FR-7: Special Characters in Filenames ─────────────────────────────────────
@@ -175,7 +215,9 @@ fn fr7_special_characters_in_filenames() {
 
     for (name, content) in &files {
         store.write_file(name, content);
-        store.run(&["add", "scratch", name]).expect_success(&format!("add {}", name));
+        store
+            .run(&["add", "scratch", name])
+            .expect_success(&format!("add {}", name));
     }
 
     // ls shows all.
@@ -185,8 +227,12 @@ fn fr7_special_characters_in_filenames() {
     }
 
     // info works on hyphenated name.
-    store.run(&["info", "my-plan.md"]).expect_success("info my-plan.md");
-    store.run(&["info", "my_plan.md"]).expect_success("info my_plan.md");
+    store
+        .run(&["info", "my-plan.md"])
+        .expect_success("info my-plan.md");
+    store
+        .run(&["info", "my_plan.md"])
+        .expect_success("info my_plan.md");
 }
 
 // Separate test for file with spaces (needs quoting — tricky in Command args).
@@ -195,12 +241,16 @@ fn fr7_file_with_spaces() {
     let store = TestStore::new();
     store.write_file("my plan.md", "# My Plan With Space");
     // Pass the full argument as a single string — Command handles this correctly (no shell).
-    store.run(&["add", "scratch", "my plan.md"]).expect_success("add file with space");
+    store
+        .run(&["add", "scratch", "my plan.md"])
+        .expect_success("add file with space");
 
     let out = store.run(&["ls"]).expect_success("ls");
     out.assert_stdout_contains("my plan.md");
 
-    store.run(&["info", "my plan.md"]).expect_success("info with space");
+    store
+        .run(&["info", "my plan.md"])
+        .expect_success("info with space");
 }
 
 // ── FR-8: Empty Store Operations ─────────────────────────────────────────────
@@ -221,14 +271,20 @@ fn fr8_empty_store_operations_no_crash() {
     out.assert_stdout_contains("0 document");
 
     // context refresh → creates minimal context.md
-    let out = store.run(&["context", "refresh"]).expect_success("context refresh empty");
+    let out = store
+        .run(&["context", "refresh"])
+        .expect_success("context refresh empty");
     out.assert_stdout_contains("context.md refreshed");
 
     // violations → "No violations recorded"
-    let out = store.run(&["violations"]).expect_success("violations empty");
+    let out = store
+        .run(&["violations"])
+        .expect_success("violations empty");
     out.assert_stdout_contains("No violations recorded");
 
     // replace → "No matches found"
-    let out = store.run(&["replace", "foo", "bar"]).expect_success("replace empty");
+    let out = store
+        .run(&["replace", "foo", "bar"])
+        .expect_success("replace empty");
     out.assert_stdout_contains("No matches found");
 }

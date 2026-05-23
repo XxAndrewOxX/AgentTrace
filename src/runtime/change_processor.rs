@@ -1,8 +1,8 @@
 use crate::config::MergedConfig;
-use crate::trace::pipeline::apply_trace_hooks;
 use crate::git_store::{CommitInfo, GitStore};
 use crate::manifest::Manifest;
 use crate::permissions::{check_permission, Overrides, PermissionResult, Violation};
+use crate::trace::pipeline::apply_trace_hooks;
 use crate::types::{Action, Actor, DocType, FileChange, LogEntry};
 use anyhow::Result;
 use chrono::Utc;
@@ -55,7 +55,13 @@ impl ChangeProcessor {
         ui_tx: Option<tokio::sync::mpsc::Sender<UiEvent>>,
     ) -> Self {
         let session_id = format!("{}", Utc::now().format("%Y%m%d-%H%M%S"));
-        Self { git, manifest, agent_state, ui_tx, session_id }
+        Self {
+            git,
+            manifest,
+            agent_state,
+            ui_tx,
+            session_id,
+        }
     }
 
     pub fn run_poll_cycle(&mut self) -> Result<()> {
@@ -81,7 +87,8 @@ impl ChangeProcessor {
             let action = change.action();
 
             // Determine doc type from manifest, default to Scratch for new files.
-            let doc_type = manifest.find_by_path(&path)
+            let doc_type = manifest
+                .find_by_path(&path)
                 .map(|d| d.doc_type.clone())
                 .unwrap_or(DocType::Scratch);
 
@@ -126,7 +133,9 @@ impl ChangeProcessor {
                     if let Some(tx) = &self.ui_tx {
                         let msg = format!(
                             "Permission denied: {} tried to modify {} ({})",
-                            actor, path.display(), reason
+                            actor,
+                            path.display(),
+                            reason
                         );
                         let _ = tx.try_send(UiEvent::Violation(msg));
                     }
@@ -145,20 +154,28 @@ impl ChangeProcessor {
                 files: vec![(
                     v.doc_path.clone(),
                     v.attempted_action.clone(),
-                    manifest.find_by_path(&v.doc_path)
+                    manifest
+                        .find_by_path(&v.doc_path)
                         .map(|d| d.doc_type.clone())
                         .unwrap_or(DocType::Scratch),
                 )],
                 actor: Actor::System,
                 summary: format!(
                     "violation: {} attempted {} on {} — {}",
-                    v.actor, v.attempted_action, v.doc_path.display(), v.reason
+                    v.actor,
+                    v.attempted_action,
+                    v.doc_path.display(),
+                    v.reason
                 ),
                 agent_name: v.agent_name.clone(),
                 session_id: None,
             };
             if let Err(e) = self.git.commit(&info) {
-                tracing::error!("Failed to commit violation record for {:?}: {:#}", v.doc_path, e);
+                tracing::error!(
+                    "Failed to commit violation record for {:?}: {:#}",
+                    v.doc_path,
+                    e
+                );
             }
         }
 
@@ -196,7 +213,8 @@ impl ChangeProcessor {
                     }
                     tracing::warn!(
                         "Commit failed, rolled back {} registration(s): {}",
-                        newly_registered.len(), e
+                        newly_registered.len(),
+                        e
                     );
                     return Ok(());
                 }
@@ -226,7 +244,10 @@ pub struct InstanceLock {
 
 impl InstanceLock {
     pub fn acquire(store_root: &Path) -> Result<Self> {
-        let path = store_root.join(".agent-trace").join("locks").join("instance.lock");
+        let path = store_root
+            .join(".agent-trace")
+            .join("locks")
+            .join("instance.lock");
         std::fs::create_dir_all(path.parent().unwrap())?;
 
         // Check for stale lock.
@@ -259,7 +280,7 @@ impl Drop for InstanceLock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{MergedConfig, GlobalConfig, StoreConfig, StoreInfo, PollingConfig};
+    use crate::config::{GlobalConfig, MergedConfig, PollingConfig, StoreConfig, StoreInfo};
     use crate::session::AgentState;
     use tempfile::TempDir;
 
@@ -270,7 +291,11 @@ mod tests {
         let info = StoreInfo::new("test".into());
         let manifest = Manifest::create_empty(info.clone(), root).unwrap();
         let global = GlobalConfig::default();
-        let store_cfg = StoreConfig { store: info, llm: None, polling: PollingConfig::default() };
+        let store_cfg = StoreConfig {
+            store: info,
+            llm: None,
+            polling: PollingConfig::default(),
+        };
         let config = MergedConfig::merge(global, store_cfg);
         (git, Arc::new(Mutex::new(manifest)), config)
     }
@@ -311,7 +336,12 @@ mod tests {
     fn test_agent_state_cli_flag() {
         let tmp = TempDir::new().unwrap();
         let state = AgentState::new(Some("aider".into()));
-        assert_eq!(state.current_actor(tmp.path()), Actor::Agent { name: "aider".into() });
+        assert_eq!(
+            state.current_actor(tmp.path()),
+            Actor::Agent {
+                name: "aider".into()
+            }
+        );
     }
 
     #[test]
@@ -325,7 +355,12 @@ mod tests {
             "[agent]\nname=\"my-agent\"\nsession_id=\"s1\"\ntransport=\"cli\"\nstarted_at=\"2026-01-01T00:00:00Z\"\nlast_heartbeat=\"2099-01-01T00:00:00Z\"\n",
         ).unwrap();
         let state = AgentState::new(None);
-        assert_eq!(state.current_actor(root), Actor::Agent { name: "my-agent".into() });
+        assert_eq!(
+            state.current_actor(root),
+            Actor::Agent {
+                name: "my-agent".into()
+            }
+        );
     }
 
     #[test]
@@ -333,7 +368,12 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         // No lock file, but CLI flag set — should be Agent
         let state = AgentState::new(Some("cli-agent".into()));
-        assert_eq!(state.current_actor(tmp.path()), Actor::Agent { name: "cli-agent".into() });
+        assert_eq!(
+            state.current_actor(tmp.path()),
+            Actor::Agent {
+                name: "cli-agent".into()
+            }
+        );
     }
 
     #[test]
@@ -341,7 +381,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join(".agent-trace").join("locks")).unwrap();
-        let lock_path = root.join(".agent-trace").join("locks").join("instance.lock");
+        let lock_path = root
+            .join(".agent-trace")
+            .join("locks")
+            .join("instance.lock");
 
         {
             let _lock = InstanceLock::acquire(root).unwrap();
@@ -360,7 +403,11 @@ mod tests {
         {
             let info = CommitInfo {
                 action: Action::Create,
-                files: vec![(PathBuf::from("context.md"), Action::Create, DocType::Context)],
+                files: vec![(
+                    PathBuf::from("context.md"),
+                    Action::Create,
+                    DocType::Context,
+                )],
                 actor: Actor::System,
                 summary: "create context".into(),
                 agent_name: None,
@@ -370,7 +417,8 @@ mod tests {
         }
         {
             let mut m = manifest.lock().unwrap();
-            m.register(&PathBuf::from("context.md"), DocType::Context, "").unwrap();
+            m.register(&PathBuf::from("context.md"), DocType::Context, "")
+                .unwrap();
         }
 
         // Agent modifies context.md.

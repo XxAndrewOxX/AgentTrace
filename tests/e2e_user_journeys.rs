@@ -11,18 +11,33 @@ fn uj1_cold_start_empty() {
     let root = store.root();
 
     // .agent-trace/ structure created.
-    assert!(root.join(".agent-trace/config.toml").exists(), ".agent-trace/config.toml");
-    assert!(root.join(".agent-trace/manifest.toml").exists(), ".agent-trace/manifest.toml");
-    assert!(root.join(".agent-trace/locks").exists(), ".agent-trace/locks/");
+    assert!(
+        root.join(".agent-trace/config.toml").exists(),
+        ".agent-trace/config.toml"
+    );
+    assert!(
+        root.join(".agent-trace/manifest.toml").exists(),
+        ".agent-trace/manifest.toml"
+    );
+    assert!(
+        root.join(".agent-trace/locks").exists(),
+        ".agent-trace/locks/"
+    );
     assert!(root.join(".gitignore").exists(), ".gitignore");
 
     // AGENT-TRACE.md present and mentions 0 documents.
     assert!(root.join("AGENT-TRACE.md").exists(), "AGENT-TRACE.md");
     let at_md = std::fs::read_to_string(root.join("AGENT-TRACE.md")).unwrap();
-    assert!(at_md.contains("0 total"), "AGENT-TRACE.md should say 0 total");
+    assert!(
+        at_md.contains("0 total"),
+        "AGENT-TRACE.md should say 0 total"
+    );
 
     // No context.md (no documents).
-    assert!(!root.join("context.md").exists(), "context.md should not exist on empty store");
+    assert!(
+        !root.join("context.md").exists(),
+        "context.md should not exist on empty store"
+    );
 
     // status output.
     let out = store.run(&["status"]).expect_success("status");
@@ -68,7 +83,10 @@ fn uj2_cold_start_populated() {
 
     // AGENT-TRACE.md lists 5 files.
     let at_md = std::fs::read_to_string(store.root().join("AGENT-TRACE.md")).unwrap();
-    assert!(at_md.contains("5 total"), "AGENT-TRACE.md should have 5 total");
+    assert!(
+        at_md.contains("5 total"),
+        "AGENT-TRACE.md should have 5 total"
+    );
 
     // info on one file.
     let out = store.run(&["info", "notes.md"]).expect_success("info");
@@ -84,14 +102,20 @@ fn uj3_document_lifecycle() {
 
     // Create and add a plan doc.
     store.write_file("design.md", "# Design v1");
-    store.run(&["add", "plan", "design.md"]).expect_success("add");
+    store
+        .run(&["add", "plan", "design.md"])
+        .expect_success("add");
 
     // Reclassify to reference then back to plan to verify.
-    store.run(&["reclassify", "design.md", "reference"]).expect_success("reclassify");
+    store
+        .run(&["reclassify", "design.md", "reference"])
+        .expect_success("reclassify");
     let out = store.run(&["ls"]).expect_success("ls");
     out.assert_stdout_contains("[R]");
 
-    store.run(&["reclassify", "design.md", "plan"]).expect_success("reclassify back");
+    store
+        .run(&["reclassify", "design.md", "plan"])
+        .expect_success("reclassify back");
     let out = store.run(&["ls"]).expect_success("ls");
     out.assert_stdout_contains("[P]");
 
@@ -101,14 +125,24 @@ fn uj3_document_lifecycle() {
     // only returns commits that staged design.md itself — just the initial add.
     let out = store.run(&["log", "design.md"]).expect_success("log file");
     let stdout = out.stdout();
-    assert!(!stdout.contains("No log entries"), "Expected ≥1 file log entry, got:\n{}", stdout);
+    assert!(
+        !stdout.contains("No log entries"),
+        "Expected ≥1 file log entry, got:\n{}",
+        stdout
+    );
     // Full log includes reclassify commits (manifest changes).
     let out = store.run(&["log"]).expect_success("full log");
     let stdout = out.stdout();
-    assert!(stdout.lines().count() >= 3, "Expected at least 3 full log entries, got:\n{}", stdout);
+    assert!(
+        stdout.lines().count() >= 3,
+        "Expected at least 3 full log entries, got:\n{}",
+        stdout
+    );
 
     // show v1 (first version committed).
-    let out = store.run(&["show", "design.md", "1"]).expect_success("show v1");
+    let out = store
+        .run(&["show", "design.md", "1"])
+        .expect_success("show v1");
     out.assert_stdout_contains("# Design v1");
 
     // info shows plan type.
@@ -128,10 +162,18 @@ fn uj4_batch_replace() {
     store.write_file("plan3.md", "Connect to PostgreSQL");
     store.write_file("ref.md", "PostgreSQL reference doc");
 
-    store.run(&["add", "plan", "plan1.md"]).expect_success("add plan1");
-    store.run(&["add", "plan", "plan2.md"]).expect_success("add plan2");
-    store.run(&["add", "plan", "plan3.md"]).expect_success("add plan3");
-    store.run(&["add", "reference", "ref.md"]).expect_success("add ref");
+    store
+        .run(&["add", "plan", "plan1.md"])
+        .expect_success("add plan1");
+    store
+        .run(&["add", "plan", "plan2.md"])
+        .expect_success("add plan2");
+    store
+        .run(&["add", "plan", "plan3.md"])
+        .expect_success("add plan3");
+    store
+        .run(&["add", "reference", "ref.md"])
+        .expect_success("add ref");
 
     // Dry run: shows matches, does not apply.
     let out = store
@@ -173,15 +215,24 @@ fn uj5_context_management() {
 
     store.write_file("prd.md", "# PRD\n\nBuild a thing");
     store.write_file("arch.md", "# Architecture\n\nMicroservices");
-    store.run(&["add", "plan", "prd.md"]).expect_success("add prd");
-    store.run(&["add", "plan", "arch.md"]).expect_success("add arch");
+    store
+        .run(&["add", "plan", "prd.md"])
+        .expect_success("add prd");
+    store
+        .run(&["add", "plan", "arch.md"])
+        .expect_success("add arch");
 
     // Refresh context.
-    store.run(&["context", "refresh"]).expect_success("context refresh");
+    store
+        .run(&["context", "refresh"])
+        .expect_success("context refresh");
     assert!(store.file_exists("context.md"), "context.md should exist");
 
     let ctx = store.read_file("context.md");
-    assert!(ctx.contains("# Project Context"), "context.md should have header");
+    assert!(
+        ctx.contains("# Project Context"),
+        "context.md should have header"
+    );
 
     // Queue an update.
     store
@@ -189,19 +240,27 @@ fn uj5_context_management() {
         .expect_success("context update");
 
     // List pending updates.
-    let out = store.run(&["context", "updates"]).expect_success("context updates");
+    let out = store
+        .run(&["context", "updates"])
+        .expect_success("context updates");
     out.assert_stdout_contains("1 pending");
     out.assert_stdout_contains("switch to Rust");
 
     // Refresh incorporates updates.
-    store.run(&["context", "refresh"]).expect_success("context refresh 2");
+    store
+        .run(&["context", "refresh"])
+        .expect_success("context refresh 2");
 
     // After refresh, no more pending updates.
-    let out = store.run(&["context", "updates"]).expect_success("context updates 2");
+    let out = store
+        .run(&["context", "updates"])
+        .expect_success("context updates 2");
     out.assert_stdout_contains("No pending");
 
     // Show prints context.md content.
-    let out = store.run(&["context", "show"]).expect_success("context show");
+    let out = store
+        .run(&["context", "show"])
+        .expect_success("context show");
     out.assert_stdout_contains("Project Context");
 }
 
@@ -209,11 +268,7 @@ fn uj5_context_management() {
 
 #[test]
 fn uj6_cli_only() {
-    let store = TestStore::new_with_scan(&[
-        ("a.md", "# A"),
-        ("b.md", "# B"),
-        ("c.md", "# C"),
-    ]);
+    let store = TestStore::new_with_scan(&[("a.md", "# A"), ("b.md", "# B"), ("c.md", "# C")]);
 
     // status.
     store.run(&["status"]).expect_success("status");
@@ -223,7 +278,8 @@ fn uj6_cli_only() {
 
     // ls --json.
     let out = store.run(&["ls", "--json"]).expect_success("ls --json");
-    let json: serde_json::Value = serde_json::from_str(&out.stdout()).expect("ls --json output parses as JSON");
+    let json: serde_json::Value =
+        serde_json::from_str(&out.stdout()).expect("ls --json output parses as JSON");
     assert!(json.is_array(), "ls --json should return array");
 
     // info.
@@ -231,10 +287,14 @@ fn uj6_cli_only() {
 
     // add a new file.
     store.write_file("new-plan.md", "# New Plan");
-    store.run(&["add", "plan", "new-plan.md"]).expect_success("add");
+    store
+        .run(&["add", "plan", "new-plan.md"])
+        .expect_success("add");
 
     // reclassify.
-    store.run(&["reclassify", "a.md", "reference"]).expect_success("reclassify");
+    store
+        .run(&["reclassify", "a.md", "reference"])
+        .expect_success("reclassify");
 
     // log.
     store.run(&["log"]).expect_success("log");
@@ -246,28 +306,44 @@ fn uj6_cli_only() {
     store.run(&["diff", "new-plan.md"]).expect_success("diff");
 
     // show v1.
-    store.run(&["show", "new-plan.md", "1"]).expect_success("show v1");
+    store
+        .run(&["show", "new-plan.md", "1"])
+        .expect_success("show v1");
 
     // restore v1.
-    store.run(&["restore", "new-plan.md", "1"]).expect_success("restore v1");
+    store
+        .run(&["restore", "new-plan.md", "1"])
+        .expect_success("restore v1");
 
     // replace dry-run.
-    store.run(&["replace", "foo", "bar", "--dry-run"]).expect_success("replace dry-run");
+    store
+        .run(&["replace", "foo", "bar", "--dry-run"])
+        .expect_success("replace dry-run");
 
     // context refresh.
-    store.run(&["context", "refresh"]).expect_success("context refresh");
+    store
+        .run(&["context", "refresh"])
+        .expect_success("context refresh");
 
     // context update.
-    store.run(&["context", "update", "test"]).expect_success("context update");
+    store
+        .run(&["context", "update", "test"])
+        .expect_success("context update");
 
     // context updates.
-    store.run(&["context", "updates"]).expect_success("context updates");
+    store
+        .run(&["context", "updates"])
+        .expect_success("context updates");
 
     // context show.
-    store.run(&["context", "show"]).expect_success("context show");
+    store
+        .run(&["context", "show"])
+        .expect_success("context show");
 
     // unlock.
-    store.run(&["unlock", "a.md", "--for=agent", "--duration=1"]).expect_success("unlock");
+    store
+        .run(&["unlock", "a.md", "--for=agent", "--duration=1"])
+        .expect_success("unlock");
 
     // violations.
     store.run(&["violations"]).expect_success("violations");

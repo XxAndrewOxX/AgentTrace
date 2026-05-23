@@ -21,7 +21,10 @@ pub fn run_connect(root: &Path, name: &str, output: &dyn CliOutput) -> Result<()
 pub fn run_disconnect(root: &Path, output: &dyn CliOutput) -> Result<()> {
     if let Some(existing) = session::load_session(root) {
         session::remove_session(root)?;
-        output.line(&format!("Disconnected '{}'. Actor reverts to User.", existing.name))?;
+        output.line(&format!(
+            "Disconnected '{}'. Actor reverts to User.",
+            existing.name
+        ))?;
     } else {
         output.line("Not connected (no agent session active).")?;
     }
@@ -59,8 +62,14 @@ mod tests {
         let lock = root.join(LOCK_FILE);
         assert!(lock.exists(), "lock file should exist after connect");
         let content = std::fs::read_to_string(&lock).unwrap();
-        assert!(content.contains("claude"), "lock file should contain agent name");
-        assert!(!content.contains("pid"), "new lock file should not contain pid");
+        assert!(
+            content.contains("claude"),
+            "lock file should contain agent name"
+        );
+        assert!(
+            !content.contains("pid"),
+            "new lock file should not contain pid"
+        );
     }
 
     #[test]
@@ -71,7 +80,10 @@ mod tests {
         let result = run_connect(&root, "another", &NoopOutput);
         assert!(result.is_err(), "double connect should fail");
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("claude"), "error should name the existing agent");
+        assert!(
+            msg.contains("claude"),
+            "error should name the existing agent"
+        );
     }
 
     #[test]
@@ -80,7 +92,10 @@ mod tests {
         let root = setup(&tmp);
         run_connect(&root, "claude", &NoopOutput).unwrap();
         run_disconnect(&root, &NoopOutput).unwrap();
-        assert!(!root.join(LOCK_FILE).exists(), "lock file should be gone after disconnect");
+        assert!(
+            !root.join(LOCK_FILE).exists(),
+            "lock file should be gone after disconnect"
+        );
     }
 
     #[test]
@@ -99,7 +114,9 @@ mod tests {
         let state = AgentState::new(None);
         assert_eq!(
             state.current_actor(&root),
-            Actor::Agent { name: "my-agent".into() }
+            Actor::Agent {
+                name: "my-agent".into()
+            }
         );
     }
 

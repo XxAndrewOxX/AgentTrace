@@ -1,12 +1,15 @@
-use crate::types::{Action, Actor, CommitId, DocType, DiffStats, FileChange, LogEntry};
+use crate::types::{Action, Actor, CommitId, DiffStats, DocType, FileChange, LogEntry};
 
-type ParsedCommit = (Action, String, Actor, Option<String>, Vec<(PathBuf, Action, DocType)>);
+type ParsedCommit = (
+    Action,
+    String,
+    Actor,
+    Option<String>,
+    Vec<(PathBuf, Action, DocType)>,
+);
 use anyhow::{bail, Context, Result};
 use chrono::{TimeZone, Utc};
-use git2::{
-    DiffOptions, Oid, Repository, RepositoryInitOptions,
-    Signature, StatusOptions, Tree,
-};
+use git2::{DiffOptions, Oid, Repository, RepositoryInitOptions, Signature, StatusOptions, Tree};
 use std::path::{Path, PathBuf};
 
 pub struct CommitInfo {
@@ -43,7 +46,10 @@ impl GitStore {
         std::fs::create_dir_all(exclude.parent().unwrap())?;
         std::fs::write(&exclude, ".agent-trace/\n")?;
 
-        let store = Self { repo, workdir: store_root.to_path_buf() };
+        let store = Self {
+            repo,
+            workdir: store_root.to_path_buf(),
+        };
 
         // Create initial empty commit.
         store.create_empty_commit("agent-trace store initialized")?;
@@ -54,11 +60,17 @@ impl GitStore {
     pub fn open(store_root: &Path) -> Result<Self> {
         let git_dir = store_root.join(".agent-trace").join("repo");
         if !git_dir.exists() {
-            bail!("Not an agent-trace store: .agent-trace/repo not found in {}", store_root.display());
+            bail!(
+                "Not an agent-trace store: .agent-trace/repo not found in {}",
+                store_root.display()
+            );
         }
         let repo = Repository::open(&git_dir)
             .with_context(|| format!("Opening git repo at {}", git_dir.display()))?;
-        Ok(Self { repo, workdir: store_root.to_path_buf() })
+        Ok(Self {
+            repo,
+            workdir: store_root.to_path_buf(),
+        })
     }
 
     fn create_empty_commit(&self, message: &str) -> Result<Oid> {
@@ -114,7 +126,10 @@ impl GitStore {
                 if !is_md(&new_path) && !is_md(&old_path) {
                     continue;
                 }
-                changes.push(FileChange::Renamed { from: old_path, to: new_path });
+                changes.push(FileChange::Renamed {
+                    from: old_path,
+                    to: new_path,
+                });
                 continue;
             }
 
@@ -152,7 +167,8 @@ impl GitStore {
                     }
                 }
                 _ => {
-                    index.add_path(path)
+                    index
+                        .add_path(path)
                         .with_context(|| format!("Staging {}", path.display()))?;
                 }
             }
@@ -170,14 +186,9 @@ impl GitStore {
 
         let message = build_commit_message(info);
 
-        let oid = self.repo.commit(
-            Some("HEAD"),
-            &sig,
-            &sig,
-            &message,
-            &tree,
-            &parents,
-        )?;
+        let oid = self
+            .repo
+            .commit(Some("HEAD"), &sig, &sig, &message, &tree, &parents)?;
         Ok(oid)
     }
 
@@ -326,7 +337,8 @@ impl GitStore {
         let tree = commit.tree()?;
 
         let path_str = path.to_string_lossy();
-        let entry = tree.get_path(Path::new(path_str.as_ref()))
+        let entry = tree
+            .get_path(Path::new(path_str.as_ref()))
             .with_context(|| format!("File {} not found at v{}", path.display(), version))?;
         let blob = self.repo.find_blob(entry.id())?;
         Ok(std::str::from_utf8(blob.content())?.to_string())
@@ -397,7 +409,8 @@ impl GitStore {
         let head = self.head_commit()?;
         let tree = head.tree()?;
         let path_str = path.to_string_lossy();
-        let entry = tree.get_path(Path::new(path_str.as_ref()))
+        let entry = tree
+            .get_path(Path::new(path_str.as_ref()))
             .with_context(|| format!("File {} not found in HEAD", path.display()))?;
         let blob = self.repo.find_blob(entry.id())?;
         let full_path = self.workdir.join(path);
@@ -465,7 +478,12 @@ fn build_commit_message(info: &CommitInfo) -> String {
         body.push_str(&format!("session: {}\n", session));
     }
     for (path, action, doc_type) in &info.files {
-        body.push_str(&format!("file:\t{}\t{}\t{}\n", path.display(), action, doc_type));
+        body.push_str(&format!(
+            "file:\t{}\t{}\t{}\n",
+            path.display(),
+            action,
+            doc_type
+        ));
     }
 
     format!("{}\n\n{}", subject, body)
@@ -483,7 +501,13 @@ fn parse_commit(commit: &git2::Commit<'_>) -> Option<LogEntry> {
     let (action, summary, actor, agent_name, files) = if subject.starts_with("[agent-trace]") {
         parse_structured_message(message)
     } else {
-        (Action::Unknown, message.to_string(), Actor::System, None, Vec::new())
+        (
+            Action::Unknown,
+            message.to_string(),
+            Actor::System,
+            None,
+            Vec::new(),
+        )
     };
 
     Some(LogEntry {
@@ -537,7 +561,9 @@ fn parse_actor_str(s: &str) -> Actor {
     } else if s == "system" {
         Actor::System
     } else if let Some(name) = s.strip_prefix("agent:") {
-        Actor::Agent { name: name.to_string() }
+        Actor::Agent {
+            name: name.to_string(),
+        }
     } else {
         Actor::System
     }
@@ -580,11 +606,7 @@ fn commit_touches_file(repo: &Repository, commit: &git2::Commit<'_>, path: &str)
     let mut diff_opts = DiffOptions::new();
     diff_opts.pathspec(path);
 
-    let diff = repo.diff_tree_to_tree(
-        parent_tree.as_ref(),
-        Some(&tree),
-        Some(&mut diff_opts),
-    )?;
+    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut diff_opts))?;
 
     Ok(diff.deltas().count() > 0)
 }
@@ -668,7 +690,9 @@ mod tests {
         let info = CommitInfo {
             action: Action::Create,
             files: vec![(rel.clone(), Action::Create, DocType::Plan)],
-            actor: Actor::Agent { name: "claude-code".into() },
+            actor: Actor::Agent {
+                name: "claude-code".into(),
+            },
             summary: "add prd".into(),
             agent_name: Some("claude-code".into()),
             session_id: None,
@@ -725,9 +749,13 @@ mod tests {
         std::fs::write(store.workdir.join("prd.md"), "version two").unwrap();
         commit_file(&store, &rel, Action::Modify);
 
-        let v1 = store.show_file_at_version(&PathBuf::from("prd.md"), 1).unwrap();
+        let v1 = store
+            .show_file_at_version(&PathBuf::from("prd.md"), 1)
+            .unwrap();
         assert_eq!(v1.trim(), "version one");
-        let v2 = store.show_file_at_version(&PathBuf::from("prd.md"), 2).unwrap();
+        let v2 = store
+            .show_file_at_version(&PathBuf::from("prd.md"), 2)
+            .unwrap();
         assert_eq!(v2.trim(), "version two");
     }
 
@@ -757,7 +785,11 @@ mod tests {
         store.commit(&info).unwrap();
         let head = store.head_commit().unwrap();
         let msg = head.message().unwrap();
-        assert!(msg.contains("[agent-trace] modify plan: prd.md"), "Got: {}", msg);
+        assert!(
+            msg.contains("[agent-trace] modify plan: prd.md"),
+            "Got: {}",
+            msg
+        );
         assert!(msg.contains("actor: user"));
     }
 
@@ -772,7 +804,11 @@ mod tests {
         let (path, action, doc_type) = result.unwrap();
         assert_eq!(path, PathBuf::from("prd.md"));
         assert!(matches!(action, Action::Modify), "action = {:?}", action);
-        assert!(matches!(doc_type, DocType::Plan), "doc_type = {:?}", doc_type);
+        assert!(
+            matches!(doc_type, DocType::Plan),
+            "doc_type = {:?}",
+            doc_type
+        );
     }
 
     #[test]
@@ -780,11 +816,18 @@ mod tests {
         // Path containing spaces must round-trip correctly with tab delimiter
         let s = "\tmy plan.md\tcreate\tplan";
         let result = parse_file_line(s);
-        assert!(result.is_some(), "Expected Some for path-with-spaces, got None");
+        assert!(
+            result.is_some(),
+            "Expected Some for path-with-spaces, got None"
+        );
         let (path, action, doc_type) = result.unwrap();
         assert_eq!(path, PathBuf::from("my plan.md"));
         assert!(matches!(action, Action::Create), "action = {:?}", action);
-        assert!(matches!(doc_type, DocType::Plan), "doc_type = {:?}", doc_type);
+        assert!(
+            matches!(doc_type, DocType::Plan),
+            "doc_type = {:?}",
+            doc_type
+        );
     }
 
     #[test]
@@ -795,7 +838,11 @@ mod tests {
         assert!(result.is_some(), "Expected Some even with unknown action");
         let (path, action, _doc_type) = result.unwrap();
         assert_eq!(path, PathBuf::from("notes.md"));
-        assert!(matches!(action, Action::Unknown), "Expected Unknown, got {:?}", action);
+        assert!(
+            matches!(action, Action::Unknown),
+            "Expected Unknown, got {:?}",
+            action
+        );
     }
 
     #[test]
@@ -805,7 +852,11 @@ mod tests {
         let result = parse_file_line(s);
         assert!(result.is_some(), "Expected Some even with unknown doc_type");
         let (_path, _action, doc_type) = result.unwrap();
-        assert!(matches!(doc_type, DocType::Scratch), "Expected Scratch fallback, got {:?}", doc_type);
+        assert!(
+            matches!(doc_type, DocType::Scratch),
+            "Expected Scratch fallback, got {:?}",
+            doc_type
+        );
     }
 
     #[test]

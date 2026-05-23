@@ -11,11 +11,11 @@
 mod helpers;
 use helpers::TestStore;
 
-use agent_trace::tui::app::App;
-use agent_trace::tui::panels::{ChatState, Focus};
-use agent_trace::manifest::Manifest;
 use agent_trace::config::StoreInfo;
 use agent_trace::llm::LlmEngine;
+use agent_trace::manifest::Manifest;
+use agent_trace::tui::app::App;
+use agent_trace::tui::panels::{ChatState, Focus};
 use std::sync::{Arc, Mutex};
 
 // ── TB-1/TB-2/TB-3/TB-4: Layout rendering ────────────────────────────────────
@@ -95,8 +95,8 @@ fn tb5_proxy_new_file_detected_and_committed() {
     use agent_trace::config::{GlobalConfig, MergedConfig, PollingConfig, StoreConfig};
     use agent_trace::git_store::GitStore;
     use agent_trace::poll::{AgentState, ChangeProcessor};
-    use tempfile::TempDir;
     use std::path::PathBuf;
+    use tempfile::TempDir;
 
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
@@ -106,7 +106,11 @@ fn tb5_proxy_new_file_detected_and_committed() {
     let manifest = Manifest::create_empty(info.clone(), root).unwrap();
     let manifest = Arc::new(Mutex::new(manifest));
     let global = GlobalConfig::default();
-    let store_cfg = StoreConfig { store: info, llm: None, polling: PollingConfig::default() };
+    let store_cfg = StoreConfig {
+        store: info,
+        llm: None,
+        polling: PollingConfig::default(),
+    };
     let config = MergedConfig::merge(global, store_cfg);
     let agent = AgentState::new(None);
     let mut proc = ChangeProcessor::new(git, manifest.clone(), config, agent, None);
@@ -117,7 +121,10 @@ fn tb5_proxy_new_file_detected_and_committed() {
 
     // File should be tracked now.
     let m = manifest.lock().unwrap();
-    assert!(m.is_tracked(&PathBuf::from("newfile.md")), "new file should be tracked after poll");
+    assert!(
+        m.is_tracked(&PathBuf::from("newfile.md")),
+        "new file should be tracked after poll"
+    );
 }
 
 // ── TB-6: Real-Time Violation Display ────────────────────────────────────────
@@ -146,11 +153,11 @@ fn tb7_chat_state_history_and_input() {
 
     // History navigation: most-recent-first (Up = older, Down = newer).
     chat.history_up();
-    assert_eq!(chat.input, "ls");  // most recent command
+    assert_eq!(chat.input, "ls"); // most recent command
     chat.history_up();
     assert_eq!(chat.input, "log"); // older command
     chat.history_down();
-    assert_eq!(chat.input, "ls");  // back to most recent
+    assert_eq!(chat.input, "ls"); // back to most recent
 
     // Backspace.
     chat.push_char('x');
@@ -164,7 +171,10 @@ fn tb7_chat_state_history_and_input() {
 fn tb8_no_llm_engine_is_not_loaded() {
     use agent_trace::llm::NoLlm;
     let no_llm = NoLlm;
-    assert!(!no_llm.is_loaded(), "NoLlm should report is_loaded() = false");
+    assert!(
+        !no_llm.is_loaded(),
+        "NoLlm should report is_loaded() = false"
+    );
 }
 
 // ── TB-9: Startup Banner ──────────────────────────────────────────────────────
@@ -221,8 +231,17 @@ fn tb10_command_history_persistence() {
 
     // The command_history.txt is only written by agent-trace open, not CLI commands.
     // Verify the .agent-trace directory has the expected structure.
-    assert!(store.file_exists(".agent-trace/config.toml"), ".agent-trace/config.toml");
-    assert!(store.file_exists(".agent-trace/manifest.toml"), ".agent-trace/manifest.toml");
+    assert!(
+        store.file_exists(".agent-trace/config.toml"),
+        ".agent-trace/config.toml"
+    );
+    assert!(
+        store.file_exists(".agent-trace/manifest.toml"),
+        ".agent-trace/manifest.toml"
+    );
     // No instance lock left.
-    assert!(!store.file_exists(".agent-trace/locks/instance.lock"), "no lock after commands");
+    assert!(
+        !store.file_exists(".agent-trace/locks/instance.lock"),
+        "no lock after commands"
+    );
 }

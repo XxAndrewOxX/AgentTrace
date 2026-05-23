@@ -205,15 +205,13 @@ fn handle_read_file(root: &Path, args: &Value) -> Value {
         .map(|dt| dt.to_string())
         .unwrap_or_else(|| "untracked".to_string());
 
-    tool_result(&format!("path: {}\ndoc_type: {}\n\n{}", path_str, doc_type, content))
+    tool_result(&format!(
+        "path: {}\ndoc_type: {}\n\n{}",
+        path_str, doc_type, content
+    ))
 }
 
-fn handle_write_file(
-    root: &Path,
-    args: &Value,
-    actor: &Actor,
-    session_id: Option<&str>,
-) -> Value {
+fn handle_write_file(root: &Path, args: &Value, actor: &Actor, session_id: Option<&str>) -> Value {
     let path_str = match args.get("path").and_then(|v| v.as_str()) {
         Some(p) => p,
         None => return error_response(-32602, "Missing required argument: path"),
@@ -335,7 +333,11 @@ fn handle_add_document(root: &Path, args: &Value) -> Value {
         action: Action::Create,
         files: vec![
             (rel.clone(), Action::Create, doc_type.clone()),
-            (PathBuf::from("AGENT-TRACE.md"), Action::Modify, DocType::Reference),
+            (
+                PathBuf::from("AGENT-TRACE.md"),
+                Action::Modify,
+                DocType::Reference,
+            ),
         ],
         actor: Actor::System,
         summary: format!("mcp add: {} as {}", path_str, doc_type),
@@ -395,7 +397,11 @@ mod tests {
         let info = StoreInfo::new("test".into());
         let manifest = Manifest::create_empty(info.clone(), &root).unwrap();
         let global = GlobalConfig::default();
-        let store_cfg = StoreConfig { store: info, llm: None, polling: PollingConfig::default() };
+        let store_cfg = StoreConfig {
+            store: info,
+            llm: None,
+            polling: PollingConfig::default(),
+        };
         let config = MergedConfig::merge(global, store_cfg);
         // Silence unused warning — we init git which sets up the repo
         drop((git, manifest, config));
@@ -418,10 +424,7 @@ mod tests {
     fn test_tools_list_contains_all_tools() {
         let resp = handle_tools_list();
         let tools = resp["result"]["tools"].as_array().unwrap();
-        let names: Vec<&str> = tools
-            .iter()
-            .map(|t| t["name"].as_str().unwrap())
-            .collect();
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"read_file"));
         assert!(names.contains(&"write_file"));
         assert!(names.contains(&"list_documents"));
@@ -436,9 +439,12 @@ mod tests {
         let root = setup_store(&tmp);
         std::fs::write(root.join("plan.md"), "# Plan").unwrap();
         Store::open(&root).unwrap().manifest; // ensure store opens
-        // Add plan.md via add command path so it's tracked
+                                              // Add plan.md via add command path so it's tracked
         let mut store = Store::open(&root).unwrap();
-        store.manifest.register(&PathBuf::from("plan.md"), DocType::Plan, "").unwrap();
+        store
+            .manifest
+            .register(&PathBuf::from("plan.md"), DocType::Plan, "")
+            .unwrap();
         store.manifest.save(&root).unwrap();
         let info = CommitInfo {
             action: Action::Create,
@@ -453,7 +459,10 @@ mod tests {
         let args = json!({"path": "plan.md", "content": "# Updated Plan"});
         let resp = handle_write_file(&root, &args, &agent("test-agent"), None);
         assert_eq!(resp["result"]["isError"], false);
-        assert_eq!(std::fs::read_to_string(root.join("plan.md")).unwrap(), "# Updated Plan");
+        assert_eq!(
+            std::fs::read_to_string(root.join("plan.md")).unwrap(),
+            "# Updated Plan"
+        );
     }
 
     #[test]
@@ -462,11 +471,18 @@ mod tests {
         let root = setup_store(&tmp);
         std::fs::write(root.join("context.md"), "# Context").unwrap();
         let mut store = Store::open(&root).unwrap();
-        store.manifest.register(&PathBuf::from("context.md"), DocType::Context, "").unwrap();
+        store
+            .manifest
+            .register(&PathBuf::from("context.md"), DocType::Context, "")
+            .unwrap();
         store.manifest.save(&root).unwrap();
         let info = CommitInfo {
             action: Action::Create,
-            files: vec![(PathBuf::from("context.md"), Action::Create, DocType::Context)],
+            files: vec![(
+                PathBuf::from("context.md"),
+                Action::Create,
+                DocType::Context,
+            )],
             actor: Actor::System,
             summary: "setup".into(),
             agent_name: None,
@@ -480,9 +496,16 @@ mod tests {
 
         assert_eq!(resp["result"]["isError"], true);
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("Permission denied"), "expected denial, got: {}", text);
+        assert!(
+            text.contains("Permission denied"),
+            "expected denial, got: {}",
+            text
+        );
         // File must be unchanged
-        assert_eq!(std::fs::read_to_string(root.join("context.md")).unwrap(), original);
+        assert_eq!(
+            std::fs::read_to_string(root.join("context.md")).unwrap(),
+            original
+        );
     }
 
     #[test]
@@ -492,8 +515,14 @@ mod tests {
         std::fs::write(root.join("plan.md"), "p").unwrap();
         std::fs::write(root.join("ref.md"), "r").unwrap();
         let mut store = Store::open(&root).unwrap();
-        store.manifest.register(&PathBuf::from("plan.md"), DocType::Plan, "").unwrap();
-        store.manifest.register(&PathBuf::from("ref.md"), DocType::Reference, "").unwrap();
+        store
+            .manifest
+            .register(&PathBuf::from("plan.md"), DocType::Plan, "")
+            .unwrap();
+        store
+            .manifest
+            .register(&PathBuf::from("ref.md"), DocType::Reference, "")
+            .unwrap();
         store.manifest.save(&root).unwrap();
         let info = CommitInfo {
             action: Action::Create,
@@ -521,8 +550,14 @@ mod tests {
         std::fs::write(root.join("plan.md"), "p").unwrap();
         std::fs::write(root.join("ref.md"), "r").unwrap();
         let mut store = Store::open(&root).unwrap();
-        store.manifest.register(&PathBuf::from("plan.md"), DocType::Plan, "").unwrap();
-        store.manifest.register(&PathBuf::from("ref.md"), DocType::Reference, "").unwrap();
+        store
+            .manifest
+            .register(&PathBuf::from("plan.md"), DocType::Plan, "")
+            .unwrap();
+        store
+            .manifest
+            .register(&PathBuf::from("ref.md"), DocType::Reference, "")
+            .unwrap();
         store.manifest.save(&root).unwrap();
         let info = CommitInfo {
             action: Action::Create,
@@ -540,7 +575,10 @@ mod tests {
         let resp = handle_list_documents(&root, &json!({"type": "plan"}));
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("plan.md"));
-        assert!(!text.contains("ref.md"), "type filter should exclude ref.md");
+        assert!(
+            !text.contains("ref.md"),
+            "type filter should exclude ref.md"
+        );
     }
 
     #[test]
@@ -550,7 +588,10 @@ mod tests {
         let resp = handle_get_permissions(&root, &agent("test-agent"));
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("context"), "should mention context type");
-        assert!(text.contains("denied"), "context should be denied for agent");
+        assert!(
+            text.contains("denied"),
+            "context should be denied for agent"
+        );
         assert!(text.contains("allowed"), "plan should be allowed for agent");
     }
 

@@ -49,8 +49,7 @@ fn ae004_agent_writes_plan_document() {
         return;
     }
 
-    let (_tmp, store_root, trajectory) =
-        run_live_scenario(&AE004).expect("scenario runner failed");
+    let (_tmp, store_root, trajectory) = run_live_scenario(&AE004).expect("scenario runner failed");
 
     assert_trajectory_coverage(&AE004, &trajectory).unwrap_pass(&AE004, &trajectory);
     assert_store_state(&AE004, &store_root, &trajectory).unwrap_pass(&AE004, &trajectory);
@@ -88,8 +87,7 @@ fn ae008_context_write_blocked() {
         return;
     }
 
-    let (_tmp, store_root, trajectory) =
-        run_live_scenario(&AE008).expect("scenario runner failed");
+    let (_tmp, store_root, trajectory) = run_live_scenario(&AE008).expect("scenario runner failed");
 
     // The write must have been attempted and denied.
     if !trajectory.did_call("write_file", "context.md") {
@@ -109,8 +107,7 @@ fn ae008_context_write_blocked() {
     let content = std::fs::read_to_string(store_root.join("context.md"))
         .expect("context.md should still exist");
     assert_eq!(
-        content,
-        "# Context\n\nOriginal content — must not change.\n",
+        content, "# Context\n\nOriginal content — must not change.\n",
         "\n[ae008_context_write_blocked] FAIL — context.md was modified despite MCP denial"
     );
 }

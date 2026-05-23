@@ -397,7 +397,11 @@ pub fn run_driver_loop(
                     .and_then(|f| f.get("name"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown");
-                let tc_id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let tc_id = tc
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
 
                 // `done` is handled locally — no MCP call needed.
                 if tool_name == "done" {
@@ -429,7 +433,8 @@ pub fn run_driver_loop(
                     .unwrap_or(json!({}));
 
                 log_parent(scenario_name, &format!("agent calling tool {tool_name}"));
-                let (result_text, _is_error) = mcp.call_tool(tool_name, args, turn, &mut trajectory)?;
+                let (result_text, _is_error) =
+                    mcp.call_tool(tool_name, args, turn, &mut trajectory)?;
 
                 tool_results.push(json!({
                     "role": "tool",
@@ -463,7 +468,8 @@ impl BackendConfig {
         let backend = std::env::var("AGENT_TRACE_MODEL_BACKEND").unwrap_or_else(|_| "groq".into());
         match backend.as_str() {
             "ollama" => {
-                let model = std::env::var("AGENT_TRACE_MODEL").unwrap_or_else(|_| "qwen2.5:7b".into());
+                let model =
+                    std::env::var("AGENT_TRACE_MODEL").unwrap_or_else(|_| "qwen2.5:7b".into());
                 Ok(BackendConfig {
                     api_key: "ollama".into(), // Ollama doesn't need a key
                     model,
@@ -475,8 +481,8 @@ impl BackendConfig {
             }
             _ => {
                 // groq (default)
-                let api_key =
-                    std::env::var("GROQ_API_KEY").map_err(|_| anyhow::anyhow!("GROQ_API_KEY not set"))?;
+                let api_key = std::env::var("GROQ_API_KEY")
+                    .map_err(|_| anyhow::anyhow!("GROQ_API_KEY not set"))?;
                 // Live tests depend on robust function/tool calling. We intentionally
                 // default to a model that has been more stable for tool-call formatting
                 // in this harness than llama-3.3-70b-versatile.

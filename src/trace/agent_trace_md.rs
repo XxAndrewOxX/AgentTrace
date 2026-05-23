@@ -45,8 +45,12 @@ pub fn generate(_store_root: &Path, manifest: &Manifest) -> String {
 
     out.push_str("## How to Use This Store\n\n");
     out.push_str("- **Read** any document freely — all documents are readable by all actors.\n");
-    out.push_str("- **Write** only to `plan` and `scratch` documents — other types are protected.\n");
-    out.push_str("- **Context** (`context.md`) is system-synthesized — read it for project state.\n");
+    out.push_str(
+        "- **Write** only to `plan` and `scratch` documents — other types are protected.\n",
+    );
+    out.push_str(
+        "- **Context** (`context.md`) is system-synthesized — read it for project state.\n",
+    );
     out.push_str("- **Logs** are system-generated — do not modify them.\n");
     out.push_str("- **Reference** documents are user-curated — agents cannot modify them.\n\n");
 
@@ -65,7 +69,11 @@ pub fn generate(_store_root: &Path, manifest: &Manifest) -> String {
     if !plans.is_empty() {
         out.push_str("### Plans\n\n");
         for p in &plans {
-            let desc = if p.description.is_empty() { "" } else { &p.description };
+            let desc = if p.description.is_empty() {
+                ""
+            } else {
+                &p.description
+            };
             out.push_str(&format!("- `{}` {}\n", p.path.display(), desc));
         }
         out.push('\n');
@@ -82,7 +90,11 @@ pub fn generate(_store_root: &Path, manifest: &Manifest) -> String {
     if !references.is_empty() {
         out.push_str("### Reference\n\n");
         for r in &references {
-            let desc = if r.description.is_empty() { "" } else { &r.description };
+            let desc = if r.description.is_empty() {
+                ""
+            } else {
+                &r.description
+            };
             out.push_str(&format!("- `{}` {}\n", r.path.display(), desc));
         }
         out.push('\n');
@@ -145,9 +157,15 @@ mod tests {
     fn test_generate_with_documents() {
         let tmp = TempDir::new().unwrap();
         let (root, mut manifest, _git) = setup(&tmp);
-        manifest.register(&PathBuf::from("prd.md"), DocType::Plan, "").unwrap();
-        manifest.register(&PathBuf::from("schema.md"), DocType::Reference, "").unwrap();
-        manifest.register(&PathBuf::from("notes.md"), DocType::Scratch, "").unwrap();
+        manifest
+            .register(&PathBuf::from("prd.md"), DocType::Plan, "")
+            .unwrap();
+        manifest
+            .register(&PathBuf::from("schema.md"), DocType::Reference, "")
+            .unwrap();
+        manifest
+            .register(&PathBuf::from("notes.md"), DocType::Scratch, "")
+            .unwrap();
 
         let content = generate(&root, &manifest);
         assert!(content.contains("prd.md"));
@@ -160,7 +178,9 @@ mod tests {
     fn test_generate_and_commit() {
         let tmp = TempDir::new().unwrap();
         let (root, mut manifest, git) = setup(&tmp);
-        manifest.register(&PathBuf::from("prd.md"), DocType::Plan, "").unwrap();
+        manifest
+            .register(&PathBuf::from("prd.md"), DocType::Plan, "")
+            .unwrap();
 
         // Need prd.md to exist to stage it (already in AGENT-TRACE generation we only write AGENT-TRACE.md)
         generate_and_commit(&root, &manifest, &git).unwrap();

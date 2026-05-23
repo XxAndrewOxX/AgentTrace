@@ -9,7 +9,7 @@ pub mod trajectory;
 
 use std::path::PathBuf;
 
-use driver::{BackendConfig, McpBridge, run_driver_loop, setup_store};
+use driver::{run_driver_loop, setup_store, BackendConfig, McpBridge};
 use logging::log_parent;
 use scenario::AgentScenario;
 use trajectory::Trajectory;

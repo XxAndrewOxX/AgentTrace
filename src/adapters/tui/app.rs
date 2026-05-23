@@ -141,7 +141,9 @@ impl App {
         match parts.as_slice() {
             ["ls"] | ["ls", ..] => {
                 let m = self.manifest.lock().unwrap();
-                let lines: Vec<String> = m.documents().iter()
+                let lines: Vec<String> = m
+                    .documents()
+                    .iter()
                     .map(|d| format!("[{}] {}", d.doc_type.indicator(), d.path.display()))
                     .collect();
                 self.chat.output = Some(if lines.is_empty() {
@@ -227,17 +229,23 @@ impl App {
         let start = self.changelog.scroll.min(entries.len().saturating_sub(1));
         let visible = entries.iter().skip(start).take(visible_height);
 
-        let lines: Vec<Line> = visible.map(|entry| {
-            let time = entry.timestamp.format("%H:%M:%S").to_string();
-            let actor_color = if entry.actor.is_agent() { Color::Magenta } else { Color::White };
-            Line::from(vec![
-                Span::styled(time, Style::default().fg(Color::DarkGray)),
-                Span::raw(" "),
-                Span::styled(entry.actor.to_string(), Style::default().fg(actor_color)),
-                Span::raw(" "),
-                Span::raw(entry.summary.clone()),
-            ])
-        }).collect();
+        let lines: Vec<Line> = visible
+            .map(|entry| {
+                let time = entry.timestamp.format("%H:%M:%S").to_string();
+                let actor_color = if entry.actor.is_agent() {
+                    Color::Magenta
+                } else {
+                    Color::White
+                };
+                Line::from(vec![
+                    Span::styled(time, Style::default().fg(Color::DarkGray)),
+                    Span::raw(" "),
+                    Span::styled(entry.actor.to_string(), Style::default().fg(actor_color)),
+                    Span::raw(" "),
+                    Span::raw(entry.summary.clone()),
+                ])
+            })
+            .collect();
 
         let para = Paragraph::new(lines).block(
             Block::default()

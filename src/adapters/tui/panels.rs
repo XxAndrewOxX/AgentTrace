@@ -1,8 +1,8 @@
 use crate::manifest::{DocumentEntry, Manifest};
 use crate::types::LogEntry;
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
 
 // ── Tree Panel State ──────────────────────────────────────────────────────────
 
@@ -25,7 +25,13 @@ impl TreeState {
 
     pub fn scroll_up(&mut self) {
         let i = match self.list_state.selected() {
-            Some(i) => if i == 0 { 0 } else { i - 1 },
+            Some(i) => {
+                if i == 0 {
+                    0
+                } else {
+                    i - 1
+                }
+            }
             None => 0,
         };
         self.list_state.select(Some(i));
@@ -34,21 +40,34 @@ impl TreeState {
     pub fn scroll_down(&mut self) {
         let len = self.documents.len();
         let i = match self.list_state.selected() {
-            Some(i) => if i >= len.saturating_sub(1) { i } else { i + 1 },
+            Some(i) => {
+                if i >= len.saturating_sub(1) {
+                    i
+                } else {
+                    i + 1
+                }
+            }
             None => 0,
         };
         self.list_state.select(Some(i));
     }
 
     pub fn render_widget(&mut self) -> (List<'_>, &mut ListState) {
-        let items: Vec<ListItem> = self.documents.iter().map(|doc| {
-            let indicator = doc.doc_type.indicator();
-            let line = Line::from(vec![
-                Span::styled(format!("[{}] ", indicator), Style::default().fg(Color::Cyan)),
-                Span::raw(doc.path.display().to_string()),
-            ]);
-            ListItem::new(line)
-        }).collect();
+        let items: Vec<ListItem> = self
+            .documents
+            .iter()
+            .map(|doc| {
+                let indicator = doc.doc_type.indicator();
+                let line = Line::from(vec![
+                    Span::styled(
+                        format!("[{}] ", indicator),
+                        Style::default().fg(Color::Cyan),
+                    ),
+                    Span::raw(doc.path.display().to_string()),
+                ]);
+                ListItem::new(line)
+            })
+            .collect();
 
         let list = List::new(items)
             .block(Block::default().title("Documents").borders(Borders::ALL))
@@ -69,7 +88,10 @@ pub struct ChangelogState {
 
 impl ChangelogState {
     pub fn new(initial: Vec<LogEntry>) -> Self {
-        Self { entries: initial, scroll: 0 }
+        Self {
+            entries: initial,
+            scroll: 0,
+        }
     }
 
     pub fn push(&mut self, entry: LogEntry) {
@@ -141,7 +163,9 @@ impl ChatState {
     }
 
     pub fn history_up(&mut self) {
-        if self.history.is_empty() { return; }
+        if self.history.is_empty() {
+            return;
+        }
         let idx = match self.history_idx {
             None => self.history.len() - 1,
             Some(i) => i.saturating_sub(1),

@@ -1,5 +1,5 @@
 use crate::git_store::{CommitInfo, GitStore};
-use crate::types::{Action, Actor, DocType, DiffStats};
+use crate::types::{Action, Actor, DiffStats, DocType};
 use anyhow::Result;
 use chrono::Utc;
 use std::path::{Path, PathBuf};
@@ -36,15 +36,15 @@ pub fn append_agent_log(
     std::fs::create_dir_all(&logs_dir)?;
 
     let log_path = logs_dir.join(format!("{}-{}.md", agent_name, session_id));
-    let rel_log_path = log_path.strip_prefix(store_root).unwrap_or(&log_path).to_path_buf();
+    let rel_log_path = log_path
+        .strip_prefix(store_root)
+        .unwrap_or(&log_path)
+        .to_path_buf();
 
     let mut content = if log_path.exists() {
         std::fs::read_to_string(&log_path)?
     } else {
-        format!(
-            "# Agent Log: {} (session {})\n\n",
-            agent_name, session_id
-        )
+        format!("# Agent Log: {} (session {})\n\n", agent_name, session_id)
     };
 
     for entry in entries {
@@ -81,13 +81,16 @@ pub struct LogSynthEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git_store::GitStore;
     use crate::types::DiffStats;
     use tempfile::TempDir;
-    use crate::git_store::GitStore;
 
     #[test]
     fn test_summarize_change_no_llm() {
-        let stats = DiffStats { lines_added: 15, lines_removed: 3 };
+        let stats = DiffStats {
+            lines_added: 15,
+            lines_removed: 3,
+        };
         let summary = summarize_change_no_llm(
             &PathBuf::from("impl-plan.md"),
             &DocType::Plan,

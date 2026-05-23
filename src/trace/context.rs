@@ -14,7 +14,9 @@ pub struct ContextUpdate {
 
 /// Load pending (unincorporated) context updates from the JSONL file.
 pub fn load_pending_updates(store_root: &Path) -> Result<Vec<ContextUpdate>> {
-    let path = store_root.join(".agent-trace").join("context_updates.jsonl");
+    let path = store_root
+        .join(".agent-trace")
+        .join("context_updates.jsonl");
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -30,7 +32,9 @@ pub fn load_pending_updates(store_root: &Path) -> Result<Vec<ContextUpdate>> {
 
 /// Mark all pending updates as incorporated.
 pub fn mark_updates_incorporated(store_root: &Path) -> Result<()> {
-    let path = store_root.join(".agent-trace").join("context_updates.jsonl");
+    let path = store_root
+        .join(".agent-trace")
+        .join("context_updates.jsonl");
     if !path.exists() {
         return Ok(());
     }
@@ -75,7 +79,11 @@ pub fn synthesize_no_llm(store_root: &Path, manifest: &Manifest) -> Result<Strin
         out.push_str("*(no plan documents)*\n");
     } else {
         for p in &plans {
-            let desc = if p.description.is_empty() { "(no description)" } else { &p.description };
+            let desc = if p.description.is_empty() {
+                "(no description)"
+            } else {
+                &p.description
+            };
             out.push_str(&format!("- **{}** — {}\n", p.path.display(), desc));
         }
     }
@@ -86,7 +94,11 @@ pub fn synthesize_no_llm(store_root: &Path, manifest: &Manifest) -> Result<Strin
         out.push_str("*(no reference documents)*\n");
     } else {
         for r in &refs {
-            let desc = if r.description.is_empty() { "(no description)" } else { &r.description };
+            let desc = if r.description.is_empty() {
+                "(no description)"
+            } else {
+                &r.description
+            };
             out.push_str(&format!("- **{}** — {}\n", r.path.display(), desc));
         }
     }
@@ -138,8 +150,12 @@ mod tests {
     fn test_no_llm_synthesis_with_plans() {
         let tmp = TempDir::new().unwrap();
         let (root, mut manifest) = setup(&tmp);
-        manifest.register(&std::path::PathBuf::from("prd.md"), DocType::Plan, "").unwrap();
-        manifest.update_description(&std::path::PathBuf::from("prd.md"), "Product requirements").unwrap();
+        manifest
+            .register(&std::path::PathBuf::from("prd.md"), DocType::Plan, "")
+            .unwrap();
+        manifest
+            .update_description(&std::path::PathBuf::from("prd.md"), "Product requirements")
+            .unwrap();
         let ctx = synthesize_no_llm(&root, &manifest).unwrap();
         assert!(ctx.contains("prd.md"));
         assert!(ctx.contains("Product requirements"));
@@ -159,7 +175,8 @@ mod tests {
         std::fs::write(
             root.join(".agent-trace").join("context_updates.jsonl"),
             entry.to_string() + "\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         let pending = load_pending_updates(&root).unwrap();
         assert_eq!(pending.len(), 1);
@@ -180,7 +197,8 @@ mod tests {
         std::fs::write(
             root.join(".agent-trace").join("context_updates.jsonl"),
             entry.to_string() + "\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         mark_updates_incorporated(&root).unwrap();
 

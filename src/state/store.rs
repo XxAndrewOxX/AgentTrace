@@ -23,8 +23,7 @@ impl Store {
             .with_context(|| format!("Not an agent-trace store: {}", root.display()))?;
         let manifest = Manifest::load(root)
             .with_context(|| format!("Failed to load manifest at {}", root.display()))?;
-        let overrides = Overrides::load(root)
-            .with_context(|| "Failed to load overrides")?;
+        let overrides = Overrides::load(root).with_context(|| "Failed to load overrides")?;
         Ok(Self {
             root: root.to_path_buf(),
             git,

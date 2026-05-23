@@ -22,15 +22,21 @@ impl fmt::Display for DocId {
 }
 
 impl From<String> for DocId {
-    fn from(s: String) -> Self { DocId(s) }
+    fn from(s: String) -> Self {
+        DocId(s)
+    }
 }
 
 impl From<&str> for DocId {
-    fn from(s: &str) -> Self { DocId(s.to_string()) }
+    fn from(s: &str) -> Self {
+        DocId(s.to_string())
+    }
 }
 
 impl AsRef<str> for DocId {
-    fn as_ref(&self) -> &str { &self.0 }
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Newtype wrapper for a store UUID string.
@@ -50,7 +56,9 @@ impl fmt::Display for StoreId {
 }
 
 impl From<String> for StoreId {
-    fn from(s: String) -> Self { StoreId(s) }
+    fn from(s: String) -> Self {
+        StoreId(s)
+    }
 }
 
 /// Newtype wrapper for a git commit OID string.
@@ -64,15 +72,21 @@ impl fmt::Display for CommitId {
 }
 
 impl From<String> for CommitId {
-    fn from(s: String) -> Self { CommitId(s) }
+    fn from(s: String) -> Self {
+        CommitId(s)
+    }
 }
 
 impl From<&str> for CommitId {
-    fn from(s: &str) -> Self { CommitId(s.to_string()) }
+    fn from(s: &str) -> Self {
+        CommitId(s.to_string())
+    }
 }
 
 impl AsRef<str> for CommitId {
-    fn as_ref(&self) -> &str { &self.0 }
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
 }
 
 /// The semantic type of a document, which determines write permissions.
@@ -108,7 +122,10 @@ impl FromStr for DocType {
             "log" => Ok(DocType::Log),
             "reference" => Ok(DocType::Reference),
             "scratch" => Ok(DocType::Scratch),
-            other => Err(anyhow::anyhow!("Unknown doc type: '{}'. Valid types: plan, context, log, reference, scratch", other)),
+            other => Err(anyhow::anyhow!(
+                "Unknown doc type: '{}'. Valid types: plan, context, log, reference, scratch",
+                other
+            )),
         }
     }
 }
@@ -296,7 +313,9 @@ mod tests {
         assert_eq!(Actor::User.git_author_name(), "User");
         assert_eq!(Actor::User.git_author_email(), "user@agent-trace");
 
-        let agent = Actor::Agent { name: "claude-code".into() };
+        let agent = Actor::Agent {
+            name: "claude-code".into(),
+        };
         assert_eq!(agent.git_author_name(), "Agent: claude-code");
         assert_eq!(agent.git_author_email(), "agent@agent-trace");
 

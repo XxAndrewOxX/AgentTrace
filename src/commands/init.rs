@@ -1,4 +1,4 @@
-use crate::config::{StoreConfig, StoreInfo, PollingConfig};
+use crate::config::{PollingConfig, StoreConfig, StoreInfo};
 use crate::git_store::GitStore;
 use crate::manifest::Manifest;
 use crate::observability::CliOutput;
@@ -13,8 +13,14 @@ pub fn run(path: &Path, scan: bool, output: &dyn CliOutput) -> Result<()> {
     let store_dir = path.join(".agent-trace");
     if store_dir.join("config.toml").exists() {
         output.line(&format!("Store already initialised at {}", path.display()))?;
-        output.line(&format!("  Config: {}", store_dir.join("config.toml").display()))?;
-        output.line(&format!("  Manifest: {}", store_dir.join("manifest.toml").display()))?;
+        output.line(&format!(
+            "  Config: {}",
+            store_dir.join("config.toml").display()
+        ))?;
+        output.line(&format!(
+            "  Manifest: {}",
+            store_dir.join("manifest.toml").display()
+        ))?;
         return Ok(());
     }
 
@@ -99,8 +105,16 @@ pub fn run(path: &Path, scan: bool, output: &dyn CliOutput) -> Result<()> {
             let agent_trace_content = crate::agent_trace_md::generate(&path, &manifest);
             std::fs::write(path.join("AGENT-TRACE.md"), &agent_trace_content)?;
 
-            let mut files: Vec<_> = manifest.documents().iter()
-                .map(|d| (d.path.clone(), crate::types::Action::Create, d.doc_type.clone()))
+            let mut files: Vec<_> = manifest
+                .documents()
+                .iter()
+                .map(|d| {
+                    (
+                        d.path.clone(),
+                        crate::types::Action::Create,
+                        d.doc_type.clone(),
+                    )
+                })
                 .collect();
             files.push((
                 std::path::PathBuf::from("AGENT-TRACE.md"),
@@ -116,11 +130,17 @@ pub fn run(path: &Path, scan: bool, output: &dyn CliOutput) -> Result<()> {
                 session_id: None,
             };
             git.commit(&info)?;
-            output.line(&format!("Registered {} existing markdown files as scratch.", count))?;
+            output.line(&format!(
+                "Registered {} existing markdown files as scratch.",
+                count
+            ))?;
         }
     }
 
-    output.line(&format!("Initialised agent-trace store at {}", path.display()))?;
+    output.line(&format!(
+        "Initialised agent-trace store at {}",
+        path.display()
+    ))?;
     Ok(())
 }
 
@@ -132,7 +152,9 @@ fn scan_and_register(root: &Path, manifest: &mut Manifest) -> Result<usize> {
         if rel.starts_with(".agent-trace") {
             continue;
         }
-        if rel == std::path::Path::new("AGENT-TRACE.md") || rel == std::path::Path::new("context.md") {
+        if rel == std::path::Path::new("AGENT-TRACE.md")
+            || rel == std::path::Path::new("context.md")
+        {
             continue;
         }
         if manifest.is_tracked(rel) {
@@ -151,12 +173,18 @@ fn walkdir_md(root: &Path) -> Vec<std::path::PathBuf> {
 }
 
 fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
             // Skip hidden directories.
-            if path.file_name().map(|n| n.to_string_lossy().starts_with('.')).unwrap_or(false) {
+            if path
+                .file_name()
+                .map(|n| n.to_string_lossy().starts_with('.'))
+                .unwrap_or(false)
+            {
                 continue;
             }
             walk(&path, out);
@@ -186,7 +214,11 @@ mod tests {
         run(tmp.path(), false, &NoopOutput).unwrap();
         assert!(tmp.path().join(".agent-trace").exists());
         assert!(tmp.path().join(".agent-trace").join("config.toml").exists());
-        assert!(tmp.path().join(".agent-trace").join("manifest.toml").exists());
+        assert!(tmp
+            .path()
+            .join(".agent-trace")
+            .join("manifest.toml")
+            .exists());
         assert!(tmp.path().join(".agent-trace").join("repo").exists());
         assert!(tmp.path().join(".agent-trace").join("locks").exists());
         assert!(tmp.path().join(".gitignore").exists());
@@ -208,7 +240,10 @@ mod tests {
         run(tmp.path(), true, &NoopOutput).unwrap();
         let manifest = crate::manifest::Manifest::load(tmp.path()).unwrap();
         assert_eq!(manifest.len(), 2);
-        assert!(manifest.documents().iter().all(|d| d.doc_type == DocType::Scratch));
+        assert!(manifest
+            .documents()
+            .iter()
+            .all(|d| d.doc_type == DocType::Scratch));
     }
 
     #[test]
