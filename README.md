@@ -13,10 +13,44 @@
 - Session-scoped agent logs in `logs/<agent>-<session_id>.md`
 - Permission enforcement with violation tracking and rejected-content capture
 
+## Installation
+
+Agent Trace is not publicly released yet. The project is being prepared for two
+official install paths:
+
+```bash
+cargo install agent-trace
+```
+
+or a prebuilt binary from GitHub Releases:
+
+```bash
+# Example shape once releases are published.
+version=0.1.0
+target=x86_64-unknown-linux-gnu
+curl -LO "https://github.com/XxAndrewOxX/AgentTrace/releases/download/v${version}/agent-trace-v${version}-${target}.tar.gz"
+curl -LO "https://github.com/XxAndrewOxX/AgentTrace/releases/download/v${version}/agent-trace-v${version}-${target}.tar.gz.sha256"
+sha256sum -c "agent-trace-v${version}-${target}.tar.gz.sha256"
+tar xzf "agent-trace-v${version}-${target}.tar.gz"
+sudo mv agent-trace /usr/local/bin/
+```
+
+Until then, build from source:
+
+```bash
+rustup toolchain install 1.88.0
+cargo build --locked
+./target/debug/agent-trace --help
+```
+
+See [`docs/INSTALL.md`](docs/INSTALL.md) for Cargo, GitHub Release, checksum,
+and MCP setup details.
+See [`docs/agent-plugin.md`](docs/agent-plugin.md) for the agent-native plugin
+distribution plan.
+
 ## Quick Start
 
 ```bash
-cargo build
 ./target/debug/agent-trace init .
 ./target/debug/agent-trace add plan plan.md
 ./target/debug/agent-trace connect my-agent
@@ -29,6 +63,9 @@ For MCP-based agents:
 ```bash
 ./target/debug/agent-trace mcp --path . --actor my-agent
 ```
+
+After installing a released binary on `PATH`, replace `./target/debug/agent-trace`
+with `agent-trace` in the examples above.
 
 ## Resume After Crash
 
