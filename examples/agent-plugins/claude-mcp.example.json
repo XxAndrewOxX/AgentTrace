@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agent-trace": {
+      "command": "agent-trace",
+      "args": ["mcp", "--path", "/path/to/workspace", "--actor", "claude"]
+    }
+  }
+}
