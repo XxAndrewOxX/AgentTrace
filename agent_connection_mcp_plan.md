@@ -1,5 +1,9 @@
 # Agent Connection & MCP Server — Implementation Plan
 
+> **Historical planning doc.** MCP and CLI connection are implemented under
+> `src/adapters/mcp/` and `src/commands/connect.rs`. See
+> `tests/e2e_agent_connection.rs` for current AC/MC test coverage.
+
 ## Problem
 
 The current agent connection mechanism is unreliable:
@@ -144,14 +148,13 @@ cargo test --test e2e_agent_connection   # directly
 ## File Checklist
 
 - [x] `agent_connection_mcp_plan.md` (this file)
-- [ ] `src/commands/connect.rs`
-- [ ] `src/commands/write_cmd.rs`
-- [ ] `src/mcp/mod.rs`
-- [ ] `src/mcp/server.rs`
-- [ ] `src/poll.rs` (simplify `current_actor`)
-- [ ] `src/commands/mod.rs` (add connect, write_cmd)
-- [ ] `src/lib.rs` (add mcp)
-- [ ] `src/main.rs` (add Connect, Disconnect, Write, Mcp variants)
-- [ ] `tests/e2e_agent_connection.rs`
-- [ ] `tests/helpers.rs` (add `spawn_child`)
-- [ ] `scripts/run_e2e.sh` (add connection suite)
+- [x] `src/commands/connect.rs`
+- [x] `src/commands/write_cmd.rs`
+- [x] `src/adapters/mcp/` (MCP server)
+- [x] `src/runtime/change_processor.rs` (simplified `current_actor`)
+- [x] `src/commands/mod.rs` (connect, write_cmd)
+- [x] `src/lib.rs` (MCP module exports)
+- [x] `src/main.rs` (Connect, Disconnect, Write, Mcp variants)
+- [x] `tests/e2e_agent_connection.rs`
+- [x] `tests/helpers.rs` (`spawn_child` and helpers)
+- [x] `scripts/run_e2e.sh` (connection suite)

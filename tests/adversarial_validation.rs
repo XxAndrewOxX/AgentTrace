@@ -1,4 +1,4 @@
-/// Adversarial Validation Tests — all 35 cases from ADVERSARIAL-VALIDATION.md
+/// Adversarial Validation Tests — all 35 cases from docs/ADVERSARIAL-VALIDATION.md
 ///
 /// Covers: RC-1..7, PE-1..4, GS-1..6, DC-1..4, TS-1..5, FS-1..5, DI-1..4
 #[path = "helpers.rs"]

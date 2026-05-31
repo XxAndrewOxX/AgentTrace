@@ -1,9 +1,14 @@
 # agent-trace — Agent Document Manager
 
 ## Project Overview
-Read docs/PRD.md for full requirements. Read docs/IMPLEMENTATION-PLAN.md for task breakdown.
+
+Agent Trace is a git-backed document store for agent workflows. See
+[`docs/VALIDATION-PLAN.md`](docs/VALIDATION-PLAN.md) for E2E and release
+validation. See [`docs/ADVERSARIAL-VALIDATION.md`](docs/ADVERSARIAL-VALIDATION.md)
+for adversarial case specs.
 
 ## Architecture
+
 - Rust binary, git-backed document store via `git2` crate
 - Self-managed git repo inside `.agent-trace/repo/`
 - TOML manifest for document metadata (types, tags, descriptions)
@@ -12,37 +17,39 @@ Read docs/PRD.md for full requirements. Read docs/IMPLEMENTATION-PLAN.md for tas
 - TUI via `ratatui` + `crossterm`
 - System-synthesized `context.md` and agent logs
 - `AGENT-TRACE.md` agent discovery index at store root
+- MCP server for agent tool integration
 
 ## Module Ownership
-- `src/types.rs` — shared types (DO NOT modify without updating all dependents)
-- `src/config.rs` — config loading (global + per-store)
-- `src/manifest.rs` — TOML manifest CRUD
-- `src/git_store.rs` — all git operations (wraps git2)
-- `src/permissions.rs` — write permission rules + enforcement
-- `src/commands/*.rs` — CLI command implementations
-- `src/poll.rs` — poll loop + change processor
-- `src/context.rs` — context synthesis
-- `src/log_synth.rs` — agent log generation
-- `src/agent_trace_md.rs` — AGENT-TRACE.md generation
-- `src/tui/*.rs` — terminal UI
-- `src/llm/*.rs` — LLM engine
+
+- `src/core/` — shared types and utilities (`types.rs`, `util.rs`)
+- `src/state/` — config, manifest, git store, permissions
+- `src/runtime/` — poll loop, change processor, session management
+- `src/adapters/` — MCP server and TUI
+- `src/commands/` — CLI command implementations
+- `src/trace/` — context synthesis, logs, agent trace markdown
+- `src/llm/` — LLM engine (optional `--features llm`)
+- `src/synthesis/` — synthesis helpers
 
 ## Build Order
-1. First: types.rs, config.rs, manifest.rs, git_store.rs, permissions.rs (parallel, no deps)
-2. Then: commands/*.rs (depends on 1)
-3. Then: poll.rs, context.rs, log_synth.rs, agent_trace_md.rs (integrates everything)
-4. Then: tui/*.rs (depends on poll loop for events)
-5. Then: llm/*.rs (plugs in anywhere via trait)
+
+1. Core + state modules (types, config, manifest, git, permissions)
+2. Commands (depends on state)
+3. Runtime + trace synthesis (poll, context, logs, AGENT-TRACE.md)
+4. Adapters (TUI, MCP — depend on runtime/events)
+5. LLM (plugs in via trait anywhere)
 
 ## Testing
-Every module must have unit tests. Run `cargo test` after every change.
-See docs/IMPLEMENTATION-PLAN.md for acceptance criteria per task.
-See docs/VALIDATION-PLAN.md for E2E tests to run at the end.
+
+Every module must have unit tests. Run `cargo test --locked` after every change.
+See [`docs/VALIDATION-PLAN.md`](docs/VALIDATION-PLAN.md) for E2E suites
+(`./scripts/run_e2e.sh`) and release validation.
 
 ## Conventions
+
 - Use `anyhow::Result` for fallible functions
 - Use `thiserror` for custom error types
 - Use `tracing` for logging (not println)
-- All git operations go through `GitStore` — never use `git2` directly elsewhere
-- All permission checks go through `permissions.rs`
+- All git operations go through `GitStore` in `src/state/git.rs` — never use
+  `git2` directly elsewhere
+- All permission checks go through `src/state/permissions.rs`
 - LLM is accessed via the `LlmEngine` trait — always support `NoLlm` fallback
