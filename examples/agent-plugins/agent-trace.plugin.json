@@ -34,7 +34,7 @@
     "add_document"
   ],
   "releaseBoundary": {
-    "shipsRuntimeBinary": false,
+    "shipsRuntimeBinary": true,
     "runtimeBinary": "agent-trace",
     "excludes": ["e2e test harness", "live-agent evaluation driver"]
   }

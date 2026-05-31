@@ -62,6 +62,10 @@ def copy_payload(staging_dir: Path, built_binary: Path) -> None:
         if source.exists():
             shutil.copy2(source, staging_dir / filename)
 
+    install_source = Path("docs") / "INSTALL.md"
+    if install_source.exists():
+        shutil.copy2(install_source, staging_dir / "INSTALL.md")
+
 
 def make_tarball(staging_dir: Path, archive_path: Path) -> None:
     with tarfile.open(archive_path, "w:gz") as archive:

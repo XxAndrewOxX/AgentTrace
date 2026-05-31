@@ -44,7 +44,9 @@ The MCP server exposes:
 - `add_document`
 
 This keeps packaging simple: Cargo, GitHub Releases, and agent plugins all use
-the same binary artifact.
+the same binary artifact. Prebuilt binaries are published via GitHub Releases
+(see `docs/INSTALL.md`); the plugin manifest sets `shipsRuntimeBinary: true`
+and references the release artifact naming pattern used by CI.
 
 ## Generic plugin manifest
 
