@@ -73,8 +73,7 @@ fn uj2_cold_start_populated() {
     assert_eq!(
         stdout.lines().filter(|l| l.starts_with("[S]")).count(),
         5,
-        "Expected 5 scratch docs, got:\n{}",
-        stdout
+        "Expected 5 scratch docs, got:\n{stdout}"
     );
 
     // .txt and .json NOT tracked.
@@ -127,16 +126,14 @@ fn uj3_document_lifecycle() {
     let stdout = out.stdout();
     assert!(
         !stdout.contains("No log entries"),
-        "Expected ≥1 file log entry, got:\n{}",
-        stdout
+        "Expected ≥1 file log entry, got:\n{stdout}"
     );
     // Full log includes reclassify commits (manifest changes).
     let out = store.run(&["log"]).expect_success("full log");
     let stdout = out.stdout();
     assert!(
         stdout.lines().count() >= 3,
-        "Expected at least 3 full log entries, got:\n{}",
-        stdout
+        "Expected at least 3 full log entries, got:\n{stdout}"
     );
 
     // show v1 (first version committed).

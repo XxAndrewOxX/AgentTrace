@@ -135,11 +135,10 @@ fn fr4_git_corruption_reported_clearly() {
         // A git error is acceptable.
         let stdout = out.stdout();
         let stderr = out.stderr();
-        let output = format!("{}{}", stdout, stderr);
+        let output = format!("{stdout}{stderr}");
         assert!(
             !output.contains("thread 'main' panicked"),
-            "should not panic on git corruption, got:\n{}",
-            output
+            "should not panic on git corruption, got:\n{output}"
         );
     }
     // If no object file found (bare pack only), skip — still a pass.
@@ -182,8 +181,7 @@ fn fr6_large_file_tracked() {
     // Should complete in reasonable time.
     assert!(
         elapsed.as_secs() < 30,
-        "large file add took too long: {:?}",
-        elapsed
+        "large file add took too long: {elapsed:?}"
     );
 
     // File is tracked.
@@ -217,7 +215,7 @@ fn fr7_special_characters_in_filenames() {
         store.write_file(name, content);
         store
             .run(&["add", "scratch", name])
-            .expect_success(&format!("add {}", name));
+            .expect_success(&format!("add {name}"));
     }
 
     // ls shows all.

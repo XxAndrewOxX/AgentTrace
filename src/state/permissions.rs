@@ -93,7 +93,7 @@ impl OverrideEntry {
         match actor {
             Actor::User => self.allow_actor == "user",
             Actor::Agent { name } => {
-                self.allow_actor == "agent" || self.allow_actor == format!("agent:{}", name)
+                self.allow_actor == "agent" || self.allow_actor == format!("agent:{name}")
             }
             Actor::System => self.allow_actor == "system",
         }

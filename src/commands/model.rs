@@ -108,10 +108,10 @@ pub fn run(cmd: ModelCmd, output: &dyn CliOutput) -> Result<()> {
                 return Ok(());
             }
 
-            let url = format!("https://huggingface.co/{}/resolve/main/{}", repo, filename);
+            let url = format!("https://huggingface.co/{repo}/resolve/main/{filename}");
 
-            output.line(&format!("Downloading {} ({} model)…", filename, size))?;
-            output.line(&format!("Source: {}", url))?;
+            output.line(&format!("Downloading {filename} ({size} model)…"))?;
+            output.line(&format!("Source: {url}"))?;
 
             download_with_progress(&url, &dest_path)?;
 
@@ -139,7 +139,7 @@ fn download_with_progress(url: &str, dest: &std::path::Path) -> Result<()> {
     let resp = client
         .get(url)
         .send()
-        .with_context(|| format!("GET {}", url))?;
+        .with_context(|| format!("GET {url}"))?;
 
     if !resp.status().is_success() {
         bail!("Download failed: HTTP {}", resp.status());
@@ -189,8 +189,7 @@ mod tests {
         for size in ["1b", "3b", "7b"] {
             assert!(
                 MODELS.iter().any(|(s, _, _)| *s == size),
-                "Missing model size: {}",
-                size
+                "Missing model size: {size}"
             );
         }
     }

@@ -51,7 +51,7 @@ pub fn run(root: &Path, actor_name: Option<String>) -> Result<()> {
                     "id": null,
                     "error": {"code": -32700, "message": format!("Parse error: {}", e)}
                 });
-                writeln!(out, "{}", err)?;
+                writeln!(out, "{err}")?;
                 out.flush()?;
                 continue;
             }
@@ -70,7 +70,7 @@ pub fn run(root: &Path, actor_name: Option<String>) -> Result<()> {
         let mut response = dispatch(&msg, method, root, &actor, session_id.as_deref());
         response["id"] = id;
 
-        writeln!(out, "{}", response)?;
+        writeln!(out, "{response}")?;
         out.flush()?;
     }
     Ok(())
@@ -96,10 +96,10 @@ fn dispatch(
                 "list_documents" => handle_list_documents(root, &args),
                 "get_permissions" => handle_get_permissions(root, actor),
                 "add_document" => handle_add_document(root, &args),
-                _ => error_response(-32601, &format!("Unknown tool: {}", name)),
+                _ => error_response(-32601, &format!("Unknown tool: {name}")),
             }
         }
-        _ => error_response(-32601, &format!("Method not found: {}", method)),
+        _ => error_response(-32601, &format!("Method not found: {method}")),
     }
 }
 
@@ -196,7 +196,7 @@ fn handle_read_file(root: &Path, args: &Value) -> Value {
 
     let content = match std::fs::read_to_string(&full) {
         Ok(c) => c,
-        Err(e) => return error_response(-32603, &format!("Cannot read {}: {}", path_str, e)),
+        Err(e) => return error_response(-32603, &format!("Cannot read {path_str}: {e}")),
     };
 
     let doc_type = Store::open(root)
@@ -206,8 +206,7 @@ fn handle_read_file(root: &Path, args: &Value) -> Value {
         .unwrap_or_else(|| "untracked".to_string());
 
     tool_result(&format!(
-        "path: {}\ndoc_type: {}\n\n{}",
-        path_str, doc_type, content
+        "path: {path_str}\ndoc_type: {doc_type}\n\n{content}"
     ))
 }
 
@@ -223,13 +222,11 @@ fn handle_write_file(root: &Path, args: &Value, actor: &Actor, session_id: Optio
 
     let rel = PathBuf::from(path_str);
     match data_plane::write_document(root, &rel, content, actor, "mcp write", session_id) {
-        Ok(_) => tool_result(&format!("OK: {} written", path_str)),
+        Ok(_) => tool_result(&format!("OK: {path_str} written")),
         Err(WriteDocumentError::PermissionDenied { path, reason }) => {
             tool_error(&format_permission_denied(&path, &reason))
         }
-        Err(WriteDocumentError::Other(e)) => {
-            error_response(-32603, &format!("Write failed: {}", e))
-        }
+        Err(WriteDocumentError::Other(e)) => error_response(-32603, &format!("Write failed: {e}")),
     }
 }
 
@@ -241,7 +238,7 @@ fn handle_list_documents(root: &Path, args: &Value) -> Value {
 
     let store = match Store::open(root) {
         Ok(s) => s,
-        Err(e) => return error_response(-32603, &format!("Cannot open store: {}", e)),
+        Err(e) => return error_response(-32603, &format!("Cannot open store: {e}")),
     };
 
     let docs: Vec<Value> = store
@@ -303,27 +300,27 @@ fn handle_add_document(root: &Path, args: &Value) -> Value {
     };
     let doc_type: DocType = match doc_type_str.parse() {
         Ok(dt) => dt,
-        Err(e) => return error_response(-32602, &format!("Invalid doc_type: {}", e)),
+        Err(e) => return error_response(-32602, &format!("Invalid doc_type: {e}")),
     };
 
     let rel = PathBuf::from(path_str);
     let mut store = match Store::open(root) {
         Ok(s) => s,
-        Err(e) => return error_response(-32603, &format!("Cannot open store: {}", e)),
+        Err(e) => return error_response(-32603, &format!("Cannot open store: {e}")),
     };
 
     if !root.join(&rel).exists() {
-        return tool_error(&format!("File does not exist: {}", path_str));
+        return tool_error(&format!("File does not exist: {path_str}"));
     }
     if store.manifest.is_tracked(&rel) {
-        return tool_error(&format!("Already tracked: {}", path_str));
+        return tool_error(&format!("Already tracked: {path_str}"));
     }
 
     if let Err(e) = store.manifest.register(&rel, doc_type.clone(), "") {
-        return error_response(-32603, &format!("Cannot register: {}", e));
+        return error_response(-32603, &format!("Cannot register: {e}"));
     }
     if let Err(e) = store.manifest.save(root) {
-        return error_response(-32603, &format!("Cannot save manifest: {}", e));
+        return error_response(-32603, &format!("Cannot save manifest: {e}"));
     }
 
     let at_content = agent_trace_md::generate(root, &store.manifest);
@@ -340,15 +337,15 @@ fn handle_add_document(root: &Path, args: &Value) -> Value {
             ),
         ],
         actor: Actor::System,
-        summary: format!("mcp add: {} as {}", path_str, doc_type),
+        summary: format!("mcp add: {path_str} as {doc_type}"),
         agent_name: None,
         session_id: None,
     };
     if let Err(e) = store.commit(&info) {
-        return error_response(-32603, &format!("Cannot commit: {}", e));
+        return error_response(-32603, &format!("Cannot commit: {e}"));
     }
 
-    tool_result(&format!("Added {} as {}", path_str, doc_type))
+    tool_result(&format!("Added {path_str} as {doc_type}"))
 }
 
 // ── Response helpers ──────────────────────────────────────────────────────────
@@ -498,8 +495,7 @@ mod tests {
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(
             text.contains("Permission denied"),
-            "expected denial, got: {}",
-            text
+            "expected denial, got: {text}"
         );
         // File must be unchanged
         assert_eq!(

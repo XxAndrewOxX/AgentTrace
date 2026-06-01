@@ -92,12 +92,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          crate_version="$(python - <<'PY'
-import tomllib
-with open("Cargo.toml", "rb") as handle:
-    print(tomllib.load(handle)["package"]["version"])
-PY
-)"
+          crate_version="$(python scripts/crate_version.py)"
           requested_version=""
           if [ -n "${{ inputs.version }}" ]; then
             requested_version="${{ inputs.version }}"
@@ -141,24 +136,7 @@ PY
 
           if [[ "${TARGET}" == *windows* ]]; then
             archive="dist/${package_name}.zip"
-            python - <<'PY'
-import hashlib
-import os
-import zipfile
-from pathlib import Path
-
-version = os.environ["VERSION"]
-target = os.environ["TARGET"]
-package_name = f"agent-trace-v{version}-{target}"
-archive = Path("dist") / f"{package_name}.zip"
-checksum_path = Path("dist") / f"{package_name}.zip.sha256"
-expected = checksum_path.read_text(encoding="utf-8").split()[0]
-actual = hashlib.sha256(archive.read_bytes()).hexdigest()
-if actual != expected:
-    raise SystemExit(f"Checksum mismatch for {archive.name}")
-with zipfile.ZipFile(archive) as zf:
-    zf.extractall(os.environ["smoke_dir"])
-PY
+            python scripts/smoke_extract_windows_archive.py
             binary="${smoke_dir}/agent-trace.exe"
           else
             archive="dist/${package_name}.tar.gz"
@@ -231,12 +209,7 @@ PY
         id: version
         shell: bash
         run: |
-          crate_version="$(python - <<'PY'
-import tomllib
-with open("Cargo.toml", "rb") as handle:
-    print(tomllib.load(handle)["package"]["version"])
-PY
-)"
+          crate_version="$(python scripts/crate_version.py)"
           requested_version=""
           if [ -n "${{ inputs.version }}" ]; then
             requested_version="${{ inputs.version }}"

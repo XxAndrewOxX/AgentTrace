@@ -59,10 +59,7 @@ impl TreeState {
             .map(|doc| {
                 let indicator = doc.doc_type.indicator();
                 let line = Line::from(vec![
-                    Span::styled(
-                        format!("[{}] ", indicator),
-                        Style::default().fg(Color::Cyan),
-                    ),
+                    Span::styled(format!("[{indicator}] "), Style::default().fg(Color::Cyan)),
                     Span::raw(doc.path.display().to_string()),
                 ]);
                 ListItem::new(line)

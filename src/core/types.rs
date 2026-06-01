@@ -135,8 +135,7 @@ impl FromStr for DocType {
             "reference" => Ok(DocType::Reference),
             "scratch" => Ok(DocType::Scratch),
             other => Err(anyhow::anyhow!(
-                "Unknown doc type: '{}'. Valid types: plan, context, log, reference, scratch",
-                other
+                "Unknown doc type: '{other}'. Valid types: plan, context, log, reference, scratch"
             )),
         }
     }
@@ -168,7 +167,7 @@ impl fmt::Display for Actor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Actor::User => write!(f, "user"),
-            Actor::Agent { name } => write!(f, "agent:{}", name),
+            Actor::Agent { name } => write!(f, "agent:{name}"),
             Actor::System => write!(f, "system"),
         }
     }
@@ -179,7 +178,7 @@ impl Actor {
     pub fn git_author_name(&self) -> String {
         match self {
             Actor::User => "User".to_string(),
-            Actor::Agent { name } => format!("Agent: {}", name),
+            Actor::Agent { name } => format!("Agent: {name}"),
             Actor::System => "agent-trace".to_string(),
         }
     }

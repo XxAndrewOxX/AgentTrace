@@ -64,7 +64,7 @@ pub fn generate(_store_root: &Path, manifest: &Manifest) -> String {
     out.push_str("| scratch | ✓ | ✓ | ✓ |\n\n");
     out.push_str("*⚠ = requires user confirmation. Unauthorized agent writes are automatically reverted.*\n\n");
 
-    out.push_str(&format!("## Documents ({} total)\n\n", total));
+    out.push_str(&format!("## Documents ({total} total)\n\n"));
 
     if !plans.is_empty() {
         out.push_str("### Plans\n\n");
@@ -117,7 +117,7 @@ pub fn generate(_store_root: &Path, manifest: &Manifest) -> String {
     }
 
     out.push_str("## Store Stats\n\n");
-    out.push_str(&format!("- Total documents: {}\n", total));
+    out.push_str(&format!("- Total documents: {total}\n"));
     out.push_str(&format!("- Plans: {}\n", plans.len()));
     out.push_str(&format!("- Reference: {}\n", references.len()));
     out.push_str(&format!("- Scratch: {}\n", scratches.len()));

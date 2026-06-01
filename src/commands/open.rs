@@ -83,7 +83,7 @@ pub fn run(
     let _instance_lock = match InstanceLock::acquire(&store_root) {
         Ok(lock) => lock,
         Err(e) => {
-            output.warn(&format!("Warning: {}", e))?;
+            output.warn(&format!("Warning: {e}"))?;
             output.warn("Opening in read-only mode (poll loop disabled).")?;
             return run_readonly(&store_root, manifest, agent_name, ascii);
         }

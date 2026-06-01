@@ -66,7 +66,7 @@ fn commit_tracked(
         action: Action::Create,
         files: vec![(rel, Action::Create, doc_type)],
         actor: Actor::System,
-        summary: format!("create {}", path),
+        summary: format!("create {path}"),
         agent_name: None,
         session_id: None,
     };
@@ -87,7 +87,7 @@ fn rc1_rapid_file_creation_storm() {
 
     // Create 50 files at once (simulates a tight loop).
     for i in 1..=50 {
-        std::fs::write(root.join(format!("doc-{}.md", i)), format!("# Doc {}", i)).unwrap();
+        std::fs::write(root.join(format!("doc-{i}.md")), format!("# Doc {i}")).unwrap();
     }
 
     // Single poll cycle should detect and commit all files (batched).
@@ -109,8 +109,7 @@ fn rc1_rapid_file_creation_storm() {
     let total_files: usize = log.iter().map(|e| e.files.len()).sum();
     assert!(
         total_files >= 50,
-        "Git log should cover all 50 files; got {}",
-        total_files
+        "Git log should cover all 50 files; got {total_files}"
     );
 }
 
@@ -128,7 +127,7 @@ fn rc2_file_modified_during_poll() {
 
     // Overwrite 20 times rapidly.
     for i in 1..=20 {
-        std::fs::write(root.join("rapid.md"), format!("version {}", i)).unwrap();
+        std::fs::write(root.join("rapid.md"), format!("version {i}")).unwrap();
     }
 
     // Poll cycle should capture the current state (version 20) without crashing.
@@ -147,8 +146,7 @@ fn rc2_file_modified_during_poll() {
     // Content must be a complete "version N" string.
     assert!(
         latest_content.starts_with("version "),
-        "Captured content should be a complete version string, got: {:?}",
-        latest_content
+        "Captured content should be a complete version string, got: {latest_content:?}"
     );
 }
 
@@ -238,7 +236,7 @@ fn rc4_simultaneous_lock_and_file_modification() {
 
     // Write the lock file and modify the plan simultaneously (both happen before the poll).
     let pid = std::process::id();
-    let lock_content = format!("[agent]\npid = {}\nname = \"fast-agent\"\n", pid);
+    let lock_content = format!("[agent]\npid = {pid}\nname = \"fast-agent\"\n");
     std::fs::write(
         root.join(".agent-trace/locks/agent-lock.toml"),
         &lock_content,
@@ -286,7 +284,7 @@ fn rc5_lock_removed_during_processing() {
     commit_tracked(root, "plan.md", "# Plan", DocType::Plan, &manifest, &git);
 
     let pid = std::process::id();
-    let lock_content = format!("[agent]\npid = {}\nname = \"test-agent\"\n", pid);
+    let lock_content = format!("[agent]\npid = {pid}\nname = \"test-agent\"\n");
     std::fs::write(
         root.join(".agent-trace/locks/agent-lock.toml"),
         &lock_content,
@@ -336,7 +334,7 @@ fn rc6_manifest_write_read_contention() {
 
     // Pre-create 100 files so the manifest is large.
     for i in 0..100 {
-        std::fs::write(root.join(format!("base-{}.md", i)), format!("# {}", i)).unwrap();
+        std::fs::write(root.join(format!("base-{i}.md")), format!("# {i}")).unwrap();
     }
     proc.run_poll_cycle().unwrap(); // batch commit all 100
 
@@ -361,7 +359,7 @@ fn rc6_manifest_write_read_contention() {
 
     // While the reader runs, create 10 more files (triggers manifest writes).
     for i in 100..110 {
-        std::fs::write(root.join(format!("new-{}.md", i)), format!("# new {}", i)).unwrap();
+        std::fs::write(root.join(format!("new-{i}.md")), format!("# new {i}")).unwrap();
     }
     proc.run_poll_cycle().unwrap();
 
@@ -461,22 +459,18 @@ fn pe1_agent_rapid_fire_protected_writes() {
 
     // Agent attacks each file 10 times (simulated as 10 rounds of writes + poll cycles).
     for i in 1..=10 {
-        std::fs::write(root.join("context.md"), format!("hack attempt {}", i)).unwrap();
-        std::fs::write(root.join("ref.md"), format!("hack attempt {}", i)).unwrap();
-        std::fs::write(root.join("log.md"), format!("hack attempt {}", i)).unwrap();
+        std::fs::write(root.join("context.md"), format!("hack attempt {i}")).unwrap();
+        std::fs::write(root.join("ref.md"), format!("hack attempt {i}")).unwrap();
+        std::fs::write(root.join("log.md"), format!("hack attempt {i}")).unwrap();
         proc.run_poll_cycle().unwrap();
 
         // Verify all three are reverted after each poll cycle.
         let ctx = std::fs::read_to_string(root.join("context.md")).unwrap();
         let rf = std::fs::read_to_string(root.join("ref.md")).unwrap();
         let lg = std::fs::read_to_string(root.join("log.md")).unwrap();
-        assert_eq!(
-            ctx, original_context,
-            "context.md reverted on attempt {}",
-            i
-        );
-        assert_eq!(rf, original_ref, "ref.md reverted on attempt {}", i);
-        assert_eq!(lg, original_log, "log.md reverted on attempt {}", i);
+        assert_eq!(ctx, original_context, "context.md reverted on attempt {i}");
+        assert_eq!(rf, original_ref, "ref.md reverted on attempt {i}");
+        assert_eq!(lg, original_log, "log.md reverted on attempt {i}");
     }
 
     // Check violations were recorded in git log.
@@ -510,14 +504,13 @@ fn pe2_agent_races_the_revert() {
 
     // Simulate the continuous write/revert race: 5 rounds.
     for i in 1..=5 {
-        std::fs::write(root.join("ref.md"), format!("attempt {}", i)).unwrap();
+        std::fs::write(root.join("ref.md"), format!("attempt {i}")).unwrap();
         proc.run_poll_cycle().unwrap();
         // After each poll, content must be reverted.
         let content = std::fs::read_to_string(root.join("ref.md")).unwrap();
         assert_eq!(
             content, original,
-            "After cycle {}, ref.md must be reverted",
-            i
+            "After cycle {i}, ref.md must be reverted"
         );
     }
 
@@ -569,8 +562,7 @@ fn pe3_override_expiry_during_session() {
     let content_after_allowed = std::fs::read_to_string(root.join("ref.md")).unwrap();
     assert!(
         content_after_allowed.contains("Agent edit"),
-        "Write within override window must be committed; got: {:?}",
-        content_after_allowed
+        "Write within override window must be committed; got: {content_after_allowed:?}"
     );
 
     // Now expire the override by setting expires_at to the past.
@@ -631,7 +623,7 @@ fn pe4_agent_files_faster_than_classification() {
         "overview.md",
     ];
     for f in &files {
-        std::fs::write(root.join(f), format!("# {}", f)).unwrap();
+        std::fs::write(root.join(f), format!("# {f}")).unwrap();
     }
     proc.run_poll_cycle().unwrap();
 
@@ -674,7 +666,7 @@ fn gs1_hundreds_of_commits_log_performance() {
     // Make 20 rounds of modifications (100 total commits to git).
     for round in 1..=20 {
         for f in &["a.md", "b.md", "c.md", "d.md", "e.md"] {
-            std::fs::write(root.join(f), format!("round {}", round)).unwrap();
+            std::fs::write(root.join(f), format!("round {round}")).unwrap();
         }
         proc.run_poll_cycle().unwrap();
     }
@@ -686,7 +678,7 @@ fn gs1_hundreds_of_commits_log_performance() {
     let log = git2.log(50).unwrap();
     let log_ms = t0.elapsed().as_millis();
     assert!(log.len() <= 50);
-    assert!(log_ms < 500, "log(50) took {}ms, must be < 500ms", log_ms);
+    assert!(log_ms < 500, "log(50) took {log_ms}ms, must be < 500ms");
 
     // log for a single file must be < 1s.
     let t1 = Instant::now();
@@ -695,8 +687,7 @@ fn gs1_hundreds_of_commits_log_performance() {
     assert!(!file_log.is_empty(), "a.md must have commits");
     assert!(
         file_log_ms < 1000,
-        "log_file took {}ms, must be < 1s",
-        file_log_ms
+        "log_file took {file_log_ms}ms, must be < 1s"
     );
 
     // info (version_count) must be < 1s.
@@ -706,8 +697,7 @@ fn gs1_hundreds_of_commits_log_performance() {
     assert!(count >= 20, "a.md must have >= 20 versions");
     assert!(
         count_ms < 1000,
-        "version_count took {}ms, must be < 1s",
-        count_ms
+        "version_count took {count_ms}ms, must be < 1s"
     );
 }
 
@@ -723,7 +713,7 @@ fn gs2_integrity_after_abrupt_drop() {
 
     // Make some commits.
     for i in 1..=10 {
-        std::fs::write(root.join(format!("file{}.md", i)), format!("# v{}", i)).unwrap();
+        std::fs::write(root.join(format!("file{i}.md")), format!("# v{i}")).unwrap();
         proc.run_poll_cycle().unwrap();
     }
 
@@ -756,7 +746,7 @@ fn gs3_very_long_file_paths() {
 
     let deep_dir = "a/b/c/d/e/f/g/h/i/j/k/l/m/n/o";
     std::fs::create_dir_all(root.join(deep_dir)).unwrap();
-    let deep_path = format!("{}/deep.md", deep_dir);
+    let deep_path = format!("{deep_dir}/deep.md");
     std::fs::write(root.join(&deep_path), "# Deep").unwrap();
 
     // Poll should detect and track the deeply nested file without crash.
@@ -857,8 +847,7 @@ fn gs5_empty_md_file() {
         .unwrap();
     assert!(
         diff.contains("now has content") || diff.contains("+"),
-        "Diff from empty to content must show addition; got: {:?}",
-        diff
+        "Diff from empty to content must show addition; got: {diff:?}"
     );
 }
 
@@ -915,7 +904,7 @@ fn dc1_agent_trace_md_consistency_under_rapid_changes() {
 
     // Create 10 documents.
     for i in 0..10 {
-        std::fs::write(root.join(format!("doc{}.md", i)), format!("# Doc {}", i)).unwrap();
+        std::fs::write(root.join(format!("doc{i}.md")), format!("# Doc {i}")).unwrap();
     }
     proc.run_poll_cycle().unwrap();
 
@@ -924,8 +913,8 @@ fn dc1_agent_trace_md_consistency_under_rapid_changes() {
         // Modify some files.
         for i in 0..5 {
             std::fs::write(
-                root.join(format!("doc{}.md", i)),
-                format!("# Doc {} round {}", i, round),
+                root.join(format!("doc{i}.md")),
+                format!("# Doc {i} round {round}"),
             )
             .unwrap();
         }
@@ -1001,11 +990,11 @@ fn dc3_context_synthesis_large_document_set() {
     // Create 50 plan files.
     for i in 0..50 {
         store.write_file(
-            &format!("plan-{:02}.md", i),
+            &format!("plan-{i:02}.md"),
             &format!("# Plan {}\n\n{}", i, "Content. ".repeat(200)),
         );
         store
-            .run(&["add", "plan", &format!("plan-{:02}.md", i)])
+            .run(&["add", "plan", &format!("plan-{i:02}.md")])
             .expect_success("add plan");
     }
 
@@ -1017,8 +1006,7 @@ fn dc3_context_synthesis_large_document_set() {
 
     assert!(
         elapsed < 10,
-        "context refresh with 50 plans must complete in < 10s; took {}s",
-        elapsed
+        "context refresh with 50 plans must complete in < 10s; took {elapsed}s"
     );
 
     let context = store.read_file("context.md");
@@ -1056,7 +1044,7 @@ fn dc4_agent_trace_md_written_atomically() {
 
     // While reader runs, create files to trigger AGENT-TRACE.md regeneration.
     for i in 0..20 {
-        std::fs::write(root.join(format!("f{}.md", i)), format!("# {}", i)).unwrap();
+        std::fs::write(root.join(format!("f{i}.md")), format!("# {i}")).unwrap();
         proc.run_poll_cycle().unwrap();
     }
 
@@ -1069,8 +1057,7 @@ fn dc4_agent_trace_md_written_atomically() {
     // Ideally zero partial reads, but we accept a small race window.
     assert!(
         partial == 0,
-        "Readers saw {} empty AGENT-TRACE.md reads — atomic write may have failed",
-        partial
+        "Readers saw {partial} empty AGENT-TRACE.md reads — atomic write may have failed"
     );
 }
 
@@ -1087,13 +1074,13 @@ fn ts1_changelog_panel_entry_eviction() {
     // Push 300 entries — must not grow past MAX_CHANGELOG_ENTRIES (200).
     for i in 0..300 {
         changelog.push(LogEntry {
-            commit_id: agent_trace::types::CommitId(format!("{:040x}", i)),
+            commit_id: agent_trace::types::CommitId(format!("{i:040x}")),
             timestamp: Utc::now(),
             action: Action::Modify,
             actor: Actor::User,
             agent_name: None,
             files: vec![(PathBuf::from("a.md"), Action::Modify, DocType::Scratch)],
-            summary: format!("commit {}", i),
+            summary: format!("commit {i}"),
         });
     }
 
@@ -1176,8 +1163,7 @@ fn ts3_thousands_of_files_in_tree_panel() {
 
     assert!(
         render_ms < 500,
-        "Render of 500 files must be < 500ms; took {}ms",
-        render_ms
+        "Render of 500 files must be < 500ms; took {render_ms}ms"
     );
 }
 
@@ -1400,7 +1386,7 @@ fn di1_manifest_git_consistency_after_1000_ops() {
     // Perform 1000 operations: create, modify, "delete" (remove from disk).
     let n_files = 20usize;
     for i in 0..n_files {
-        std::fs::write(root.join(format!("file{}.md", i)), format!("# File {}", i)).unwrap();
+        std::fs::write(root.join(format!("file{i}.md")), format!("# File {i}")).unwrap();
     }
     proc.run_poll_cycle().unwrap();
 
@@ -1408,8 +1394,8 @@ fn di1_manifest_git_consistency_after_1000_ops() {
     for round in 0..50 {
         let file_idx = round % n_files;
         std::fs::write(
-            root.join(format!("file{}.md", file_idx)),
-            format!("round {} file {}", round, file_idx),
+            root.join(format!("file{file_idx}.md")),
+            format!("round {round} file {file_idx}"),
         )
         .unwrap();
         proc.run_poll_cycle().unwrap();
@@ -1449,13 +1435,13 @@ fn di2_version_numbers_are_monotonic() {
 
     // Modify 19 more times → 20 total versions.
     for i in 2..=20 {
-        std::fs::write(root.join("versioned.md"), format!("content v{}", i)).unwrap();
+        std::fs::write(root.join("versioned.md"), format!("content v{i}")).unwrap();
         proc.run_poll_cycle().unwrap();
     }
 
     let git2 = GitStore::open(root).unwrap();
     let count = git2.version_count(&PathBuf::from("versioned.md")).unwrap();
-    assert!(count >= 20, "Must have >= 20 versions; got {}", count);
+    assert!(count >= 20, "Must have >= 20 versions; got {count}");
 
     // Retrieve every version and collect all content.
     // NOTE: rapid commits may share a unix timestamp, so Sort::TIME order is not
@@ -1482,9 +1468,7 @@ fn di2_version_numbers_are_monotonic() {
     for expected in 1u32..=20 {
         assert!(
             seen_versions.contains(&expected),
-            "content v{} must appear in version history; seen: {:?}",
-            expected,
-            seen_versions
+            "content v{expected} must appear in version history; seen: {seen_versions:?}"
         );
     }
 }
@@ -1508,7 +1492,7 @@ fn di3_rename_preserves_full_history() {
 
     // 4 more modifications under old name.
     for i in 2..=5 {
-        std::fs::write(root.join("old-name.md"), format!("# v{}", i)).unwrap();
+        std::fs::write(root.join("old-name.md"), format!("# v{i}")).unwrap();
         proc.run_poll_cycle().unwrap();
     }
 
@@ -1518,7 +1502,7 @@ fn di3_rename_preserves_full_history() {
 
     // 3 more modifications under new name.
     for i in 6..=8 {
-        std::fs::write(root.join("new-name.md"), format!("# v{}", i)).unwrap();
+        std::fs::write(root.join("new-name.md"), format!("# v{i}")).unwrap();
         proc.run_poll_cycle().unwrap();
     }
 
@@ -1581,8 +1565,7 @@ fn di4_restore_does_not_corrupt_subsequent_versions() {
     let count = git3.version_count(&PathBuf::from("doc.md")).unwrap();
     assert!(
         count >= 4,
-        "Must have >= 4 versions after restore + new edit; got {}",
-        count
+        "Must have >= 4 versions after restore + new edit; got {count}"
     );
 
     // Collect all version contents. NOTE: rapid commits share unix timestamps so
@@ -1599,23 +1582,19 @@ fn di4_restore_does_not_corrupt_subsequent_versions() {
     // All distinct content variants must appear in history.
     assert!(
         seen.contains("v1 content"),
-        "v1 content must appear in history; seen: {:?}",
-        seen
+        "v1 content must appear in history; seen: {seen:?}"
     );
     assert!(
         seen.contains("v2 content"),
-        "v2 content must appear in history; seen: {:?}",
-        seen
+        "v2 content must appear in history; seen: {seen:?}"
     );
     assert!(
         seen.contains("v3 content"),
-        "v3 content must appear in history; seen: {:?}",
-        seen
+        "v3 content must appear in history; seen: {seen:?}"
     );
     // "v1 content" appears twice (original + restore), and "v5 new content" is the latest edit.
     assert!(
         seen.iter().any(|s| s.contains("v5")),
-        "v5 new content must appear; seen: {:?}",
-        seen
+        "v5 new content must appear; seen: {seen:?}"
     );
 }

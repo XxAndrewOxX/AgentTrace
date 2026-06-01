@@ -35,7 +35,7 @@ pub fn append_agent_log(
     let logs_dir = store_root.join("logs");
     std::fs::create_dir_all(&logs_dir)?;
 
-    let log_path = logs_dir.join(format!("{}-{}.md", agent_name, session_id));
+    let log_path = logs_dir.join(format!("{agent_name}-{session_id}.md"));
     let rel_log_path = log_path
         .strip_prefix(store_root)
         .unwrap_or(&log_path)
@@ -44,7 +44,7 @@ pub fn append_agent_log(
     let mut content = if log_path.exists() {
         std::fs::read_to_string(&log_path)?
     } else {
-        format!("# Agent Log: {} (session {})\n\n", agent_name, session_id)
+        format!("# Agent Log: {agent_name} (session {session_id})\n\n")
     };
 
     for entry in entries {
@@ -63,7 +63,7 @@ pub fn append_agent_log(
         action: Action::Modify,
         files: vec![(rel_log_path, Action::Modify, DocType::Log)],
         actor: Actor::System,
-        summary: format!("update agent log for {}", agent_name),
+        summary: format!("update agent log for {agent_name}"),
         agent_name: Some(agent_name.to_string()),
         session_id: Some(session_id.to_string()),
     };

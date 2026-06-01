@@ -48,8 +48,7 @@ pub fn run(store_root: &Path, output: &dyn CliOutput) -> Result<()> {
         .count();
     if untracked > 0 {
         output.line(&format!(
-            "\n{} untracked file(s). Use `agent-trace add <type> <file>` to register.",
-            untracked
+            "\n{untracked} untracked file(s). Use `agent-trace add <type> <file>` to register."
         ))?;
     }
 

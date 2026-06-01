@@ -37,10 +37,10 @@ pub fn run(store_root: &Path, file: &Path, output: &dyn CliOutput) -> Result<()>
     output.line(&format!("Tags:          {}", entry.tags.join(", ")))?;
     output.line(&format!("Description:   {}", entry.description))?;
     output.line(&format!("Agent:         {}", entry.agent_name))?;
-    output.line(&format!("Versions:      {}", version_count))?;
-    output.line(&format!("Created:       {}", created))?;
-    output.line(&format!("Last modified: {}", last_modified))?;
-    output.line(&format!("Created by:    {}", created_by))?;
+    output.line(&format!("Versions:      {version_count}"))?;
+    output.line(&format!("Created:       {created}"))?;
+    output.line(&format!("Last modified: {last_modified}"))?;
+    output.line(&format!("Created by:    {created_by}"))?;
 
     Ok(())
 }

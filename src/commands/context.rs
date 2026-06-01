@@ -51,7 +51,7 @@ pub fn run(store_root: &Path, cmd: ContextCmd, output: &dyn CliOutput) -> Result
             content.push_str(&entry.to_string());
             content.push('\n');
             std::fs::write(&updates_file, content)?;
-            output.line(&format!("Context update queued: {}", statement))?;
+            output.line(&format!("Context update queued: {statement}"))?;
         }
         ContextCmd::Updates => {
             let pending = load_pending_updates(store_root)?;
@@ -67,9 +67,8 @@ pub fn run(store_root: &Path, cmd: ContextCmd, output: &dyn CliOutput) -> Result
         ContextCmd::Refresh => {
             let store = Store::open(store_root)?;
             let content = if let Some(api) = TraceInsightsFacade::from_store_root(store_root)
-                .map_err(|e| {
-                    anyhow::anyhow!("failed to initialize LLM trace_insights API: {}", e)
-                })? {
+                .map_err(|e| anyhow::anyhow!("failed to initialize LLM trace_insights API: {e}"))?
+            {
                 let docs = store
                     .manifest
                     .documents()
@@ -98,7 +97,7 @@ pub fn run(store_root: &Path, cmd: ContextCmd, output: &dyn CliOutput) -> Result
                     .map(|u| u.update)
                     .collect::<Vec<_>>();
                 api.synthesize_context(&docs, &updates).map_err(|e| {
-                    anyhow::anyhow!("LLM trace_insights synthesize_context failed: {}", e)
+                    anyhow::anyhow!("LLM trace_insights synthesize_context failed: {e}")
                 })?
             } else {
                 synthesize_no_llm(store_root, &store.manifest)?

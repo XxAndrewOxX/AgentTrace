@@ -126,9 +126,7 @@ impl CmdOutput {
         let s = self.stdout();
         assert!(
             s.contains(needle),
-            "expected stdout to contain {:?}, got:\n{}",
-            needle,
-            s
+            "expected stdout to contain {needle:?}, got:\n{s}"
         );
         self
     }
@@ -137,9 +135,7 @@ impl CmdOutput {
         let s = self.stdout();
         assert!(
             !s.contains(needle),
-            "expected stdout NOT to contain {:?}, but got:\n{}",
-            needle,
-            s
+            "expected stdout NOT to contain {needle:?}, but got:\n{s}"
         );
         self
     }

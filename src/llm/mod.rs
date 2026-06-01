@@ -103,7 +103,7 @@ impl LlmEngine for NoLlm {
     fn summarize_change(&self, path: &str, _doc_type: &str, diff: &str) -> Result<String> {
         let added = diff.lines().filter(|l| l.starts_with('+')).count();
         let removed = diff.lines().filter(|l| l.starts_with('-')).count();
-        Ok(format!("{}: +{} lines, -{} lines.", path, added, removed))
+        Ok(format!("{path}: +{added} lines, -{removed} lines."))
     }
 
     fn parse_command(&self, _input: &str, _manifest_summary: &str) -> Result<ParsedCommand> {
