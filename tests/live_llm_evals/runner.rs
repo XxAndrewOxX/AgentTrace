@@ -87,13 +87,13 @@ fn run_case(api: &TraceInsightsFacade, fx: EvalFixture) -> EvalCaseResult {
 
     let mut errors = Vec::new();
     if let Err(e) = summary_res {
-        errors.push(format!("summary: {}", e));
+        errors.push(format!("summary: {e}"));
     }
     if let Err(e) = context_res {
-        errors.push(format!("context: {}", e));
+        errors.push(format!("context: {e}"));
     }
     if let Err(e) = recap_res {
-        errors.push(format!("recap: {}", e));
+        errors.push(format!("recap: {e}"));
     }
 
     EvalCaseResult {

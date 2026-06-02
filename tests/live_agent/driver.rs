@@ -34,7 +34,7 @@ impl McpBridge {
         scenario_name: &str,
     ) -> anyhow::Result<Self> {
         let mut child = std::process::Command::new(bin)
-            .args(["mcp", &format!("--actor={}", actor)])
+            .args(["mcp", &format!("--actor={actor}")])
             .current_dir(store_root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -136,7 +136,7 @@ impl McpBridge {
     }
 
     fn send(&mut self, msg: &Value) -> anyhow::Result<()> {
-        writeln!(self.stdin, "{}", msg)?;
+        writeln!(self.stdin, "{msg}")?;
         self.stdin.flush()?;
         Ok(())
     }

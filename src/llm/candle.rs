@@ -376,8 +376,7 @@ mod tests {
         let msg = result.err().unwrap().to_string();
         assert!(
             msg.contains("not found") || msg.contains("not compiled"),
-            "Unexpected error: {}",
-            msg
+            "Unexpected error: {msg}"
         );
     }
 

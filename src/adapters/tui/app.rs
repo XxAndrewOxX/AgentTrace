@@ -157,8 +157,7 @@ impl App {
             }
             _ => {
                 self.chat.output = Some(format!(
-                    "Unknown command: '{}'. Type 'ls' to list documents, 'q' to quit.",
-                    input
+                    "Unknown command: '{input}'. Type 'ls' to list documents, 'q' to quit."
                 ));
             }
         }

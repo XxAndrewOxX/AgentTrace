@@ -125,14 +125,13 @@ pub fn run(path: &Path, scan: bool, output: &dyn CliOutput) -> Result<()> {
                 action: crate::types::Action::Init,
                 files,
                 actor: crate::types::Actor::System,
-                summary: format!("scanned {} existing markdown files", count),
+                summary: format!("scanned {count} existing markdown files"),
                 agent_name: None,
                 session_id: None,
             };
             git.commit(&info)?;
             output.line(&format!(
-                "Registered {} existing markdown files as scratch.",
-                count
+                "Registered {count} existing markdown files as scratch."
             ))?;
         }
     }

@@ -108,7 +108,7 @@ pub fn apply_trace_hooks(
         return Ok(());
     }
     let trace_insights = TraceInsightsFacade::from_store_root(store_root)
-        .map_err(|e| anyhow::anyhow!("failed to initialize LLM trace_insights API: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("failed to initialize LLM trace_insights API: {e}"))?;
 
     if actor.is_agent() {
         if let (Some(agent_name), Some(sid)) = (actor.agent_name(), session_id) {
@@ -199,7 +199,7 @@ fn sync_context_md(
             .map(|u| u.update)
             .collect::<Vec<_>>();
         api.synthesize_context(&docs, &updates)
-            .map_err(|e| anyhow::anyhow!("LLM trace_insights synthesize_context failed: {}", e))?
+            .map_err(|e| anyhow::anyhow!("LLM trace_insights synthesize_context failed: {e}"))?
     } else {
         crate::trace::context::synthesize_no_llm(store_root, manifest)?
     };

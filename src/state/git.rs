@@ -356,7 +356,7 @@ impl GitStore {
 
         let tree_at = |v: u32| -> Result<Tree<'_>> {
             if v == 0 || v as usize > n {
-                bail!("Version {} does not exist", v);
+                bail!("Version {v} does not exist");
             }
             let idx = n - v as usize;
             let oid = Oid::from_str(&history[idx].commit_id.0)?;
@@ -472,10 +472,10 @@ fn build_commit_message(info: &CommitInfo) -> String {
     let mut body = format!("summary: {}\n", info.summary);
     body.push_str(&format!("actor: {}\n", info.actor));
     if let Some(agent) = &info.agent_name {
-        body.push_str(&format!("agent: {}\n", agent));
+        body.push_str(&format!("agent: {agent}\n"));
     }
     if let Some(session) = &info.session_id {
-        body.push_str(&format!("session: {}\n", session));
+        body.push_str(&format!("session: {session}\n"));
     }
     for (path, action, doc_type) in &info.files {
         body.push_str(&format!(
@@ -486,7 +486,7 @@ fn build_commit_message(info: &CommitInfo) -> String {
         ));
     }
 
-    format!("{}\n\n{}", subject, body)
+    format!("{subject}\n\n{body}")
 }
 
 fn parse_commit(commit: &git2::Commit<'_>) -> Option<LogEntry> {
@@ -787,8 +787,7 @@ mod tests {
         let msg = head.message().unwrap();
         assert!(
             msg.contains("[agent-trace] modify plan: prd.md"),
-            "Got: {}",
-            msg
+            "Got: {msg}"
         );
         assert!(msg.contains("actor: user"));
     }
@@ -803,12 +802,8 @@ mod tests {
         assert!(result.is_some(), "Expected Some, got None");
         let (path, action, doc_type) = result.unwrap();
         assert_eq!(path, PathBuf::from("prd.md"));
-        assert!(matches!(action, Action::Modify), "action = {:?}", action);
-        assert!(
-            matches!(doc_type, DocType::Plan),
-            "doc_type = {:?}",
-            doc_type
-        );
+        assert!(matches!(action, Action::Modify), "action = {action:?}");
+        assert!(matches!(doc_type, DocType::Plan), "doc_type = {doc_type:?}");
     }
 
     #[test]
@@ -822,12 +817,8 @@ mod tests {
         );
         let (path, action, doc_type) = result.unwrap();
         assert_eq!(path, PathBuf::from("my plan.md"));
-        assert!(matches!(action, Action::Create), "action = {:?}", action);
-        assert!(
-            matches!(doc_type, DocType::Plan),
-            "doc_type = {:?}",
-            doc_type
-        );
+        assert!(matches!(action, Action::Create), "action = {action:?}");
+        assert!(matches!(doc_type, DocType::Plan), "doc_type = {doc_type:?}");
     }
 
     #[test]
@@ -840,8 +831,7 @@ mod tests {
         assert_eq!(path, PathBuf::from("notes.md"));
         assert!(
             matches!(action, Action::Unknown),
-            "Expected Unknown, got {:?}",
-            action
+            "Expected Unknown, got {action:?}"
         );
     }
 
@@ -854,8 +844,7 @@ mod tests {
         let (_path, _action, doc_type) = result.unwrap();
         assert!(
             matches!(doc_type, DocType::Scratch),
-            "Expected Scratch fallback, got {:?}",
-            doc_type
+            "Expected Scratch fallback, got {doc_type:?}"
         );
     }
 

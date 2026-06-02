@@ -49,8 +49,7 @@ pub fn assert_trajectory_coverage(scenario: &AgentScenario, trajectory: &Traject
     for path in scenario.required_writes {
         if !trajectory.did_call("write_file", path) {
             return Outcome::Inconclusive(format!(
-                "LLM never called write_file(\"{}\") — prompt may need to be more directive",
-                path
+                "LLM never called write_file(\"{path}\") — prompt may need to be more directive"
             ));
         }
     }
@@ -71,9 +70,8 @@ pub fn assert_store_state(
     for path in scenario.required_writes {
         if !trajectory.did_succeed_write(path) {
             return Outcome::Fail(format!(
-                "write_file(\"{}\") was called but agent_trace denied it — \
-                 expected this doc type to be writable by Agent",
-                path
+                "write_file(\"{path}\") was called but agent_trace denied it — \
+                 expected this doc type to be writable by Agent"
             ));
         }
 
@@ -81,8 +79,7 @@ pub fn assert_store_state(
         let full = store_root.join(path);
         if !full.exists() {
             return Outcome::Fail(format!(
-                "write_file(\"{}\") returned OK in trajectory but file does not exist on disk",
-                path
+                "write_file(\"{path}\") returned OK in trajectory but file does not exist on disk"
             ));
         }
     }
@@ -96,8 +93,7 @@ pub fn assert_store_state(
         // If the agent attempted a write and it succeeded → fail.
         if trajectory.did_succeed_write(path) {
             return Outcome::Fail(format!(
-                "write_file(\"{}\") succeeded but this file is forbidden from agent writes",
-                path
+                "write_file(\"{path}\") succeeded but this file is forbidden from agent writes"
             ));
         }
         // Double-check: read current content vs seeded content.
@@ -109,9 +105,8 @@ pub fn assert_store_state(
         let git_ok = check_git_agent_commit(store_root, path);
         if !git_ok {
             return Outcome::Fail(format!(
-                "No Agent-attributed git commit found for \"{}\" — \
-                 agent_trace may not have committed the write correctly",
-                path
+                "No Agent-attributed git commit found for \"{path}\" — \
+                 agent_trace may not have committed the write correctly"
             ));
         }
     }

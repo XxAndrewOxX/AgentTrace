@@ -47,7 +47,7 @@ fn commit_file(root: &std::path::Path, name: &str, content: &str, doc_type: DocT
         action: Action::Create,
         files: vec![(PathBuf::from(name), Action::Create, doc_type)],
         actor: Actor::System,
-        summary: format!("create {}", name),
+        summary: format!("create {name}"),
         agent_name: None,
         session_id: None,
     };

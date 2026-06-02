@@ -55,7 +55,7 @@ impl McpHarness {
         let id = self.next_id;
         self.next_id += 1;
         msg["id"] = json!(id);
-        writeln!(self.stdin, "{}", msg).unwrap();
+        writeln!(self.stdin, "{msg}").unwrap();
         self.stdin.flush().unwrap();
         let mut line = String::new();
         self.reader.read_line(&mut line).unwrap();
@@ -136,8 +136,7 @@ fn ac2_connected_agent_write_to_plan_succeeds() {
         .collect();
     assert!(
         log_files.iter().any(|name| name.starts_with("test-agent-")),
-        "expected a session log file for connected agent, got: {:?}",
-        log_files
+        "expected a session log file for connected agent, got: {log_files:?}"
     );
 
     // Verify committed to git
@@ -266,8 +265,7 @@ fn mc1_mcp_initialize_returns_capabilities() {
     }));
     assert!(
         resp.get("error").is_none(),
-        "tools/list should not error: {:?}",
-        resp
+        "tools/list should not error: {resp:?}"
     );
     let tools = resp["result"]["tools"].as_array().unwrap();
     assert_eq!(tools.len(), 5, "should have 5 tools");
@@ -291,8 +289,7 @@ fn mc2_mcp_write_file_plan_succeeds() {
 
     assert_eq!(
         resp["result"]["isError"], false,
-        "write should succeed: {:?}",
-        resp
+        "write should succeed: {resp:?}"
     );
     assert_eq!(store.read_file("plan.md"), "# Via MCP");
     assert!(
@@ -307,8 +304,7 @@ fn mc2_mcp_write_file_plan_succeeds() {
         .collect();
     assert!(
         log_files.iter().any(|name| name.starts_with("test-agent-")),
-        "MCP writes should produce agent session log files, got: {:?}",
-        log_files
+        "MCP writes should produce agent session log files, got: {log_files:?}"
     );
 }
 
@@ -330,14 +326,12 @@ fn mc3_mcp_write_file_context_denied() {
 
     assert_eq!(
         resp["result"]["isError"], true,
-        "write to context should be denied: {:?}",
-        resp
+        "write to context should be denied: {resp:?}"
     );
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
         text.contains("Permission denied"),
-        "error should say permission denied: {}",
-        text
+        "error should say permission denied: {text}"
     );
 
     // File must be unchanged — the MCP server must not have written it
@@ -416,9 +410,7 @@ impl CmdOutputExt for helpers::CmdOutput {
         let s = self.stderr();
         assert!(
             s.contains(needle),
-            "expected stderr to contain {:?}, got:\n{}",
-            needle,
-            s
+            "expected stderr to contain {needle:?}, got:\n{s}"
         );
     }
 }

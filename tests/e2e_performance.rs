@@ -24,12 +24,12 @@ fn setup_large_store(n_files: usize, n_dirs: usize) -> (TempDir, Arc<Mutex<Manif
     let files_per_dir = n_files / n_dirs;
     let mut all_files: Vec<(PathBuf, Action, DocType)> = Vec::new();
     for d in 0..n_dirs {
-        let dir = root.join(format!("dir{:02}", d));
+        let dir = root.join(format!("dir{d:02}"));
         std::fs::create_dir_all(&dir).unwrap();
         for f in 0..files_per_dir {
-            let rel = PathBuf::from(format!("dir{:02}/file{:04}.md", d, f));
+            let rel = PathBuf::from(format!("dir{d:02}/file{f:04}.md"));
             let full = root.join(&rel);
-            std::fs::write(&full, format!("# File {} in dir {}\n\nContent here.", f, d)).unwrap();
+            std::fs::write(&full, format!("# File {f} in dir {d}\n\nContent here.")).unwrap();
             manifest.register(&rel, DocType::Scratch, "").unwrap();
             all_files.push((rel, Action::Create, DocType::Scratch));
         }
@@ -40,7 +40,7 @@ fn setup_large_store(n_files: usize, n_dirs: usize) -> (TempDir, Arc<Mutex<Manif
         action: Action::Create,
         files: all_files,
         actor: Actor::System,
-        summary: format!("bulk create {} files", n_files),
+        summary: format!("bulk create {n_files} files"),
         agent_name: None,
         session_id: None,
     };
@@ -74,11 +74,10 @@ fn ps1_poll_performance_500_docs() {
     let start = Instant::now();
     proc.run_poll_cycle().unwrap();
     let no_change_ms = start.elapsed().as_millis();
-    println!("No-change poll (500 docs): {}ms", no_change_ms);
+    println!("No-change poll (500 docs): {no_change_ms}ms");
     assert!(
         no_change_ms < 500,
-        "no-change poll should be < 500ms, got {}ms",
-        no_change_ms
+        "no-change poll should be < 500ms, got {no_change_ms}ms"
     );
 
     // Single file change poll.
@@ -86,11 +85,10 @@ fn ps1_poll_performance_500_docs() {
     let start = Instant::now();
     proc.run_poll_cycle().unwrap();
     let change_ms = start.elapsed().as_millis();
-    println!("Single-change poll (500 docs): {}ms", change_ms);
+    println!("Single-change poll (500 docs): {change_ms}ms");
     assert!(
         change_ms < 2000,
-        "single-change poll should be < 2000ms, got {}ms",
-        change_ms
+        "single-change poll should be < 2000ms, got {change_ms}ms"
     );
 }
 
@@ -104,11 +102,10 @@ fn ps2_startup_time_200_docs() {
     let start = Instant::now();
     let _manifest = Manifest::load(root).unwrap();
     let load_ms = start.elapsed().as_millis();
-    println!("Manifest load (200 docs): {}ms", load_ms);
+    println!("Manifest load (200 docs): {load_ms}ms");
     assert!(
         load_ms < 500,
-        "manifest load should be < 500ms, got {}ms",
-        load_ms
+        "manifest load should be < 500ms, got {load_ms}ms"
     );
 }
 
@@ -137,12 +134,12 @@ fn ps3_git_log_performance() {
     git.commit(&create_info).unwrap();
 
     for i in 1..=100 {
-        std::fs::write(root.join("heavy.md"), format!("# v{}", i)).unwrap();
+        std::fs::write(root.join("heavy.md"), format!("# v{i}")).unwrap();
         let info = CommitInfo {
             action: Action::Modify,
             files: vec![(PathBuf::from("heavy.md"), Action::Modify, DocType::Plan)],
             actor: Actor::User,
-            summary: format!("modify heavy.md v{}", i),
+            summary: format!("modify heavy.md v{i}"),
             agent_name: None,
             session_id: None,
         };
@@ -153,20 +150,19 @@ fn ps3_git_log_performance() {
     let start = Instant::now();
     let log = git.log(50).unwrap();
     let log_ms = start.elapsed().as_millis();
-    println!("git.log(50) with 100 commits: {}ms", log_ms);
+    println!("git.log(50) with 100 commits: {log_ms}ms");
     assert_eq!(log.len(), 50);
-    assert!(log_ms < 500, "log(50) should be < 500ms, got {}ms", log_ms);
+    assert!(log_ms < 500, "log(50) should be < 500ms, got {log_ms}ms");
 
     // File log with 100 versions.
     let start = Instant::now();
     let file_log = git.log_file(&PathBuf::from("heavy.md"), 200).unwrap();
     let file_log_ms = start.elapsed().as_millis();
-    println!("git.log_file() with 101 commits: {}ms", file_log_ms);
+    println!("git.log_file() with 101 commits: {file_log_ms}ms");
     assert!(file_log.len() >= 50, "expected many file log entries");
     assert!(
         file_log_ms < 2000,
-        "file log should be < 2000ms, got {}ms",
-        file_log_ms
+        "file log should be < 2000ms, got {file_log_ms}ms"
     );
 }
 
@@ -180,11 +176,10 @@ fn ps4_manifest_parse_500_entries() {
     let start = Instant::now();
     let _manifest = Manifest::load(root).unwrap();
     let load_ms = start.elapsed().as_millis();
-    println!("Manifest load (500 docs): {}ms", load_ms);
+    println!("Manifest load (500 docs): {load_ms}ms");
     assert!(
         load_ms < 100,
-        "manifest parse should be < 100ms, got {}ms",
-        load_ms
+        "manifest parse should be < 100ms, got {load_ms}ms"
     );
 }
 
@@ -216,10 +211,9 @@ fn ps5_memory_usage_within_bounds() {
         proc.run_poll_cycle().unwrap();
     }
     let total_ms = start.elapsed().as_millis();
-    println!("5 poll cycles (200 docs): {}ms total", total_ms);
+    println!("5 poll cycles (200 docs): {total_ms}ms total");
     assert!(
         total_ms < 5000,
-        "5 poll cycles should complete in < 5s, took {}ms",
-        total_ms
+        "5 poll cycles should complete in < 5s, took {total_ms}ms"
     );
 }

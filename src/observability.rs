@@ -31,17 +31,17 @@ impl CliOutput for TerminalOutput {
             return Ok(());
         }
         let mut stdout = io::stdout().lock();
-        writeln!(stdout, "{}", message).context("writing stdout")
+        writeln!(stdout, "{message}").context("writing stdout")
     }
 
     fn warn(&self, message: &str) -> Result<()> {
         let mut stderr = io::stderr().lock();
-        writeln!(stderr, "{}", message).context("writing stderr")
+        writeln!(stderr, "{message}").context("writing stderr")
     }
 
     fn error(&self, message: &str) -> Result<()> {
         let mut stderr = io::stderr().lock();
-        writeln!(stderr, "{}", message).context("writing stderr")
+        writeln!(stderr, "{message}").context("writing stderr")
     }
 
     fn raw_stdout(&self, content: &str) -> Result<()> {
@@ -87,7 +87,7 @@ pub fn init_tracing(verbosity: u8) -> Result<()> {
         .with_writer(io::stderr)
         .with_env_filter(filter)
         .try_init()
-        .map_err(|e| anyhow::anyhow!("initializing tracing subscriber: {}", e))
+        .map_err(|e| anyhow::anyhow!("initializing tracing subscriber: {e}"))
 }
 
 pub fn format_permission_denied(path: &Path, reason: &str) -> String {

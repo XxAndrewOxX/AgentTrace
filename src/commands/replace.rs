@@ -65,7 +65,7 @@ pub fn run(
             action: Action::Modify,
             files: committed,
             actor: Actor::User,
-            summary: format!("replace '{}' with '{}'", find, replace),
+            summary: format!("replace '{find}' with '{replace}'"),
             agent_name: None,
             session_id: None,
         };

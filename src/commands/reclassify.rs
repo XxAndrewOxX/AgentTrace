@@ -19,8 +19,7 @@ pub fn run(
 
     if matches!(new_type, DocType::Context | DocType::Log) {
         output.warn(&format!(
-            "Warning: '{}' is system-managed. Agents/system control this type.",
-            new_type
+            "Warning: '{new_type}' is system-managed. Agents/system control this type."
         ))?;
     }
 

@@ -256,9 +256,8 @@ impl InstanceLock {
                 if let Ok(pid) = content.trim().parse::<u32>() {
                     if is_pid_alive(pid) {
                         anyhow::bail!(
-                            "Another agent-trace instance is running (PID {}). \
-                             Opening in read-only mode.",
-                            pid
+                            "Another agent-trace instance is running (PID {pid}). \
+                             Opening in read-only mode."
                         );
                     }
                 }

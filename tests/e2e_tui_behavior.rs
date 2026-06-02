@@ -51,8 +51,7 @@ fn tb3_below_minimum_shows_message() {
     let output = terminal.backend().to_string();
     assert!(
         output.contains("Terminal too small") || output.contains("need 80x24"),
-        "Should show 'Terminal too small' at 60x20, got:\n{}",
-        output
+        "Should show 'Terminal too small' at 60x20, got:\n{output}"
     );
 }
 
