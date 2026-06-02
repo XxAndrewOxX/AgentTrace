@@ -44,5 +44,14 @@ def main() -> None:
     print(section)
 
 
+def self_test() -> None:
+    section = extract_section(Path("CHANGELOG.md"), "0.1.0")
+    if "## [0.1.0]" not in section:
+        raise SystemExit("self-test failed: missing [0.1.0] heading in extracted section")
+
+
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) == 2 and sys.argv[1] == "--self-test":
+        self_test()
+    else:
+        main()

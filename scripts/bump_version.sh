@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Prepare a version bump in Cargo.toml and CHANGELOG.md.
+# Mutates files in place — run on a clean commit or review the diff before committing.
 #
 # Usage:
 #   ./scripts/bump_version.sh 0.2.0
@@ -42,15 +43,18 @@ fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-python3 - <<PY
+NEW_VERSION="$NEW_VERSION" python3 - <<'PY'
+import os
 from pathlib import Path
 import re
+
+new_version = os.environ["NEW_VERSION"]
 
 cargo = Path("Cargo.toml")
 text = cargo.read_text(encoding="utf-8")
 updated, count = re.subn(
     r'^(version = ")[^"]+(")',
-    rf'\g<1>{NEW_VERSION}\2',
+    rf'\g<1>{new_version}\2',
     text,
     count=1,
     flags=re.MULTILINE,
@@ -58,11 +62,27 @@ updated, count = re.subn(
 if count != 1:
     raise SystemExit("Failed to update version in Cargo.toml")
 cargo.write_text(updated, encoding="utf-8")
+
+lock = Path("Cargo.lock")
+lock_text = lock.read_text(encoding="utf-8")
+lock_updated, lock_count = re.subn(
+    r'(name = "agent-trace"\nversion = ")[^"]+(")',
+    rf'\g<1>{new_version}\2',
+    lock_text,
+    count=1,
+)
+if lock_count != 1:
+    raise SystemExit("Failed to update version in Cargo.lock")
+lock.write_text(lock_updated, encoding="utf-8")
 PY
 
-python3 - <<PY
+NEW_VERSION="$NEW_VERSION" DATE="$DATE" python3 - <<'PY'
+import os
 from pathlib import Path
 import re
+
+new_version = os.environ["NEW_VERSION"]
+date = os.environ["DATE"]
 
 changelog = Path("CHANGELOG.md")
 text = changelog.read_text(encoding="utf-8")
@@ -72,7 +92,7 @@ if not match:
     raise SystemExit("Could not find [Unreleased] section in CHANGELOG.md")
 
 unreleased_body = match.group(2).rstrip()
-new_section = f"## [{NEW_VERSION}] - {DATE}\n"
+new_section = f"## [{new_version}] - {date}\n"
 if unreleased_body:
     new_section += unreleased_body + "\n"
 
@@ -84,11 +104,11 @@ PY
 cargo check --locked
 
 cat <<EOF
-Updated Cargo.toml and CHANGELOG.md for v${NEW_VERSION}.
+Updated Cargo.toml, CHANGELOG.md, and Cargo.lock for v${NEW_VERSION}.
 
 Next steps:
   1. Review the CHANGELOG section for v${NEW_VERSION}
-  2. git add Cargo.toml CHANGELOG.md
+  2. git add Cargo.toml CHANGELOG.md Cargo.lock
   3. git commit -m "chore: release v${NEW_VERSION}"
   4. git tag v${NEW_VERSION}
   5. git push origin main --tags

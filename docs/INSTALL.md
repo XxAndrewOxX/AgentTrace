@@ -3,9 +3,15 @@
 Agent Trace supports three install paths: Cargo (crates.io), prebuilt GitHub
 Release archives, and building from source.
 
+> **Pre-release:** Until v0.1.0 is published, build from source is the supported
+> install path. `cargo install agent-trace` and GitHub Release downloads apply
+> after the first release is published.
+
 Substitute `{version}` with the release version (for example `0.1.0`).
 
 ## Install from Cargo
+
+Once v0.1.0 is published to crates.io:
 
 ```bash
 cargo install agent-trace
@@ -23,9 +29,9 @@ agent-trace --help
 
 ## Install from GitHub Releases
 
-Download the archive for your platform from the GitHub Releases page. Always
-download the archive and its `.sha256` file from the same release. Stop the
-install if checksum verification fails.
+Once v0.1.0 is published, download the archive for your platform from the
+GitHub Releases page. Always download the archive and its `.sha256` file from
+the same release. Stop the install if checksum verification fails.
 
 Release archives include `INSTALL.md` at the archive root with these instructions.
 
@@ -85,8 +91,9 @@ Example: `agent-trace-v{version}-x86_64-pc-windows-msvc.zip`
 
 ## Build from source
 
-Required when no prebuilt artifact exists for your platform (for example Linux
-arm64) or when developing locally:
+Until v0.1.0 is published, this is the supported install path. Required when
+no prebuilt artifact exists for your platform (for example Linux arm64) or when
+developing locally:
 
 ```bash
 rustup toolchain install 1.88.0

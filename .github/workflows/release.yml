@@ -282,6 +282,7 @@ PY
               exit 1
             fi
             gh release upload "${TAG}" release-artifacts/* --clobber
+            gh release edit "${TAG}" --notes-file release-notes.md
           else
             gh release create "${TAG}" release-artifacts/* \
               --draft \

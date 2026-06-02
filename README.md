@@ -15,13 +15,17 @@
 
 ## Installation
 
-Install from crates.io:
+> **Pre-release:** Until v0.1.0 is published, build from source (below) is the
+> supported install path. `cargo install agent-trace` and GitHub Release downloads
+> apply after the first release is published.
+
+Install from crates.io (available after v0.1.0 is published):
 
 ```bash
 cargo install agent-trace
 ```
 
-Or download a prebuilt binary from [GitHub Releases](https://github.com/XxAndrewOxX/AgentTrace/releases).
+Or download a prebuilt binary from [GitHub Releases](https://github.com/XxAndrewOxX/AgentTrace/releases) once v0.1.0 is published.
 Substitute `{version}` with the release version (for example `0.1.0`):
 
 ```bash
@@ -35,6 +39,8 @@ sudo mv agent-trace /usr/local/bin/
 ```
 
 Build from source:
+
+> This is the supported path until v0.1.0 is published.
 
 ```bash
 rustup toolchain install 1.88.0
