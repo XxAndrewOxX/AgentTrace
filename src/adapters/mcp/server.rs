@@ -3,6 +3,7 @@ use crate::data_plane::{self, WriteDocumentError};
 use crate::git_store::CommitInfo;
 use crate::observability::format_permission_denied;
 use crate::permissions::{check_permission, Overrides, PermissionResult};
+use crate::running_summary;
 use crate::session::{self, AgentState};
 use crate::store::Store;
 use crate::types::{Action, Actor, DocType};
@@ -24,6 +25,10 @@ pub fn run(root: &Path, actor_name: Option<String>) -> Result<()> {
         } else {
             let _ = session::touch_session(root, name);
         }
+    }
+
+    if let Err(e) = running_summary::refresh_if_stale(root) {
+        tracing::warn!("running summary refresh on MCP start failed: {e}");
     }
 
     let stdin = std::io::stdin();
@@ -96,6 +101,7 @@ fn dispatch(
                 "list_documents" => handle_list_documents(root, &args),
                 "get_permissions" => handle_get_permissions(root, actor),
                 "add_document" => handle_add_document(root, &args),
+                "get_resume_context" => handle_get_resume_context(root, actor, &args),
                 _ => error_response(-32601, &format!("Unknown tool: {name}")),
             }
         }
@@ -112,7 +118,8 @@ fn handle_initialize() -> Value {
             "serverInfo": {
                 "name": "agent-trace",
                 "version": env!("CARGO_PKG_VERSION")
-            }
+            },
+            "instructions": "Call get_resume_context before other tools to load session state."
         }
     })
 }
@@ -180,10 +187,37 @@ fn handle_tools_list() -> Value {
                         },
                         "required": ["path", "doc_type"]
                     }
+                },
+                {
+                    "name": "get_resume_context",
+                    "description": "Get the full resume briefing for reconnecting agents. Call this FIRST after initialize before reading other files.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "include_git_log": {"type": "boolean", "default": true},
+                            "git_log_limit": {"type": "integer", "default": 10}
+                        }
+                    }
                 }
             ]
         }
     })
+}
+
+fn handle_get_resume_context(root: &Path, actor: &Actor, args: &Value) -> Value {
+    let include_git_log = args
+        .get("include_git_log")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let git_log_limit = args
+        .get("git_log_limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(10) as usize;
+
+    match running_summary::assemble_resume_context(root, actor, include_git_log, git_log_limit) {
+        Ok(text) => tool_result(&text),
+        Err(e) => error_response(-32603, &format!("Cannot assemble resume context: {e}")),
+    }
 }
 
 fn handle_read_file(root: &Path, args: &Value) -> Value {
@@ -414,6 +448,10 @@ mod tests {
         let resp = handle_initialize();
         assert_eq!(resp["result"]["protocolVersion"], "2024-11-05");
         assert_eq!(resp["result"]["serverInfo"]["name"], "agent-trace");
+        assert!(resp["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("get_resume_context"));
         assert!(resp.get("error").is_none());
     }
 
@@ -427,7 +465,8 @@ mod tests {
         assert!(names.contains(&"list_documents"));
         assert!(names.contains(&"get_permissions"));
         assert!(names.contains(&"add_document"));
-        assert_eq!(names.len(), 5);
+        assert!(names.contains(&"get_resume_context"));
+        assert_eq!(names.len(), 6);
     }
 
     #[test]

@@ -51,6 +51,9 @@ pub fn generate(_store_root: &Path, manifest: &Manifest) -> String {
     out.push_str(
         "- **Context** (`context.md`) is system-synthesized — read it for project state.\n",
     );
+    out.push_str(
+        "- **Running Summary** (`running_summary.md`) is incrementally updated — read it to resume work.\n",
+    );
     out.push_str("- **Logs** are system-generated — do not modify them.\n");
     out.push_str("- **Reference** documents are user-curated — agents cannot modify them.\n\n");
 
@@ -122,6 +125,11 @@ pub fn generate(_store_root: &Path, manifest: &Manifest) -> String {
     out.push_str(&format!("- Reference: {}\n", references.len()));
     out.push_str(&format!("- Scratch: {}\n", scratches.len()));
     out.push_str(&format!("- Logs: {}\n", logs.len()));
+
+    out.push_str("\n## Resume on Reconnect\n\n");
+    out.push_str("1. Call MCP tool `get_resume_context` first\n");
+    out.push_str("2. Read `running_summary.md` for current state\n");
+    out.push_str("3. Read `plan.md` only if summary references new phases\n");
 
     out
 }

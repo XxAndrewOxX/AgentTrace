@@ -1,4 +1,6 @@
+pub mod backend;
 pub mod candle;
+pub mod candle_backend;
 pub mod llama_cpp;
 pub mod trace_insights;
 

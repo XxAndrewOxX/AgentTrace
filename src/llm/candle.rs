@@ -126,7 +126,7 @@ fn eos_token_id(tokenizer: &tokenizers::Tokenizer) -> u32 {
 // ── Inference ─────────────────────────────────────────────────────────────────
 
 #[cfg(feature = "llm")]
-fn generate(inner: &mut CandleInner, prompt: &str, max_new_tokens: usize) -> Result<String> {
+pub(crate) fn generate(inner: &mut CandleInner, prompt: &str, max_new_tokens: usize) -> Result<String> {
     use candle_core::Tensor;
     use candle_transformers::generation::LogitsProcessor;
 
@@ -285,7 +285,7 @@ impl LlmEngine for CandleLlm {
 /// Use this via `spawn_llm_task` rather than `LlmEngine::classify` directly.
 #[cfg(feature = "llm")]
 pub struct CandleLlmMut {
-    inner: CandleInner,
+    pub(crate) inner: CandleInner,
 }
 
 #[cfg(feature = "llm")]
@@ -363,6 +363,42 @@ impl CandleLlmMut {
         let prompt = context_prompt(documents, updates);
         generate(&mut self.inner, &prompt, MAX_NEW_TOKENS * 4)
     }
+
+    pub fn summarize_session(&mut self, session_id: &str, events: &[String]) -> Result<String> {
+        let events_str = events.join("\n");
+        let prompt = format!(
+            "<|system|>\nSummarize this agent session in 2-3 sentences for a reconnecting agent.\n\
+             <|user|>\nSession: {}\n\nEvents:\n{}\n<|assistant|>\n",
+            session_id,
+            truncate(&events_str, MAX_PROMPT_CHARS)
+        );
+        generate(&mut self.inner, &prompt, MAX_NEW_TOKENS)
+    }
+
+    pub fn update_running_summary(
+        &mut self,
+        previous_summary: &str,
+        new_events: &str,
+        plan_snippet: &str,
+    ) -> Result<String> {
+        let prompt = update_running_summary_prompt(previous_summary, new_events, plan_snippet);
+        generate(&mut self.inner, &prompt, MAX_NEW_TOKENS * 4)
+    }
+}
+
+#[allow(dead_code)]
+pub fn update_running_summary_prompt(previous: &str, events: &str, plan: &str) -> String {
+    format!(
+        "<|system|>\nYou maintain a running project summary for an AI agent resuming work. \
+         Update the summary given the previous version and new events. \
+         Keep sections: Current Status, Recent Activity, Resume Here, Key Documents, Open Items. \
+         Under 800 words.\n\
+         <|user|>\nPrevious summary:\n{}\n\nNew events:\n{}\n\nPlan excerpt:\n{}\n\
+         <|assistant|>\n",
+        truncate(previous, 3000),
+        truncate(events, 2000),
+        truncate(plan, 2000),
+    )
 }
 
 #[cfg(test)]

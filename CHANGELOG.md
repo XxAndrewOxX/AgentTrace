@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Running summary subsystem: `.agent-trace/summary_events.jsonl` event log and
+  `running_summary.md` incrementally updated after each tracked write.
+- MCP tool `get_resume_context` — single-call resume briefing on reconnect.
+- CLI commands: `agent-trace resume show`, `resume refresh`, `resume events`.
+- Candle backend wired to `TraceInsightsFacade` when `--features llm` is enabled.
+
+### Fixed
+
+- TUI poll and MCP now share session ID when agent lock is active.
+- LLM inference failures fall back to template summaries instead of hard errors.
+- `TraceInsightsFacade` uses merged global + store LLM config.
+- `.venv/` and common dev artifacts excluded from agent-trace git tracking.
+
 ## [0.1.0] - 2026-05-31
 
 First public release. Licensed under MIT.

@@ -51,7 +51,7 @@ pub fn run(
     // Print startup banner before entering raw mode.
     {
         let m = manifest.lock().unwrap();
-        banner::print_banner(&m, llm_engine.as_ref(), ascii, output)?;
+        banner::print_banner(&store_root, &m, llm_engine.as_ref(), ascii, output)?;
     }
 
     // Install panic hook to restore terminal on panic.

@@ -1,10 +1,13 @@
 use crate::llm::LlmEngine;
 use crate::manifest::Manifest;
 use crate::observability::CliOutput;
+use crate::running_summary;
 use anyhow::Result;
+use std::path::Path;
 
 /// Print the startup banner to stdout before entering TUI mode.
 pub fn print_banner(
+    store_root: &Path,
     manifest: &Manifest,
     llm: &dyn LlmEngine,
     ascii: bool,
@@ -48,6 +51,16 @@ pub fn print_banner(
             "not configured"
         }
     ))?;
+    if store_root.join("running_summary.md").exists() {
+        let resume_lines = running_summary::resume_here_lines(store_root);
+        if !resume_lines.is_empty() {
+            output.line("")?;
+            output.line("  Resume Here:")?;
+            for line in resume_lines {
+                output.line(&format!("    {line}"))?;
+            }
+        }
+    }
     output.line("")?;
     Ok(())
 }
@@ -69,7 +82,7 @@ mod tests {
         let info = StoreInfo::new("test".into());
         let manifest = Manifest::create_empty(info, root).unwrap();
         // Just verify it doesn't panic.
-        print_banner(&manifest, &NoLlm, false, &NoopOutput).unwrap();
-        print_banner(&manifest, &NoLlm, true, &NoopOutput).unwrap();
+        print_banner(root, &manifest, &NoLlm, false, &NoopOutput).unwrap();
+        print_banner(root, &manifest, &NoLlm, true, &NoopOutput).unwrap();
     }
 }

@@ -66,8 +66,7 @@ pub fn run(store_root: &Path, cmd: ContextCmd, output: &dyn CliOutput) -> Result
         }
         ContextCmd::Refresh => {
             let store = Store::open(store_root)?;
-            let content = if let Some(api) = TraceInsightsFacade::from_store_root(store_root)
-                .map_err(|e| anyhow::anyhow!("failed to initialize LLM trace_insights API: {e}"))?
+            let content = if let Some(api) = TraceInsightsFacade::from_store_root(store_root).ok().flatten()
             {
                 let docs = store
                     .manifest
@@ -96,9 +95,13 @@ pub fn run(store_root: &Path, cmd: ContextCmd, output: &dyn CliOutput) -> Result
                     .into_iter()
                     .map(|u| u.update)
                     .collect::<Vec<_>>();
-                api.synthesize_context(&docs, &updates).map_err(|e| {
-                    anyhow::anyhow!("LLM trace_insights synthesize_context failed: {e}")
-                })?
+                match api.synthesize_context(&docs, &updates) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!("LLM synthesize_context failed, using template: {e}");
+                        synthesize_no_llm(store_root, &store.manifest)?
+                    }
+                }
             } else {
                 synthesize_no_llm(store_root, &store.manifest)?
             };

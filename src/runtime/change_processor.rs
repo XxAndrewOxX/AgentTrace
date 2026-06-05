@@ -2,6 +2,7 @@ use crate::config::MergedConfig;
 use crate::git_store::{CommitInfo, GitStore};
 use crate::manifest::Manifest;
 use crate::permissions::{check_permission, Overrides, PermissionResult, Violation};
+use crate::session;
 use crate::trace::pipeline::apply_trace_hooks;
 use crate::types::{Action, Actor, DocType, FileChange, LogEntry};
 use anyhow::Result;
@@ -54,7 +55,9 @@ impl ChangeProcessor {
         agent_state: AgentState,
         ui_tx: Option<tokio::sync::mpsc::Sender<UiEvent>>,
     ) -> Self {
-        let session_id = format!("{}", Utc::now().format("%Y%m%d-%H%M%S"));
+        let session_id = session::session_id_for_store(&git.workdir).unwrap_or_else(|| {
+            format!("{}", Utc::now().format("%Y%m%d-%H%M%S"))
+        });
         Self {
             git,
             manifest,
@@ -227,6 +230,7 @@ impl ChangeProcessor {
                 &actor,
                 Some(&self.session_id),
                 &allowed,
+                "poll",
             ) {
                 tracing::warn!("post-write trace hooks failed: {}", e);
             }

@@ -44,7 +44,10 @@ impl GitStore {
         // Write exclude file so .agent-trace itself is never tracked.
         let exclude = git_dir.join("info").join("exclude");
         std::fs::create_dir_all(exclude.parent().unwrap())?;
-        std::fs::write(&exclude, ".agent-trace/\n")?;
+        std::fs::write(
+            &exclude,
+            ".agent-trace/\n.venv/\nvenv/\nnode_modules/\n__pycache__/\n*.pyc\n",
+        )?;
 
         let store = Self {
             repo,

@@ -3,6 +3,7 @@ use crate::llm::trace_insights::{TraceDocument, TraceInsightsFacade};
 use crate::permissions::{check_permission, PermissionResult};
 use crate::store::Store;
 use crate::trace::context::load_pending_updates;
+use crate::trace::running_summary::{self, SummaryEvent};
 use crate::trace::{
     agent_trace_md,
     logs::{append_agent_log, summarize_change_no_llm, LogSynthEntry},
@@ -18,6 +19,16 @@ pub enum WriteDocumentError {
     PermissionDenied { path: PathBuf, reason: String },
     #[error(transparent)]
     Other(#[from] anyhow::Error),
+}
+
+fn source_from_prefix(summary_prefix: &str) -> &'static str {
+    if summary_prefix.starts_with("mcp") {
+        "mcp_write"
+    } else if summary_prefix.starts_with("agent") {
+        "cli_write"
+    } else {
+        "system"
+    }
 }
 
 pub fn write_document(
@@ -83,6 +94,7 @@ pub fn write_document(
     };
     store.commit(&info).map_err(WriteDocumentError::Other)?;
 
+    let source = source_from_prefix(summary_prefix);
     apply_trace_hooks(
         root,
         &store.git,
@@ -90,6 +102,7 @@ pub fn write_document(
         actor,
         session_id,
         &info.files,
+        source,
     )
     .map_err(WriteDocumentError::Other)?;
 
@@ -103,12 +116,12 @@ pub fn apply_trace_hooks(
     actor: &Actor,
     session_id: Option<&str>,
     changed_files: &[(PathBuf, Action, DocType)],
+    source: &str,
 ) -> anyhow::Result<()> {
     if changed_files.is_empty() {
         return Ok(());
     }
-    let trace_insights = TraceInsightsFacade::from_store_root(store_root)
-        .map_err(|e| anyhow::anyhow!("failed to initialize LLM trace_insights API: {e}"))?;
+    let trace_insights = TraceInsightsFacade::from_store_root(store_root).ok().flatten();
 
     if actor.is_agent() {
         if let (Some(agent_name), Some(sid)) = (actor.agent_name(), session_id) {
@@ -121,26 +134,79 @@ pub fn apply_trace_hooks(
                             "+{} lines\n-{} lines\n",
                             stats.lines_added, stats.lines_removed
                         );
-                        api.summarize_change(path, doc_type, &diff).map_err(|e| {
-                            anyhow::anyhow!(
-                                "LLM trace_insights summarize_change failed for {}: {}",
-                                path.display(),
-                                e
-                            )
-                        })
+                        match api.summarize_change(path, doc_type, &diff) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                tracing::warn!(
+                                    "LLM summarize_change failed for {}, using template: {}",
+                                    path.display(),
+                                    e
+                                );
+                                summarize_change_no_llm(path, doc_type, &stats, agent_name)
+                            }
+                        }
                     } else {
-                        Ok(summarize_change_no_llm(path, doc_type, &stats, agent_name))
+                        summarize_change_no_llm(path, doc_type, &stats, agent_name)
                     };
                     Ok(LogSynthEntry {
                         timestamp: Utc::now(),
                         path: path.clone(),
-                        summary: summary?,
+                        summary,
                     })
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
             append_agent_log(store_root, git, agent_name, sid, &entries)?;
         }
     }
+
+    for (path, action, doc_type) in changed_files {
+        let stats = git.diff_stats(path, None, None).unwrap_or_default();
+        let event_summary = if let Some(api) = trace_insights.as_ref() {
+            let diff = format!(
+                "+{} lines\n-{} lines\n",
+                stats.lines_added, stats.lines_removed
+            );
+            match api.summarize_change(path, doc_type, &diff) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(
+                        "LLM summarize_change failed for event {}, using template: {}",
+                        path.display(),
+                        e
+                    );
+                    summarize_change_no_llm(
+                        path,
+                        doc_type,
+                        &stats,
+                        actor.agent_name().unwrap_or("system"),
+                    )
+                }
+            }
+        } else {
+            summarize_change_no_llm(
+                path,
+                doc_type,
+                &stats,
+                actor.agent_name().unwrap_or("system"),
+            )
+        };
+        let event = SummaryEvent {
+            timestamp: Utc::now().to_rfc3339(),
+            session_id: session_id.map(String::from),
+            agent_name: actor.agent_name().map(String::from),
+            actor: actor.to_string(),
+            action: action.to_string(),
+            path: path.display().to_string(),
+            doc_type: doc_type.to_string(),
+            summary: event_summary,
+            source: source.to_string(),
+            lines_added: stats.lines_added,
+            lines_removed: stats.lines_removed,
+        };
+        running_summary::append_event(store_root, event)?;
+    }
+
+    running_summary::schedule_refresh(store_root.to_path_buf());
 
     sync_agent_trace_md(store_root, git, manifest)?;
 
@@ -198,8 +264,13 @@ fn sync_context_md(
             .into_iter()
             .map(|u| u.update)
             .collect::<Vec<_>>();
-        api.synthesize_context(&docs, &updates)
-            .map_err(|e| anyhow::anyhow!("LLM trace_insights synthesize_context failed: {e}"))?
+        match api.synthesize_context(&docs, &updates) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("LLM synthesize_context failed, using template: {e}");
+                crate::trace::context::synthesize_no_llm(store_root, manifest)?
+            }
+        }
     } else {
         crate::trace::context::synthesize_no_llm(store_root, manifest)?
     };

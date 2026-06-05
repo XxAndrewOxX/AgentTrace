@@ -1,6 +1,7 @@
 use agent_trace::commands;
 use agent_trace::commands::context::ContextCmd;
 use agent_trace::commands::model::ModelCmd;
+use agent_trace::commands::resume::ResumeCmd;
 use agent_trace::mcp;
 use agent_trace::observability::{self, TerminalOutput};
 use agent_trace::types::DocType;
@@ -200,6 +201,12 @@ pub enum Commands {
         subcommand: ModelCmd,
     },
 
+    /// Show resume briefing and running summary events.
+    Resume {
+        #[command(subcommand)]
+        subcommand: ResumeCmd,
+    },
+
     /// Register an agent session (writes lock file, no PID required).
     Connect {
         /// Agent name to register.
@@ -306,6 +313,9 @@ fn main() -> Result<()> {
             &output,
         ),
         Commands::Model { subcommand } => commands::model::run(subcommand, &output),
+        Commands::Resume { subcommand } => {
+            commands::resume::run(&PathBuf::from("."), subcommand, &output)
+        }
         Commands::Connect { name } => {
             commands::connect::run_connect(&PathBuf::from("."), &name, &output)
         }
