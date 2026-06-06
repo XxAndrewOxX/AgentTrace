@@ -422,9 +422,15 @@ fn mc7_get_resume_context_returns_briefing() {
     std::thread::sleep(std::time::Duration::from_millis(500));
 
     let resp = h.call_tool("get_resume_context", json!({}));
-    assert_eq!(resp["result"]["isError"], false, "get_resume_context: {resp:?}");
+    assert_eq!(
+        resp["result"]["isError"], false,
+        "get_resume_context: {resp:?}"
+    );
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("Running Summary"), "should include running summary");
+    assert!(
+        text.contains("Running Summary"),
+        "should include running summary"
+    );
     assert!(text.contains("session_id") || text.contains("Session ID"));
     assert!(text.contains("Phase"), "should include plan excerpt");
     assert!(text.contains("INSTRUCTIONS"));
@@ -462,7 +468,10 @@ fn mc8_running_summary_updates_on_mcp_write() {
     let events_path = ".agent-trace/summary_events.jsonl";
     assert!(store.file_exists(events_path), "JSONL should exist");
     let events = store.read_file(events_path);
-    assert!(!events.trim().is_empty(), "JSONL should have at least one event");
+    assert!(
+        !events.trim().is_empty(),
+        "JSONL should have at least one event"
+    );
     assert!(events.contains("plan.md"));
 }
 

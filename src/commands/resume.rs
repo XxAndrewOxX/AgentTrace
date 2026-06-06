@@ -68,7 +68,9 @@ mod tests {
     use crate::git_store::GitStore;
     use crate::manifest::Manifest;
     use crate::observability::NoopOutput;
-    use crate::running_summary::{append_event, assemble_resume_context, write_running_summary, SummaryEvent};
+    use crate::running_summary::{
+        append_event, assemble_resume_context, write_running_summary, SummaryEvent,
+    };
     use crate::types::Actor;
     use chrono::Utc;
     use tempfile::TempDir;
@@ -81,8 +83,13 @@ mod tests {
         let git = GitStore::init(root).unwrap();
         let info = StoreInfo::new("test".into());
         let mut manifest = Manifest::create_empty(info, root).unwrap();
-        write_running_summary(root, "# Running Summary\n\ntest body\n", &git, &mut manifest)
-            .unwrap();
+        write_running_summary(
+            root,
+            "# Running Summary\n\ntest body\n",
+            &git,
+            &mut manifest,
+        )
+        .unwrap();
 
         run(root, ResumeCmd::Show, &NoopOutput).unwrap();
     }

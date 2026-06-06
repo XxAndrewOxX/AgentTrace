@@ -126,7 +126,11 @@ fn eos_token_id(tokenizer: &tokenizers::Tokenizer) -> u32 {
 // ── Inference ─────────────────────────────────────────────────────────────────
 
 #[cfg(feature = "llm")]
-pub(crate) fn generate(inner: &mut CandleInner, prompt: &str, max_new_tokens: usize) -> Result<String> {
+pub(crate) fn generate(
+    inner: &mut CandleInner,
+    prompt: &str,
+    max_new_tokens: usize,
+) -> Result<String> {
     use candle_core::Tensor;
     use candle_transformers::generation::LogitsProcessor;
 

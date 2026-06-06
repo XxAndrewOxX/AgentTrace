@@ -10,7 +10,21 @@ type ParsedCommit = (
 use anyhow::{bail, Context, Result};
 use chrono::{TimeZone, Utc};
 use git2::{DiffOptions, Oid, Repository, RepositoryInitOptions, Signature, StatusOptions, Tree};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex};
+
+/// Serialize git index/commit operations per store root (background summary refresh
+/// and the poll loop share the same repo directory).
+fn store_git_lock(workdir: &Path) -> Arc<Mutex<()>> {
+    static LOCKS: LazyLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+    let mut locks = LOCKS.lock().expect("store git lock map poisoned");
+    locks
+        .entry(workdir.to_path_buf())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
 
 pub struct CommitInfo {
     pub action: Action,
@@ -77,6 +91,8 @@ impl GitStore {
     }
 
     fn create_empty_commit(&self, message: &str) -> Result<Oid> {
+        let lock = store_git_lock(&self.workdir);
+        let _guard = lock.lock().expect("store git lock poisoned");
         let sig = Signature::now("agent-trace", "system@agent-trace")?;
         let tree_oid = {
             let mut index = self.repo.index()?;
@@ -98,6 +114,8 @@ impl GitStore {
     // ── Status Detection ─────────────────────────────────────────────────
 
     pub fn detect_changes(&self) -> Result<Vec<FileChange>> {
+        let lock = store_git_lock(&self.workdir);
+        let _guard = lock.lock().expect("store git lock poisoned");
         let mut opts = StatusOptions::new();
         opts.include_untracked(true)
             .recurse_untracked_dirs(true)
@@ -160,6 +178,8 @@ impl GitStore {
     // ── Commit Operations ─────────────────────────────────────────────────
 
     pub fn commit(&self, info: &CommitInfo) -> Result<Oid> {
+        let lock = store_git_lock(&self.workdir);
+        let _guard = lock.lock().expect("store git lock poisoned");
         let mut index = self.repo.index()?;
 
         for (path, action, _doc_type) in &info.files {
@@ -409,6 +429,8 @@ impl GitStore {
     }
 
     pub fn revert_file(&self, path: &Path) -> Result<()> {
+        let lock = store_git_lock(&self.workdir);
+        let _guard = lock.lock().expect("store git lock poisoned");
         let head = self.head_commit()?;
         let tree = head.tree()?;
         let path_str = path.to_string_lossy();

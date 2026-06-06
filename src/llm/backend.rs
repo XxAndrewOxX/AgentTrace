@@ -2,12 +2,7 @@ use super::trace_insights::TraceDocument;
 
 /// Backend trait for trace insight operations (summarize, synthesize, session recap).
 pub trait TraceInsightsBackend: Send + Sync {
-    fn summarize_change(
-        &self,
-        path: &str,
-        doc_type: &str,
-        diff: &str,
-    ) -> Result<String, String>;
+    fn summarize_change(&self, path: &str, doc_type: &str, diff: &str) -> Result<String, String>;
 
     fn synthesize_context(
         &self,

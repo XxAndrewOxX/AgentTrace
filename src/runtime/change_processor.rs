@@ -55,9 +55,8 @@ impl ChangeProcessor {
         agent_state: AgentState,
         ui_tx: Option<tokio::sync::mpsc::Sender<UiEvent>>,
     ) -> Self {
-        let session_id = session::session_id_for_store(&git.workdir).unwrap_or_else(|| {
-            format!("{}", Utc::now().format("%Y%m%d-%H%M%S"))
-        });
+        let session_id = session::session_id_for_store(&git.workdir)
+            .unwrap_or_else(|| format!("{}", Utc::now().format("%Y%m%d-%H%M%S")));
         Self {
             git,
             manifest,

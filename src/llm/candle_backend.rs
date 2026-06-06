@@ -39,12 +39,7 @@ impl CandleTraceBackend {
 
 #[cfg(feature = "llm")]
 impl TraceInsightsBackend for CandleTraceBackend {
-    fn summarize_change(
-        &self,
-        path: &str,
-        doc_type: &str,
-        diff: &str,
-    ) -> Result<String, String> {
+    fn summarize_change(&self, path: &str, doc_type: &str, diff: &str) -> Result<String, String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
         inner
             .summarize_change(path, doc_type, diff)

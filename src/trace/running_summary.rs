@@ -5,7 +5,13 @@ use crate::types::{Action, Actor, DocType};
 use anyhow::Result;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
+use std::time::Duration;
+
+static REFRESH_IN_FLIGHT: LazyLock<Mutex<HashMap<PathBuf, bool>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 const EVENTS_FILE: &str = ".agent-trace/summary_events.jsonl";
 const RUNNING_SUMMARY_FILE: &str = "running_summary.md";
@@ -81,12 +87,7 @@ pub fn load_recent_events(store_root: &Path, limit: usize) -> Result<Vec<Summary
 pub fn format_events_for_prompt(events: &[SummaryEvent]) -> String {
     events
         .iter()
-        .map(|e| {
-            format!(
-                "[{}] {} {} — {}",
-                e.timestamp, e.action, e.path, e.summary
-            )
-        })
+        .map(|e| format!("[{}] {} {} — {}", e.timestamp, e.action, e.path, e.summary))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -139,7 +140,9 @@ pub fn synthesize_template_summary(
 
     out.push_str("## Current Status\n\n");
     if plan_snippet.is_empty() {
-        out.push_str("No plan document tracked yet. Add a plan via `agent-trace add plan plan.md`.\n\n");
+        out.push_str(
+            "No plan document tracked yet. Add a plan via `agent-trace add plan plan.md`.\n\n",
+        );
     } else {
         let status: String = plan_snippet.chars().take(500).collect();
         out.push_str(&status);
@@ -158,10 +161,7 @@ pub fn synthesize_template_summary(
                 .nth(1)
                 .and_then(|t| t.split('Z').next())
                 .unwrap_or(&e.timestamp);
-            out.push_str(&format!(
-                "- [{time}] {}: {}\n",
-                e.path, e.summary
-            ));
+            out.push_str(&format!("- [{time}] {}: {}\n", e.path, e.summary));
         }
         out.push('\n');
     }
@@ -267,10 +267,29 @@ pub fn refresh_from_path(store_root: &Path) -> Result<()> {
 }
 
 pub fn schedule_refresh(store_root: PathBuf) {
+    let should_spawn = {
+        let mut in_flight = REFRESH_IN_FLIGHT.lock().expect("refresh lock poisoned");
+        if *in_flight.get(&store_root).unwrap_or(&false) {
+            false
+        } else {
+            in_flight.insert(store_root.clone(), true);
+            true
+        }
+    };
+    if !should_spawn {
+        return;
+    }
+
     std::thread::spawn(move || {
+        // Brief pause to batch rapid writes; git store lock prevents index races.
+        std::thread::sleep(Duration::from_millis(50));
         if let Err(e) = refresh_from_path(&store_root) {
             tracing::warn!("running summary background refresh failed: {e}");
         }
+        REFRESH_IN_FLIGHT
+            .lock()
+            .expect("refresh lock poisoned")
+            .insert(store_root, false);
     });
 }
 
@@ -527,18 +546,19 @@ mod tests {
         write_running_summary(&root, content, &git, &mut m).unwrap();
         assert!(root.join(RUNNING_SUMMARY_FILE).exists());
         assert!(m.is_tracked(&PathBuf::from(RUNNING_SUMMARY_FILE)));
-        assert_eq!(m.find_by_path(&PathBuf::from(RUNNING_SUMMARY_FILE)).unwrap().doc_type, DocType::Context);
+        assert_eq!(
+            m.find_by_path(&PathBuf::from(RUNNING_SUMMARY_FILE))
+                .unwrap()
+                .doc_type,
+            DocType::Context
+        );
     }
 
     #[test]
     fn refresh_without_llm_writes_template() {
         let tmp = TempDir::new().unwrap();
         let (root, manifest, git) = setup(&tmp);
-        std::fs::write(
-            root.join("plan.md"),
-            "# Plan\n- [ ] Next step\n",
-        )
-        .unwrap();
+        std::fs::write(root.join("plan.md"), "# Plan\n- [ ] Next step\n").unwrap();
         let mut m = manifest;
         m.register(&PathBuf::from("plan.md"), DocType::Plan, "")
             .unwrap();

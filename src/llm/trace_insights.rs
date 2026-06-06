@@ -1,6 +1,6 @@
-use super::backend::TraceInsightsBackend;
 #[cfg(test)]
 use super::backend::NoTraceBackend;
+use super::backend::TraceInsightsBackend;
 #[cfg(feature = "llm")]
 use super::candle_backend::CandleTraceBackend;
 use crate::config::MergedConfig;
@@ -62,7 +62,9 @@ pub struct TraceInsightsFacade {
 }
 
 impl TraceInsightsFacade {
-    pub fn from_llm_config(cfg: &crate::config::LlmConfig) -> Result<Option<Self>, TraceInsightsError> {
+    pub fn from_llm_config(
+        cfg: &crate::config::LlmConfig,
+    ) -> Result<Option<Self>, TraceInsightsError> {
         if cfg.model_path.is_none() {
             return Ok(None);
         }
@@ -76,7 +78,11 @@ impl TraceInsightsFacade {
                 polling: crate::config::PollingConfig::default(),
             };
             match CandleTraceBackend::from_merged_config(&merged) {
-                Ok(Some(backend)) => return Ok(Some(Self { backend: Box::new(backend) })),
+                Ok(Some(backend)) => {
+                    return Ok(Some(Self {
+                        backend: Box::new(backend),
+                    }))
+                }
                 Ok(None) => return Ok(None),
                 Err(e) => {
                     tracing::warn!("Candle backend unavailable: {e}");
@@ -102,7 +108,9 @@ impl TraceInsightsFacade {
         #[cfg(feature = "llm")]
         {
             match CandleTraceBackend::from_merged_config(&merged) {
-                Ok(Some(backend)) => Ok(Some(Self { backend: Box::new(backend) })),
+                Ok(Some(backend)) => Ok(Some(Self {
+                    backend: Box::new(backend),
+                })),
                 Ok(None) => Ok(None),
                 Err(e) => {
                     tracing::warn!("Candle backend unavailable: {e}");

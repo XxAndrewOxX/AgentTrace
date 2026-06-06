@@ -121,7 +121,9 @@ pub fn apply_trace_hooks(
     if changed_files.is_empty() {
         return Ok(());
     }
-    let trace_insights = TraceInsightsFacade::from_store_root(store_root).ok().flatten();
+    let trace_insights = TraceInsightsFacade::from_store_root(store_root)
+        .ok()
+        .flatten();
 
     if actor.is_agent() {
         if let (Some(agent_name), Some(sid)) = (actor.agent_name(), session_id) {
@@ -206,7 +208,11 @@ pub fn apply_trace_hooks(
         running_summary::append_event(store_root, event)?;
     }
 
-    running_summary::schedule_refresh(store_root.to_path_buf());
+    if trace_insights.is_some() {
+        running_summary::schedule_refresh(store_root.to_path_buf());
+    } else if let Err(e) = running_summary::refresh_template(store_root, git, manifest) {
+        tracing::warn!("running summary template refresh failed: {e}");
+    }
 
     sync_agent_trace_md(store_root, git, manifest)?;
 
