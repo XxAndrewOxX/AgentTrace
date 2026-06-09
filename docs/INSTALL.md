@@ -126,7 +126,34 @@ For local source builds, use:
 ```
 
 The MCP server exposes document tools such as `read_file`, `write_file`,
-`list_documents`, `get_permissions`, and `add_document`.
+`list_documents`, `get_permissions`, `get_resume_context`, and `add_document`.
+
+### Synthesis (optional but recommended)
+
+Running summaries, session recaps, and context synthesis use an LLM when
+configured. Without a backend, Agent Trace falls back to mechanical templates
+from the JSONL event log and manifest.
+
+```bash
+agent-trace model setup      # interactive provider wizard
+agent-trace model status     # show active backend
+agent-trace model test       # sample synthesis latency check
+```
+
+See [`docs/MODEL-SETUP.md`](MODEL-SETUP.md) for Ollama, Qwen 2.5, remote API
+keys, and the `auto` fallback chain.
+
+### Scratch bridge (no-LLM continuity)
+
+When synthesis is unavailable, agents should rely on the **scratch bridge**:
+
+1. Track phase progress in a scratch doc (for example `progress.md` or
+   `notes.md`) via `write_file` — scratch docs are always agent-writable.
+2. Call `get_resume_context` on reconnect; it includes `running_summary.md`,
+   any **Prior Session Recap** from a stale lock handoff, and plan excerpts.
+3. Scratch snippets also appear in `context.md` when refreshed without an LLM.
+
+This keeps session continuity even when `model status` reports `degraded`.
 
 ## Validation
 
