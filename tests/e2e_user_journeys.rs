@@ -93,6 +93,35 @@ fn uj2_cold_start_populated() {
     out.assert_stdout_contains("scratch");
 }
 
+// ── UJ-2b: running_summary created on plan write ─────────────────────────────
+
+#[test]
+fn uj_running_summary_created_on_plan_write() {
+    let store = TestStore::new();
+    store.write_file("plan.md", "# Plan\n- [ ] Phase 1\n");
+    store
+        .run(&["add", "plan", "plan.md"])
+        .expect_success("add plan");
+    store
+        .run(&["connect", "test-agent"])
+        .expect_success("connect");
+    store
+        .run(&["write", "plan.md", "--content=# Plan\n- [x] Phase 1\n"])
+        .expect_success("write plan");
+
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    assert!(
+        store.file_exists("running_summary.md"),
+        "running_summary.md should be created after plan write"
+    );
+    let summary = store.read_file("running_summary.md");
+    assert!(summary.contains("# Running Summary"));
+    assert!(summary.contains("plan.md"));
+
+    store.run(&["disconnect"]).expect_success("disconnect");
+}
+
 // ── UJ-3: Document Lifecycle ──────────────────────────────────────────────────
 
 #[test]

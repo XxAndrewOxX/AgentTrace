@@ -37,6 +37,8 @@ fn print_connect_message(s: &AgentSession, output: &dyn CliOutput) -> Result<()>
         s.name, s.session_id, s.transport
     ))?;
     output.line("Agent writes will be permission-checked and trace-linked.")?;
+    output.line("Running summary: agent-trace resume show")?;
+    output.line("MCP agents: call get_resume_context on reconnect")?;
     Ok(())
 }
 

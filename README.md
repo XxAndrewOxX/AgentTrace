@@ -75,11 +75,22 @@ When developing from source, prefix commands with `./target/debug/agent-trace`.
 
 When a session drops:
 
-1. Reconnect agent identity: `agent-trace connect <name>` (stale locks are replaced)
-2. Inspect durable trace: `agent-trace log --limit 20`
-3. Review synthesized state: `agent-trace context show`
-4. If metadata is damaged, recover: `agent-trace repair`
-5. Continue writing via `agent-trace write` or MCP `write_file`
+1. **MCP agents:** call `get_resume_context` first (before `list_documents` or `read_file`)
+2. **CLI users:** `agent-trace resume show` for the running summary briefing
+3. Reconnect agent identity: `agent-trace connect <name>` (stale locks are replaced)
+4. Review `running_summary.md` — incrementally updated after each write
+5. Read `plan.md` only if the summary references new phases
+6. If metadata is damaged, recover: `agent-trace repair`
+7. Continue writing via `agent-trace write` or MCP `write_file`
+
+### MCP reconnect workflow
+
+On every new MCP session:
+
+1. Call `get_resume_context` (do not call `list_documents` first)
+2. Read `plan.md` only if `get_resume_context` says phases changed
+3. Read source files only listed under "Resume Here" or "Open Items"
+4. Update `plan.md` and progress docs via `write_file` after each phase
 
 ## Reliability Notes
 

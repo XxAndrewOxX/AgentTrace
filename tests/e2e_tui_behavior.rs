@@ -200,8 +200,8 @@ fn tb9_startup_banner_content() {
     // We test the banner function compiles and runs without panicking.
     // It writes to stdout which we can't easily capture in a library test,
     // so we just call it and verify no panic.
-    banner::print_banner(&manifest, &no_llm, false, &NoopOutput).unwrap();
-    banner::print_banner(&manifest, &no_llm, true, &NoopOutput).unwrap(); // ASCII mode.
+    banner::print_banner(root, &manifest, &no_llm, false, &NoopOutput).unwrap();
+    banner::print_banner(root, &manifest, &no_llm, true, &NoopOutput).unwrap(); // ASCII mode.
 }
 
 // ── TB-10: Clean Exit States ─────────────────────────────────────────────────

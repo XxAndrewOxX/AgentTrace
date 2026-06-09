@@ -12,6 +12,7 @@ pub mod reclassify;
 pub mod repair;
 pub mod replace;
 pub mod restore;
+pub mod resume;
 pub mod rm;
 pub mod show;
 pub mod status;

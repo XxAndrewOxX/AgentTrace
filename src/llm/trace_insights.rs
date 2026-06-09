@@ -1,4 +1,9 @@
-use crate::config::{LlmConfig, StoreConfig};
+#[cfg(test)]
+use super::backend::NoTraceBackend;
+use super::backend::TraceInsightsBackend;
+#[cfg(feature = "llm")]
+use super::candle_backend::CandleTraceBackend;
+use crate::config::MergedConfig;
 use crate::types::DocType;
 use std::path::Path;
 use thiserror::Error;
@@ -25,6 +30,11 @@ pub enum TraceInsightsRequest {
         session_id: String,
         events: Vec<String>,
     },
+    UpdateRunningSummary {
+        previous_summary: String,
+        new_events: String,
+        plan_snippet: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +42,7 @@ pub enum TraceInsightsResponse {
     ChangeSummary(String),
     ContextDocument(String),
     SessionSummary(String),
+    RunningSummary(String),
 }
 
 #[derive(Debug, Error)]
@@ -47,29 +58,77 @@ pub enum TraceInsightsError {
 }
 
 pub struct TraceInsightsFacade {
-    backend: super::llama_cpp::LlamaCppBackend,
+    backend: Box<dyn TraceInsightsBackend>,
 }
 
 impl TraceInsightsFacade {
-    pub fn from_llm_config(cfg: &LlmConfig) -> Result<Option<Self>, TraceInsightsError> {
+    pub fn from_llm_config(
+        cfg: &crate::config::LlmConfig,
+    ) -> Result<Option<Self>, TraceInsightsError> {
         if cfg.model_path.is_none() {
             return Ok(None);
         }
-        let backend = super::llama_cpp::LlamaCppBackend::from_config(cfg)
-            .map_err(TraceInsightsError::ModelUnavailable)?;
-        Ok(Some(Self { backend }))
+        #[cfg(feature = "llm")]
+        {
+            let merged = MergedConfig {
+                store: crate::config::StoreInfo::new("".into()),
+                llm: cfg.clone(),
+                ui: crate::config::UiConfig::default(),
+                defaults: crate::config::DefaultsConfig::default(),
+                polling: crate::config::PollingConfig::default(),
+            };
+            match CandleTraceBackend::from_merged_config(&merged) {
+                Ok(Some(backend)) => {
+                    return Ok(Some(Self {
+                        backend: Box::new(backend),
+                    }))
+                }
+                Ok(None) => return Ok(None),
+                Err(e) => {
+                    tracing::warn!("Candle backend unavailable: {e}");
+                    return Ok(None);
+                }
+            }
+        }
+        #[cfg(not(feature = "llm"))]
+        {
+            let _ = cfg;
+            Ok(None)
+        }
     }
 
     pub fn from_store_root(store_root: &Path) -> Result<Option<Self>, TraceInsightsError> {
-        let store_cfg = match StoreConfig::load(store_root) {
+        let merged = match MergedConfig::load(store_root) {
             Ok(cfg) => cfg,
             Err(_) => return Ok(None),
         };
-        let llm_cfg = store_cfg.llm.unwrap_or_default();
-        match Self::from_llm_config(&llm_cfg) {
-            Ok(v) => Ok(v),
-            Err(TraceInsightsError::ModelUnavailable(_)) => Ok(None),
-            Err(e) => Err(e),
+        if merged.llm.model_path.is_none() {
+            return Ok(None);
+        }
+        #[cfg(feature = "llm")]
+        {
+            match CandleTraceBackend::from_merged_config(&merged) {
+                Ok(Some(backend)) => Ok(Some(Self {
+                    backend: Box::new(backend),
+                })),
+                Ok(None) => Ok(None),
+                Err(e) => {
+                    tracing::warn!("Candle backend unavailable: {e}");
+                    Ok(None)
+                }
+            }
+        }
+        #[cfg(not(feature = "llm"))]
+        {
+            let _ = merged;
+            Ok(None)
+        }
+    }
+
+    #[cfg(test)]
+    pub fn with_no_backend() -> Self {
+        Self {
+            backend: Box::new(NoTraceBackend),
         }
     }
 
@@ -105,6 +164,18 @@ impl TraceInsightsFacade {
                     .map_err(TraceInsightsError::BackendFailure)?;
                 validate_non_empty(&text)?;
                 Ok(TraceInsightsResponse::SessionSummary(text))
+            }
+            TraceInsightsRequest::UpdateRunningSummary {
+                previous_summary,
+                new_events,
+                plan_snippet,
+            } => {
+                let text = self
+                    .backend
+                    .update_running_summary(&previous_summary, &new_events, &plan_snippet)
+                    .map_err(TraceInsightsError::BackendFailure)?;
+                validate_non_empty(&text)?;
+                Ok(TraceInsightsResponse::RunningSummary(text))
             }
         }
     }
@@ -158,6 +229,25 @@ impl TraceInsightsFacade {
             TraceInsightsResponse::SessionSummary(v) => Ok(v),
             _ => Err(TraceInsightsError::InvalidOutput(
                 "expected SessionSummary response".into(),
+            )),
+        }
+    }
+
+    pub fn update_running_summary(
+        &self,
+        previous_summary: &str,
+        new_events: &str,
+        plan_snippet: &str,
+    ) -> Result<String, TraceInsightsError> {
+        let request = TraceInsightsRequest::UpdateRunningSummary {
+            previous_summary: previous_summary.to_string(),
+            new_events: new_events.to_string(),
+            plan_snippet: plan_snippet.to_string(),
+        };
+        match self.execute(request)? {
+            TraceInsightsResponse::RunningSummary(v) => Ok(v),
+            _ => Err(TraceInsightsError::InvalidOutput(
+                "expected RunningSummary response".into(),
             )),
         }
     }

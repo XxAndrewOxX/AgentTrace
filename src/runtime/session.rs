@@ -95,6 +95,13 @@ pub fn remove_session(store_root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Returns the active session ID from the lock file, if non-stale.
+pub fn session_id_for_store(store_root: &Path) -> Option<String> {
+    load_session(store_root)
+        .filter(|s| !s.is_stale())
+        .map(|s| s.session_id)
+}
+
 pub fn session_id_for_actor(store_root: &Path, actor: &Actor) -> Option<String> {
     let Actor::Agent { name } = actor else {
         return None;

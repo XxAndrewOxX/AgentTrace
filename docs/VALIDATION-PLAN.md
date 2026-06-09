@@ -40,7 +40,7 @@ cargo publish --dry-run
 | `performance` | Performance PS-1..5 | `e2e_performance` |
 | `tui` | TUI behavior TB-1..10 | `e2e_tui_behavior` |
 | `adversarial` | Adversarial cases (see `docs/ADVERSARIAL-VALIDATION.md`) | `adversarial_validation` |
-| `connection` | CLI + MCP AC-1..6, MC-1..6 | `e2e_agent_connection` |
+| `connection` | CLI + MCP AC-1..7, MC-1..8 | `e2e_agent_connection` |
 | `unit` | Library unit tests | `--lib` |
 | `all` | All of the above (default) | — |
 
@@ -111,6 +111,18 @@ git push origin v0.1.0
 ```
 
 Wait for `release.yml`, then follow post-release validation above.
+
+## Live Test 2: MCP reconnect resume briefing
+
+Manual validation after agent disconnect/reconnect (IDE restart, crash, or stale session):
+
+1. **Phase A:** Start work on a project (e.g. ledger API), write `plan.md` via MCP `write_file`, interrupt mid-task.
+2. **Phase B:** Reconnect MCP client. First tool call **must** be `get_resume_context` (not `list_documents`).
+3. Verify response includes: session metadata, `running_summary.md` body, plan excerpt, and `INSTRUCTIONS`.
+4. Verify `running_summary.md` updates after each MCP plan write (MC-8 in `e2e_agent_connection`).
+5. Agent should continue from "Resume Here" without reading every source file.
+
+CLI equivalent: `agent-trace resume show` after `agent-trace connect <name>`.
 
 ## Related docs
 

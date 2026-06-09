@@ -268,7 +268,9 @@ fn mc1_mcp_initialize_returns_capabilities() {
         "tools/list should not error: {resp:?}"
     );
     let tools = resp["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 5, "should have 5 tools");
+    assert_eq!(tools.len(), 6, "should have 6 tools");
+    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"get_resume_context"));
 }
 
 // ── MC-2: mcp write_file to plan succeeds ────────────────────────────────────
@@ -397,6 +399,80 @@ fn mc6_mcp_get_permissions_correct_for_agent() {
         "context should be denied for agent"
     );
     assert!(text.contains("allowed"), "plan should be allowed for agent");
+}
+
+// ── MC-7: get_resume_context returns session + running summary ───────────────
+
+#[test]
+fn mc7_get_resume_context_returns_briefing() {
+    let store = TestStore::new();
+    store.write_file("plan.md", "# Plan\n- [ ] Phase 1\n");
+    store
+        .run(&["add", "plan", "plan.md"])
+        .expect_success("add plan");
+
+    let mut h = McpHarness::new(&store, "test-agent");
+    let write_resp = h.call_tool(
+        "write_file",
+        json!({"path": "plan.md", "content": "# Plan\n- [x] Phase 1\n- [ ] Phase 2\n"}),
+    );
+    assert_eq!(write_resp["result"]["isError"], false);
+
+    // Allow background summary refresh to complete.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    let resp = h.call_tool("get_resume_context", json!({}));
+    assert_eq!(
+        resp["result"]["isError"], false,
+        "get_resume_context: {resp:?}"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("Running Summary"),
+        "should include running summary"
+    );
+    assert!(text.contains("session_id") || text.contains("Session ID"));
+    assert!(text.contains("Phase"), "should include plan excerpt");
+    assert!(text.contains("INSTRUCTIONS"));
+}
+
+// ── MC-8: MCP write updates running_summary and JSONL ───────────────────────
+
+#[test]
+fn mc8_running_summary_updates_on_mcp_write() {
+    let store = TestStore::new();
+    store.write_file("plan.md", "# Plan\n");
+    store
+        .run(&["add", "plan", "plan.md"])
+        .expect_success("add plan");
+
+    let mut h = McpHarness::new(&store, "test-agent");
+    let resp = h.call_tool(
+        "write_file",
+        json!({"path": "plan.md", "content": "# Plan\nUpdated via MCP\n"}),
+    );
+    assert_eq!(resp["result"]["isError"], false);
+
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    assert!(
+        store.file_exists("running_summary.md"),
+        "running_summary.md should exist after MCP write"
+    );
+    let summary = store.read_file("running_summary.md");
+    assert!(
+        summary.contains("plan.md") || summary.contains("MCP") || summary.contains("Updated"),
+        "summary should reference the write: {summary}"
+    );
+
+    let events_path = ".agent-trace/summary_events.jsonl";
+    assert!(store.file_exists(events_path), "JSONL should exist");
+    let events = store.read_file(events_path);
+    assert!(
+        !events.trim().is_empty(),
+        "JSONL should have at least one event"
+    );
+    assert!(events.contains("plan.md"));
 }
 
 // ── Helpers extension needed for stderr assertions ────────────────────────────

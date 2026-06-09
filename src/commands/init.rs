@@ -46,6 +46,10 @@ pub fn run(path: &Path, scan: bool, output: &dyn CliOutput) -> Result<()> {
     if !context_updates.exists() {
         std::fs::write(&context_updates, "")?;
     }
+    let summary_events = store_dir.join("summary_events.jsonl");
+    if !summary_events.exists() {
+        std::fs::write(&summary_events, "")?;
+    }
     let cmd_history = store_dir.join("command_history.txt");
     if !cmd_history.exists() {
         std::fs::write(&cmd_history, "")?;
@@ -199,6 +203,11 @@ const DEFAULT_GITIGNORE: &str = r#"# agent-trace defaults
 *.swp
 *.swo
 ~*
+.venv/
+venv/
+node_modules/
+__pycache__/
+*.pyc
 "#;
 
 #[cfg(test)]
