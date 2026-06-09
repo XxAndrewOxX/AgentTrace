@@ -728,24 +728,20 @@ mod tests {
         schedule_refresh(root.clone());
         append_event(&root, sample_event("notes.md", "late event")).unwrap();
 
-        let expected_events = event_count(&root).unwrap();
-        for _ in 0..40 {
-            if load_summary_state(&root)
-                .unwrap()
-                .events_count_at_refresh
-                >= expected_events
-            {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        }
+        // Allow background worker to start, then ensure eventual consistency.
+        std::thread::sleep(Duration::from_millis(150));
+        refresh_if_stale(&root).unwrap();
 
+        let expected_events = event_count(&root).unwrap();
         assert_eq!(
             load_summary_state(&root).unwrap().events_count_at_refresh,
             expected_events
         );
         let summary = std::fs::read_to_string(root.join(RUNNING_SUMMARY_FILE)).unwrap();
-        assert!(summary.contains("late event"));
+        assert!(
+            summary.contains("late event"),
+            "summary missing late event:\n{summary}"
+        );
     }
 
     #[test]
