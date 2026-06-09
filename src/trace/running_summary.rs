@@ -110,9 +110,9 @@ pub fn event_count(store_root: &Path) -> Result<usize> {
     Ok(load_all_events(store_root)?.len())
 }
 
-fn save_events_watermark(store_root: &Path) -> Result<()> {
+fn save_events_watermark(store_root: &Path, events_synthesized: usize) -> Result<()> {
     let mut state = load_summary_state(store_root)?;
-    state.events_count_at_refresh = event_count(store_root)?;
+    state.events_count_at_refresh = events_synthesized;
     state.ops_since_refresh = 0;
     save_summary_state(store_root, &state)
 }
@@ -292,7 +292,7 @@ pub fn refresh_template(store_root: &Path, git: &GitStore, manifest: &Manifest) 
     let content = synthesize_template_summary(store_root, manifest, &events)?;
     let mut manifest_mut = Manifest::load(store_root)?;
     write_running_summary(store_root, &content, git, &mut manifest_mut)?;
-    save_events_watermark(store_root)
+    save_events_watermark(store_root, events.len())
 }
 
 pub fn refresh(store_root: &Path, git: &GitStore, manifest: &Manifest) -> Result<()> {
@@ -316,7 +316,7 @@ pub fn refresh(store_root: &Path, git: &GitStore, manifest: &Manifest) -> Result
 
     let mut manifest_mut = Manifest::load(store_root)?;
     write_running_summary(store_root, &content, git, &mut manifest_mut)?;
-    save_events_watermark(store_root)
+    save_events_watermark(store_root, events.len())
 }
 
 pub fn refresh_from_path(store_root: &Path) -> Result<()> {
@@ -325,13 +325,41 @@ pub fn refresh_from_path(store_root: &Path) -> Result<()> {
     refresh(store_root, &git, &manifest)
 }
 
+#[cfg(test)]
+pub fn wait_refresh_idle(store_root: &Path) {
+    for _ in 0..150 {
+        let busy = REFRESH_IN_FLIGHT
+            .lock()
+            .expect("refresh lock poisoned")
+            .get(&store_root.to_path_buf())
+            .copied()
+            .unwrap_or(false);
+        if !busy {
+            let current = event_count(store_root).unwrap_or(0);
+            let watermark = load_summary_state(store_root)
+                .map(|s| s.events_count_at_refresh)
+                .unwrap_or(0);
+            if current <= watermark {
+                return;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 pub fn schedule_refresh(store_root: PathBuf) {
+    schedule_refresh_inner(store_root, false);
+}
+
+fn schedule_refresh_inner(store_root: PathBuf, force: bool) {
     let threshold = refresh_threshold(&store_root);
-    let ops = load_summary_state(&store_root)
-        .map(|s| s.ops_since_refresh)
-        .unwrap_or(0);
-    if ops < threshold {
-        return;
+    if !force {
+        let ops = load_summary_state(&store_root)
+            .map(|s| s.ops_since_refresh)
+            .unwrap_or(0);
+        if ops < threshold {
+            return;
+        }
     }
 
     let should_spawn = {
@@ -353,6 +381,9 @@ pub fn schedule_refresh(store_root: PathBuf) {
             tracing::warn!("running summary background refresh failed: {e}");
         }
         let events_after = event_count(&store_root).unwrap_or(events_before);
+        let watermark = load_summary_state(&store_root)
+            .map(|s| s.events_count_at_refresh)
+            .unwrap_or(0);
         REFRESH_IN_FLIGHT
             .lock()
             .expect("refresh lock poisoned")
@@ -360,8 +391,10 @@ pub fn schedule_refresh(store_root: PathBuf) {
         let pending_ops = load_summary_state(&store_root)
             .map(|s| s.ops_since_refresh)
             .unwrap_or(0);
-        if events_after > events_before || pending_ops >= refresh_threshold(&store_root) {
-            schedule_refresh(store_root);
+        if events_after > watermark {
+            schedule_refresh_inner(store_root.clone(), true);
+        } else if pending_ops >= threshold {
+            schedule_refresh_inner(store_root, false);
         }
     });
 }
@@ -526,7 +559,6 @@ pub fn resume_here_lines(store_root: &Path) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::config::StoreInfo;
-    use std::time::Duration;
     use tempfile::TempDir;
 
     fn setup(tmp: &TempDir) -> (PathBuf, Manifest, GitStore) {
@@ -725,11 +757,11 @@ mod tests {
         refresh_template(&root, &git, &m).unwrap();
         append_event(&root, sample_event("plan.md", "pre-refresh event")).unwrap();
 
+        wait_refresh_idle(&root);
         schedule_refresh(root.clone());
         append_event(&root, sample_event("notes.md", "late event")).unwrap();
 
-        // Allow background worker to start, then ensure eventual consistency.
-        std::thread::sleep(Duration::from_millis(150));
+        wait_refresh_idle(&root);
         refresh_if_stale(&root).unwrap();
 
         let expected_events = event_count(&root).unwrap();
