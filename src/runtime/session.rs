@@ -16,6 +16,15 @@ pub struct AgentSession {
     pub last_heartbeat: String,
 }
 
+pub fn new_session_id() -> String {
+    let now = Utc::now();
+    format!(
+        "{}-{:03}",
+        now.format("%Y%m%d-%H%M%S"),
+        now.timestamp_subsec_millis()
+    )
+}
+
 impl AgentSession {
     fn now_rfc3339() -> String {
         Utc::now().to_rfc3339()
@@ -66,9 +75,16 @@ pub fn load_session(store_root: &Path) -> Option<AgentSession> {
 }
 
 pub fn start_session(store_root: &Path, name: &str, transport: &str) -> Result<AgentSession> {
+    if let Some(existing) = load_session(store_root) {
+        if existing.is_stale() {
+            crate::session_recap::maybe_recap_prior_session(store_root, &existing)?;
+            remove_session(store_root)?;
+        }
+    }
+
     let session = AgentSession {
         name: name.to_string(),
-        session_id: format!("{}", Utc::now().format("%Y%m%d-%H%M%S")),
+        session_id: new_session_id(),
         transport: transport.to_string(),
         started_at: AgentSession::now_rfc3339(),
         last_heartbeat: AgentSession::now_rfc3339(),
@@ -131,6 +147,7 @@ impl AgentState {
     pub fn current_actor(&self, store_root: &Path) -> Actor {
         if let Some(session) = load_session(store_root) {
             if session.is_stale() {
+                let _ = crate::session_recap::maybe_recap_prior_session(store_root, &session);
                 let _ = remove_session(store_root);
             } else {
                 return Actor::Agent { name: session.name };

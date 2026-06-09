@@ -93,7 +93,7 @@ pub fn append_event(store_root: &Path, event: SummaryEvent) -> Result<()> {
     Ok(())
 }
 
-fn load_all_events(store_root: &Path) -> Result<Vec<SummaryEvent>> {
+pub fn load_all_events(store_root: &Path) -> Result<Vec<SummaryEvent>> {
     let path = events_path(store_root);
     if !path.exists() {
         return Ok(Vec::new());
@@ -439,6 +439,18 @@ pub fn assemble_resume_context(
     }
     out.push('\n');
 
+    if let Some(recap) = crate::session_recap::load_prior_session_recap(store_root) {
+        out.push_str("## Prior Session Recap\n\n");
+        let body = recap
+            .strip_prefix("# Prior Session Recap\n\n")
+            .unwrap_or(&recap);
+        out.push_str(body);
+        if !body.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+
     out.push_str("--- Running Summary ---\n");
     let summary_path = store_root.join(RUNNING_SUMMARY_FILE);
     let summary_body = if summary_path.exists() {
@@ -559,6 +571,8 @@ pub fn resume_here_lines(store_root: &Path) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::config::StoreInfo;
+    use crate::session;
+    use crate::types::Actor;
     use tempfile::TempDir;
 
     fn setup(tmp: &TempDir) -> (PathBuf, Manifest, GitStore) {
@@ -774,6 +788,33 @@ mod tests {
             summary.contains("late event"),
             "summary missing late event:\n{summary}"
         );
+    }
+
+    #[test]
+    fn assemble_resume_context_includes_prior_session_recap() {
+        let tmp = TempDir::new().unwrap();
+        let (root, manifest, git) = setup(&tmp);
+        let mut m = manifest;
+        write_running_summary(
+            &root,
+            "# Running Summary\n\n## Resume Here\n\nContinue\n",
+            &git,
+            &mut m,
+        )
+        .unwrap();
+        crate::session_recap::persist_session_recap(
+            &root,
+            "prior-session",
+            "# Prior Session Recap\n\n*Agent: bot / prior-session (cli)*\n\nFinished phase 1.\n",
+        )
+        .unwrap();
+        session::start_session(&root, "bot", "cli").unwrap();
+
+        let text = assemble_resume_context(&root, &Actor::Agent { name: "bot".into() }, false, 5)
+            .unwrap();
+        assert!(text.contains("## Prior Session Recap"));
+        assert!(text.contains("Finished phase 1"));
+        assert!(text.contains("Running Summary"));
     }
 
     #[test]

@@ -59,7 +59,7 @@ impl ChangeProcessor {
         ui_tx: Option<tokio::sync::mpsc::Sender<UiEvent>>,
     ) -> Self {
         let session_id = session::session_id_for_store(&git.workdir)
-            .unwrap_or_else(|| format!("{}", Utc::now().format("%Y%m%d-%H%M%S")));
+            .unwrap_or_else(session::new_session_id);
         let last_seen_oid = git.head_oid().unwrap_or_else(|_| Oid::zero());
         Self {
             git,

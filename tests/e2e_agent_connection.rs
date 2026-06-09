@@ -475,6 +475,103 @@ fn mc8_running_summary_updates_on_mcp_write() {
     assert!(events.contains("plan.md"));
 }
 
+// ── AC-7: stale lock reconnect generates session recap ───────────────────────
+
+#[test]
+fn ac7_stale_connect_generates_session_recap() {
+    let store = TestStore::new();
+    store.write_file("plan.md", "# Plan\n- [ ] Phase 1\n");
+    store
+        .run(&["add", "plan", "plan.md"])
+        .expect_success("add plan");
+
+    store
+        .run(&["connect", "test-agent"])
+        .expect_success("connect");
+    store
+        .run(&["write", "plan.md", "--content", "# Plan\n- [x] Phase 1\n"])
+        .expect_success("write");
+
+    let lock = store.read_file(".agent-trace/locks/agent-lock.toml");
+    let old_session_id = lock
+        .lines()
+        .find(|l| l.starts_with("session_id"))
+        .and_then(|l| l.split('=').nth(1))
+        .map(|s| s.trim().trim_matches('"').to_string())
+        .expect("session_id in lock");
+
+    let stale_lock = lock.replace(
+        &lock
+            .lines()
+            .find(|l| l.starts_with("last_heartbeat"))
+            .expect("heartbeat"),
+        "last_heartbeat=\"2020-01-01T00:00:00Z\"",
+    );
+    store.write_file(".agent-trace/locks/agent-lock.toml", &stale_lock);
+
+    store
+        .run(&["connect", "test-agent"])
+        .expect_success("reconnect after stale");
+
+    let recap_path = format!(".agent-trace/session_recaps/{old_session_id}.md");
+    assert!(
+        store.file_exists(&recap_path),
+        "session recap should exist at {recap_path}"
+    );
+    let recap = store.read_file(&recap_path);
+    assert!(
+        recap.contains("Prior Session Recap"),
+        "recap should have header: {recap}"
+    );
+    assert!(
+        recap.contains("plan.md") || recap.contains("Phase 1"),
+        "recap should reference prior activity: {recap}"
+    );
+}
+
+// ── MC-9: stale MCP reconnect includes prior session recap ───────────────────
+
+#[test]
+fn mc9_stale_mcp_reconnect_includes_prior_recap() {
+    let store = TestStore::new();
+    store.write_file("plan.md", "# Plan\n- [ ] Work item\n");
+    store
+        .run(&["add", "plan", "plan.md"])
+        .expect_success("add plan");
+
+    {
+        let mut h = McpHarness::new(&store, "test-agent");
+        let resp = h.call_tool(
+            "write_file",
+            json!({"path": "plan.md", "content": "# Plan\n- [x] Work item\n"}),
+        );
+        assert_eq!(resp["result"]["isError"], false);
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+
+    let lock = store.read_file(".agent-trace/locks/agent-lock.toml");
+    let stale_lock = lock.replace(
+        lock.lines()
+            .find(|l| l.starts_with("last_heartbeat"))
+            .expect("heartbeat"),
+        "last_heartbeat=\"2020-01-01T00:00:00Z\"",
+    );
+    store.write_file(".agent-trace/locks/agent-lock.toml", &stale_lock);
+
+    let mut h = McpHarness::new(&store, "test-agent");
+    let resp = h.call_tool("get_resume_context", json!({}));
+    assert_eq!(resp["result"]["isError"], false, "get_resume_context: {resp:?}");
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("Prior Session Recap"),
+        "resume context should include prior session recap: {text}"
+    );
+    assert!(
+        text.contains("Work item") || text.contains("plan.md"),
+        "recap should reference prior work: {text}"
+    );
+}
+
 // ── Helpers extension needed for stderr assertions ────────────────────────────
 
 trait CmdOutputExt {

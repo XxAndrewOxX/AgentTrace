@@ -3,3 +3,4 @@ pub mod context;
 pub mod logs;
 pub mod pipeline;
 pub mod running_summary;
+pub mod session_recap;
