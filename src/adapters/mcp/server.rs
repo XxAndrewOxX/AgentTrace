@@ -214,6 +214,10 @@ fn handle_get_resume_context(root: &Path, actor: &Actor, args: &Value) -> Value 
         .and_then(|v| v.as_u64())
         .unwrap_or(10) as usize;
 
+    if let Err(e) = running_summary::refresh_if_stale(root) {
+        tracing::warn!("running summary refresh before resume context failed: {e}");
+    }
+
     match running_summary::assemble_resume_context(root, actor, include_git_log, git_log_limit) {
         Ok(text) => tool_result(&text),
         Err(e) => error_response(-32603, &format!("Cannot assemble resume context: {e}")),

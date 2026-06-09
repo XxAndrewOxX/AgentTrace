@@ -14,9 +14,38 @@ static REFRESH_IN_FLIGHT: LazyLock<Mutex<HashMap<PathBuf, bool>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 const EVENTS_FILE: &str = ".agent-trace/summary_events.jsonl";
+const SUMMARY_STATE_FILE: &str = ".agent-trace/summary_state.toml";
 const RUNNING_SUMMARY_FILE: &str = "running_summary.md";
 const MAX_EVENTS_RETAINED: usize = 500;
 const RECENT_ACTIVITY_LIMIT: usize = 15;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct SummaryState {
+    pub events_count_at_refresh: usize,
+}
+
+pub fn summary_state_path(store_root: &Path) -> PathBuf {
+    store_root.join(SUMMARY_STATE_FILE)
+}
+
+pub fn load_summary_state(store_root: &Path) -> Result<SummaryState> {
+    let path = summary_state_path(store_root);
+    if !path.exists() {
+        return Ok(SummaryState::default());
+    }
+    let content = std::fs::read_to_string(&path)?;
+    Ok(toml::from_str(&content).unwrap_or_default())
+}
+
+pub fn save_summary_state(store_root: &Path, state: &SummaryState) -> Result<()> {
+    let path = summary_state_path(store_root);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = toml::to_string_pretty(state)?;
+    crate::util::atomic_write(&path, &content)?;
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SummaryEvent {
@@ -73,6 +102,16 @@ fn load_all_events(store_root: &Path) -> Result<Vec<SummaryEvent>> {
         .filter(|l| !l.trim().is_empty())
         .filter_map(|l| serde_json::from_str(l).ok())
         .collect())
+}
+
+pub fn event_count(store_root: &Path) -> Result<usize> {
+    Ok(load_all_events(store_root)?.len())
+}
+
+fn save_events_watermark(store_root: &Path) -> Result<()> {
+    let mut state = load_summary_state(store_root)?;
+    state.events_count_at_refresh = event_count(store_root)?;
+    save_summary_state(store_root, &state)
 }
 
 pub fn load_recent_events(store_root: &Path, limit: usize) -> Result<Vec<SummaryEvent>> {
@@ -234,7 +273,8 @@ pub fn refresh_template(store_root: &Path, git: &GitStore, manifest: &Manifest) 
     let events = load_recent_events(store_root, 50)?;
     let content = synthesize_template_summary(store_root, manifest, &events)?;
     let mut manifest_mut = Manifest::load(store_root)?;
-    write_running_summary(store_root, &content, git, &mut manifest_mut)
+    write_running_summary(store_root, &content, git, &mut manifest_mut)?;
+    save_events_watermark(store_root)
 }
 
 pub fn refresh(store_root: &Path, git: &GitStore, manifest: &Manifest) -> Result<()> {
@@ -257,7 +297,8 @@ pub fn refresh(store_root: &Path, git: &GitStore, manifest: &Manifest) -> Result
     };
 
     let mut manifest_mut = Manifest::load(store_root)?;
-    write_running_summary(store_root, &content, git, &mut manifest_mut)
+    write_running_summary(store_root, &content, git, &mut manifest_mut)?;
+    save_events_watermark(store_root)
 }
 
 pub fn refresh_from_path(store_root: &Path) -> Result<()> {
@@ -283,41 +324,30 @@ pub fn schedule_refresh(store_root: PathBuf) {
     std::thread::spawn(move || {
         // Brief pause to batch rapid writes; git store lock prevents index races.
         std::thread::sleep(Duration::from_millis(50));
+        let events_before = event_count(&store_root).unwrap_or(0);
         if let Err(e) = refresh_from_path(&store_root) {
             tracing::warn!("running summary background refresh failed: {e}");
         }
+        let events_after = event_count(&store_root).unwrap_or(events_before);
         REFRESH_IN_FLIGHT
             .lock()
             .expect("refresh lock poisoned")
-            .insert(store_root, false);
+            .insert(store_root.clone(), false);
+        if events_after > events_before {
+            schedule_refresh(store_root);
+        }
     });
 }
 
 pub fn refresh_if_stale(store_root: &Path) -> Result<()> {
     let summary_path = store_root.join(RUNNING_SUMMARY_FILE);
-    let events = load_all_events(store_root)?;
-    if events.is_empty() {
+    let current_count = event_count(store_root)?;
+    if current_count == 0 {
         return Ok(());
     }
-    let last_event_ts = events.last().map(|e| e.timestamp.as_str()).unwrap_or("");
-    let summary_mtime_ok = if summary_path.exists() {
-        let summary_meta = std::fs::metadata(&summary_path)?;
-        let summary_modified = summary_meta.modified().ok();
-        // If we can't compare, refresh anyway when events exist.
-        summary_modified.is_some()
-    } else {
-        false
-    };
-    if !summary_path.exists() || !summary_mtime_ok {
-        let _ = last_event_ts;
+    let watermark = load_summary_state(store_root)?.events_count_at_refresh;
+    if !summary_path.exists() || current_count > watermark {
         refresh_from_path(store_root)?;
-        return Ok(());
-    }
-    // Refresh if summary file is older than last event (best-effort string compare on timestamp).
-    if let Ok(summary_content) = std::fs::read_to_string(&summary_path) {
-        if !summary_content.contains(&events.last().unwrap().path) {
-            refresh_from_path(store_root)?;
-        }
     }
     Ok(())
 }
@@ -583,6 +613,99 @@ mod tests {
         let content = std::fs::read_to_string(root.join(RUNNING_SUMMARY_FILE)).unwrap();
         assert!(content.contains("# Running Summary"));
         assert!(content.contains("updated plan"));
+    }
+
+    fn sample_event(path: &str, summary: &str) -> SummaryEvent {
+        SummaryEvent {
+            timestamp: Utc::now().to_rfc3339(),
+            session_id: Some("s1".into()),
+            agent_name: Some("bot".into()),
+            actor: "agent:bot".into(),
+            action: "modify".into(),
+            path: path.into(),
+            doc_type: "scratch".into(),
+            summary: summary.into(),
+            source: "mcp_write".into(),
+            lines_added: 1,
+            lines_removed: 0,
+        }
+    }
+
+    #[test]
+    fn refresh_if_stale_refreshes_when_events_exceed_watermark() {
+        let tmp = TempDir::new().unwrap();
+        let (root, manifest, git) = setup(&tmp);
+        std::fs::write(root.join("plan.md"), "# Plan\n- [ ] Next\n").unwrap();
+        let mut m = manifest;
+        m.register(&PathBuf::from("plan.md"), DocType::Plan, "")
+            .unwrap();
+        append_event(&root, sample_event("plan.md", "first event")).unwrap();
+        refresh_template(&root, &git, &m).unwrap();
+        assert_eq!(
+            load_summary_state(&root).unwrap().events_count_at_refresh,
+            1
+        );
+
+        append_event(&root, sample_event("notes.md", "second event")).unwrap();
+        refresh_if_stale(&root).unwrap();
+
+        assert_eq!(
+            load_summary_state(&root).unwrap().events_count_at_refresh,
+            2
+        );
+        let summary = std::fs::read_to_string(root.join(RUNNING_SUMMARY_FILE)).unwrap();
+        assert!(summary.contains("second event"));
+    }
+
+    #[test]
+    fn refresh_if_stale_skips_when_watermark_is_current() {
+        let tmp = TempDir::new().unwrap();
+        let (root, manifest, git) = setup(&tmp);
+        std::fs::write(root.join("plan.md"), "# Plan\n").unwrap();
+        let mut m = manifest;
+        m.register(&PathBuf::from("plan.md"), DocType::Plan, "")
+            .unwrap();
+        append_event(&root, sample_event("plan.md", "only event")).unwrap();
+        refresh_template(&root, &git, &m).unwrap();
+        let before = std::fs::read_to_string(root.join(RUNNING_SUMMARY_FILE)).unwrap();
+
+        refresh_if_stale(&root).unwrap();
+
+        let after = std::fs::read_to_string(root.join(RUNNING_SUMMARY_FILE)).unwrap();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn schedule_refresh_reschedules_when_events_arrive_during_refresh() {
+        let tmp = TempDir::new().unwrap();
+        let (root, manifest, git) = setup(&tmp);
+        std::fs::write(root.join("plan.md"), "# Plan\n- [ ] Next\n").unwrap();
+        let mut m = manifest;
+        m.register(&PathBuf::from("plan.md"), DocType::Plan, "")
+            .unwrap();
+        append_event(&root, sample_event("plan.md", "seed event")).unwrap();
+        refresh_template(&root, &git, &m).unwrap();
+
+        schedule_refresh(root.clone());
+        append_event(&root, sample_event("notes.md", "late event")).unwrap();
+
+        for _ in 0..40 {
+            if load_summary_state(&root)
+                .unwrap()
+                .events_count_at_refresh
+                >= 2
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+
+        assert_eq!(
+            load_summary_state(&root).unwrap().events_count_at_refresh,
+            2
+        );
+        let summary = std::fs::read_to_string(root.join(RUNNING_SUMMARY_FILE)).unwrap();
+        assert!(summary.contains("late event"));
     }
 
     #[test]
