@@ -312,7 +312,9 @@ fn main() -> Result<()> {
             dry_run,
             &output,
         ),
-        Commands::Model { subcommand } => commands::model::run(subcommand, &output),
+        Commands::Model { subcommand } => {
+            commands::model::run(subcommand, Some(&PathBuf::from(".")), &output)
+        }
         Commands::Resume { subcommand } => {
             commands::resume::run(&PathBuf::from("."), subcommand, &output)
         }

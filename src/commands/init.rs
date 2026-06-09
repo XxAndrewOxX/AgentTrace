@@ -64,6 +64,7 @@ pub fn run(path: &Path, scan: bool, output: &dyn CliOutput) -> Result<()> {
     let store_config = StoreConfig {
         store: store_info.clone(),
         llm: None,
+        synthesis: None,
         polling: PollingConfig::default(),
     };
     store_config.save(&path)?;
@@ -144,6 +145,7 @@ pub fn run(path: &Path, scan: bool, output: &dyn CliOutput) -> Result<()> {
         "Initialised agent-trace store at {}",
         path.display()
     ))?;
+    output.line("Next: run `agent-trace model setup` (or `model pull 0.5b` for offline GGUF).")?;
     Ok(())
 }
 

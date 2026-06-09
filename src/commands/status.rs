@@ -1,3 +1,6 @@
+use crate::config::MergedConfig;
+use crate::llm::providers::resolve;
+use crate::config::CredentialsStore;
 use crate::observability::CliOutput;
 use crate::store::Store;
 use crate::types::FileChange;
@@ -6,6 +9,17 @@ use std::path::Path;
 
 pub fn run(store_root: &Path, output: &dyn CliOutput) -> Result<()> {
     let store = Store::open(store_root)?;
+
+    if let Ok(merged) = MergedConfig::load(store_root) {
+        let creds = CredentialsStore::load().unwrap_or_default();
+        let info = resolve(&merged, &creds).info();
+        let line = if info.degraded {
+            "Synthesis: degraded (no backend)".to_string()
+        } else {
+            format!("Synthesis: {} (ok)", info.label)
+        };
+        output.line(&line)?;
+    }
 
     let changes = store.git.detect_changes()?;
 
