@@ -81,9 +81,10 @@ fn tb1_minimum_size_renders() {
 }
 
 // ── TB-5: Real-Time Change Detection ─────────────────────────────────────────
-// Tested via the poll cycle unit tests in src/poll.rs:
+// Tested via the poll cycle unit tests in change_processor.rs:
 //   - test_poll_new_file_registered: verifies file is detected and registered
-//   - UiEvent::NewCommit is sent on commit (covered in poll.rs with ui_tx)
+//   - test_head_poll_detects_external_commit: MCP path commits visible to poll loop
+//   - UiEvent::NewCommit is sent on commit (poll path + external HEAD poll)
 //
 // Manual verification: Creating a file while TUI is open causes it to appear
 // in the tree panel within the poll interval (1 second) — PASS

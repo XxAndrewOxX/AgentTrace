@@ -221,6 +221,41 @@ impl GitStore {
         Ok(commit)
     }
 
+    /// Current HEAD commit OID (for TUI poll dedup).
+    pub fn head_oid(&self) -> Result<Oid> {
+        let lock = store_git_lock(&self.workdir);
+        let _guard = lock.lock().expect("store git lock poisoned");
+        Ok(self.head_commit()?.id())
+    }
+
+    /// Commits reachable from HEAD but not including `since`, oldest first.
+    pub fn commits_since(&self, since: Oid) -> Result<Vec<LogEntry>> {
+        let lock = store_git_lock(&self.workdir);
+        let _guard = lock.lock().expect("store git lock poisoned");
+
+        if self.head_commit()?.id() == since {
+            return Ok(Vec::new());
+        }
+
+        let mut walk = self.repo.revwalk()?;
+        walk.push_head()?;
+        walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
+
+        let mut entries = Vec::new();
+        for oid_result in walk {
+            let oid = oid_result?;
+            if oid == since {
+                break;
+            }
+            let commit = self.repo.find_commit(oid)?;
+            if let Some(entry) = parse_commit(&commit) {
+                entries.push(entry);
+            }
+        }
+        entries.reverse();
+        Ok(entries)
+    }
+
     // ── Log / History ─────────────────────────────────────────────────────
 
     pub fn log(&self, limit: usize) -> Result<Vec<LogEntry>> {

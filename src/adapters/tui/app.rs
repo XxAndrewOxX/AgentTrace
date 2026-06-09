@@ -281,7 +281,10 @@ mod tests {
     use super::*;
     use crate::config::StoreInfo;
     use crate::manifest::Manifest;
+    use crate::poll::UiEvent;
+    use crate::types::{Action, Actor, CommitId, LogEntry};
     use ratatui::backend::TestBackend;
+    use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
 
@@ -332,5 +335,42 @@ mod tests {
         let key = crossterm::event::KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
         app.handle_key(key);
         assert!(app.should_quit);
+    }
+
+    #[test]
+    fn test_new_commit_refreshes_tree() {
+        let tmp = TempDir::new().unwrap();
+        let (mut app, tx) = make_app(&tmp);
+        assert!(app.tree.documents.is_empty());
+
+        {
+            let mut m = app.manifest.lock().unwrap();
+            m.register(&PathBuf::from("added.md"), crate::types::DocType::Plan, "")
+                .unwrap();
+        }
+
+        let entry = LogEntry {
+            commit_id: CommitId("abc123".into()),
+            timestamp: chrono::Utc::now(),
+            action: Action::Create,
+            actor: Actor::Agent {
+                name: "claude".into(),
+            },
+            agent_name: Some("claude".into()),
+            files: vec![(
+                PathBuf::from("added.md"),
+                Action::Create,
+                crate::types::DocType::Plan,
+            )],
+            summary: "mcp write: added.md".into(),
+        };
+        tx.blocking_send(UiEvent::NewCommit(entry)).unwrap();
+        while let Ok(event) = app.ui_rx.try_recv() {
+            app.handle_ui_event(event);
+        }
+
+        assert_eq!(app.tree.documents.len(), 1);
+        assert_eq!(app.tree.documents[0].path, PathBuf::from("added.md"));
+        assert_eq!(app.changelog.entries.len(), 1);
     }
 }
