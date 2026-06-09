@@ -2,6 +2,9 @@ pub mod backend;
 pub mod candle;
 pub mod candle_backend;
 pub mod llama_cpp;
+pub mod prompts;
+pub mod providers;
+pub mod synthesis_engine;
 pub mod trace_insights;
 
 use crate::types::DocType;

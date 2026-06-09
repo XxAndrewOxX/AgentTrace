@@ -4,6 +4,331 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+// ── Synthesis Config ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SynthesisMode {
+    #[default]
+    Auto,
+    Remote,
+    Ollama,
+    Embedded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SynthesisProvider {
+    #[default]
+    Ollama,
+    Openai,
+    Anthropic,
+    Openrouter,
+    Custom,
+    Embedded,
+}
+
+impl SynthesisProvider {
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::Openai => "openai",
+            Self::Anthropic => "anthropic",
+            Self::Openrouter => "openrouter",
+            Self::Ollama => "ollama",
+            Self::Custom => "custom",
+            Self::Embedded => "embedded",
+        }
+    }
+
+    pub fn default_model(self) -> &'static str {
+        match self {
+            Self::Openai => "gpt-4o-mini",
+            Self::Anthropic => "claude-3-5-haiku-latest",
+            Self::Openrouter => "openai/gpt-4o-mini",
+            Self::Ollama => "qwen2.5:1.5b",
+            Self::Custom => "gpt-4o-mini",
+            Self::Embedded => "qwen2.5-0.5b",
+        }
+    }
+
+    pub fn default_base_url(self) -> &'static str {
+        match self {
+            Self::Openai => "https://api.openai.com/v1",
+            Self::Anthropic => "https://api.anthropic.com/v1",
+            Self::Openrouter => "https://openrouter.ai/api/v1",
+            Self::Ollama => "http://127.0.0.1:11434/v1",
+            Self::Custom => "http://127.0.0.1:11434/v1",
+            Self::Embedded => "",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SynthesisFallback {
+    /// GGUF size key for embedded fallback (e.g. "0.5b", "1.5b").
+    #[serde(default = "default_embedded_model")]
+    pub embedded_model: String,
+}
+
+fn default_embedded_model() -> String {
+    "0.5b".into()
+}
+
+impl Default for SynthesisFallback {
+    fn default() -> Self {
+        Self {
+            embedded_model: default_embedded_model(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SynthesisConfig {
+    #[serde(default)]
+    pub mode: SynthesisMode,
+    #[serde(default)]
+    pub provider: SynthesisProvider,
+    #[serde(default = "default_synthesis_model")]
+    pub model: String,
+    pub base_url: Option<String>,
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: usize,
+    #[serde(default = "default_synthesis_temperature")]
+    pub temperature: f32,
+    #[serde(default = "default_refresh_every_ops")]
+    pub refresh_every_ops: usize,
+    #[serde(default)]
+    pub fallback: SynthesisFallback,
+}
+
+fn default_synthesis_model() -> String {
+    SynthesisProvider::Ollama.default_model().into()
+}
+
+fn default_max_tokens() -> usize {
+    4096
+}
+
+fn default_synthesis_temperature() -> f32 {
+    0.3
+}
+
+fn default_refresh_every_ops() -> usize {
+    10
+}
+
+impl Default for SynthesisConfig {
+    fn default() -> Self {
+        Self {
+            mode: SynthesisMode::Auto,
+            provider: SynthesisProvider::Ollama,
+            model: default_synthesis_model(),
+            base_url: None,
+            max_tokens: default_max_tokens(),
+            temperature: default_synthesis_temperature(),
+            refresh_every_ops: default_refresh_every_ops(),
+            fallback: SynthesisFallback::default(),
+        }
+    }
+}
+
+impl SynthesisConfig {
+    pub fn effective_base_url(&self) -> String {
+        self.base_url
+            .clone()
+            .filter(|u| !u.is_empty())
+            .unwrap_or_else(|| self.provider.default_base_url().to_string())
+    }
+
+    pub fn provider_needs_credentials(provider: SynthesisProvider) -> bool {
+        matches!(
+            provider,
+            SynthesisProvider::Openai | SynthesisProvider::Anthropic | SynthesisProvider::Openrouter
+        )
+    }
+
+    pub fn merge(base: Self, override_cfg: Option<&Self>) -> Self {
+        let Some(ov) = override_cfg else {
+            return base;
+        };
+        Self {
+            mode: ov.mode,
+            provider: ov.provider,
+            model: if ov.model.is_empty() {
+                base.model
+            } else {
+                ov.model.clone()
+            },
+            base_url: ov.base_url.clone().or(base.base_url),
+            max_tokens: if ov.max_tokens == 0 {
+                base.max_tokens
+            } else {
+                ov.max_tokens
+            },
+            temperature: ov.temperature,
+            refresh_every_ops: if ov.refresh_every_ops == 0 {
+                base.refresh_every_ops
+            } else {
+                ov.refresh_every_ops
+            },
+            fallback: ov.fallback.clone(),
+        }
+    }
+}
+
+// ── Credentials ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ProviderCredentials {
+    pub api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct CredentialsStore {
+    #[serde(default)]
+    pub openai: Option<ProviderCredentials>,
+    #[serde(default)]
+    pub anthropic: Option<ProviderCredentials>,
+    #[serde(default)]
+    pub openrouter: Option<ProviderCredentials>,
+    #[serde(default)]
+    pub custom: Option<ProviderCredentials>,
+}
+
+impl CredentialsStore {
+    pub fn load() -> Result<Self> {
+        let path = credentials_path();
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+        let contents = std::fs::read_to_string(&path)
+            .with_context(|| format!("Reading credentials: {}", path.display()))?;
+        let store: Self = toml::from_str(&contents)
+            .with_context(|| format!("Parsing credentials: {}", path.display()))?;
+        Ok(store)
+    }
+
+    pub fn save(&self) -> Result<()> {
+        let path = credentials_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let contents = toml::to_string_pretty(self)?;
+        crate::util::atomic_write(&path, &contents)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        }
+        Ok(())
+    }
+
+    pub fn api_key_for(&self, provider: SynthesisProvider) -> Option<String> {
+        self.stored_key(provider)
+            .or_else(|| self.env_key(provider))
+            .filter(|k| !k.is_empty())
+    }
+
+    fn stored_key(&self, provider: SynthesisProvider) -> Option<String> {
+        let section = match provider {
+            SynthesisProvider::Openai => &self.openai,
+            SynthesisProvider::Anthropic => &self.anthropic,
+            SynthesisProvider::Openrouter => &self.openrouter,
+            SynthesisProvider::Custom => &self.custom,
+            _ => return None,
+        };
+        section.as_ref().and_then(|s| s.api_key.clone())
+    }
+
+    fn env_key(&self, provider: SynthesisProvider) -> Option<String> {
+        let var = match provider {
+            SynthesisProvider::Openai => "OPENAI_API_KEY",
+            SynthesisProvider::Anthropic => "ANTHROPIC_API_KEY",
+            SynthesisProvider::Openrouter => "OPENROUTER_API_KEY",
+            SynthesisProvider::Custom => "AGENT_TRACE_API_KEY",
+            _ => return None,
+        };
+        std::env::var(var).ok()
+    }
+
+    pub fn set_key(&mut self, provider: SynthesisProvider, key: String) {
+        let entry = ProviderCredentials {
+            api_key: Some(key),
+        };
+        match provider {
+            SynthesisProvider::Openai => self.openai = Some(entry),
+            SynthesisProvider::Anthropic => self.anthropic = Some(entry),
+            SynthesisProvider::Openrouter => self.openrouter = Some(entry),
+            SynthesisProvider::Custom => self.custom = Some(entry),
+            _ => {}
+        }
+    }
+
+    pub fn clear_key(&mut self, provider: SynthesisProvider) {
+        match provider {
+            SynthesisProvider::Openai => self.openai = None,
+            SynthesisProvider::Anthropic => self.anthropic = None,
+            SynthesisProvider::Openrouter => self.openrouter = None,
+            SynthesisProvider::Custom => self.custom = None,
+            _ => {}
+        }
+    }
+
+    pub fn redacted_key(&self, provider: SynthesisProvider) -> Option<String> {
+        self.api_key_for(provider).map(|k| {
+            if k.len() <= 8 {
+                "***".into()
+            } else {
+                format!("{}...{}", &k[..4], &k[k.len() - 4..])
+            }
+        })
+    }
+}
+
+pub fn credentials_path() -> PathBuf {
+    dirs_next::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("agent-trace")
+        .join("credentials.toml")
+}
+
+pub fn models_dir() -> PathBuf {
+    dirs_next::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("agent-trace")
+        .join("models")
+}
+
+/// Path to an embedded Qwen2.5 GGUF by size key.
+pub fn embedded_model_path(size_key: &str) -> PathBuf {
+    let filename = match size_key {
+        "0.5b" => "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+        "1.5b" => "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+        "3b" => "qwen2.5-3b-instruct-q4_k_m.gguf",
+        other => return models_dir().join(format!("qwen2.5-{other}-instruct.gguf")),
+    };
+    models_dir().join(filename)
+}
+
+/// HuggingFace source for embedded Qwen2.5 GGUF downloads.
+pub fn embedded_model_source(size_key: &str) -> Option<(&'static str, &'static str)> {
+    match size_key {
+        "0.5b" => Some((
+            "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+            "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
+        )),
+        "1.5b" => Some((
+            "bartowski/Qwen2.5-1.5B-Instruct-GGUF",
+            "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
+        )),
+        "3b" => Some((
+            "bartowski/Qwen2.5-3B-Instruct-GGUF",
+            "Qwen2.5-3B-Instruct-Q4_K_M.gguf",
+        )),
+        _ => None,
+    }
+}
+
 // ── LLM Config ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -73,6 +398,8 @@ impl Default for DefaultsConfig {
 pub struct GlobalConfig {
     #[serde(default)]
     pub llm: LlmConfig,
+    #[serde(default)]
+    pub synthesis: SynthesisConfig,
     #[serde(default)]
     pub ui: UiConfig,
     #[serde(default)]
@@ -153,6 +480,8 @@ pub struct StoreConfig {
     pub store: StoreInfo,
     pub llm: Option<LlmConfig>,
     #[serde(default)]
+    pub synthesis: Option<SynthesisConfig>,
+    #[serde(default)]
     pub polling: PollingConfig,
 }
 
@@ -186,6 +515,7 @@ pub struct MergedConfig {
     #[allow(dead_code)]
     pub store: StoreInfo,
     pub llm: LlmConfig,
+    pub synthesis: SynthesisConfig,
     #[allow(dead_code)]
     pub ui: UiConfig,
     #[allow(dead_code)]
@@ -197,6 +527,7 @@ impl MergedConfig {
     pub fn merge(global: GlobalConfig, store: StoreConfig) -> Self {
         Self {
             llm: store.llm.unwrap_or(global.llm),
+            synthesis: SynthesisConfig::merge(global.synthesis, store.synthesis.as_ref()),
             ui: global.ui,
             defaults: global.defaults,
             polling: store.polling,
@@ -226,8 +557,43 @@ mod tests {
     fn test_global_config_defaults() {
         let cfg = GlobalConfig::default();
         assert_eq!(cfg.llm, LlmConfig::default());
+        assert_eq!(cfg.synthesis.model, "qwen2.5:1.5b");
         assert_eq!(cfg.ui, UiConfig::default());
         assert_eq!(cfg.defaults, DefaultsConfig::default());
+    }
+
+    #[test]
+    fn test_credentials_roundtrip() {
+        let tmp = TempDir::new().unwrap();
+        let cred_path = tmp.path().join("credentials.toml");
+        // Override path via writing directly for unit test
+        let mut store = CredentialsStore::default();
+        store.set_key(SynthesisProvider::Openai, "sk-test-key".into());
+        let contents = toml::to_string_pretty(&store).unwrap();
+        std::fs::write(&cred_path, &contents).unwrap();
+        let loaded: CredentialsStore = toml::from_str(&std::fs::read_to_string(&cred_path).unwrap()).unwrap();
+        assert_eq!(
+            loaded.api_key_for(SynthesisProvider::Openai),
+            Some("sk-test-key".into())
+        );
+    }
+
+    #[test]
+    fn test_synthesis_merge_store_override() {
+        let global = GlobalConfig::default();
+        let store = StoreConfig {
+            store: StoreInfo::new("s".into()),
+            llm: None,
+            synthesis: Some(SynthesisConfig {
+                model: "gpt-4o".into(),
+                provider: SynthesisProvider::Openai,
+                ..Default::default()
+            }),
+            polling: PollingConfig::default(),
+        };
+        let merged = MergedConfig::merge(global, store);
+        assert_eq!(merged.synthesis.model, "gpt-4o");
+        assert_eq!(merged.synthesis.provider, SynthesisProvider::Openai);
     }
 
     #[test]
@@ -244,6 +610,7 @@ mod tests {
                 max_tokens: 2048,
                 temperature: 0.5,
             }),
+            synthesis: None,
             polling: PollingConfig::default(),
         };
         cfg.save(store_root).unwrap();
@@ -271,6 +638,7 @@ mod tests {
         let store = StoreConfig {
             store: StoreInfo::new("s".into()),
             llm: Some(store_llm.clone()),
+            synthesis: None,
             polling: PollingConfig::default(),
         };
         let merged = MergedConfig::merge(global, store);
