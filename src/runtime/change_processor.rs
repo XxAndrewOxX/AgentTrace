@@ -91,8 +91,15 @@ impl ChangeProcessor {
 
         let new_commits = self.git.commits_since(self.last_seen_oid)?;
         if !new_commits.is_empty() {
-            if let Err(e) = self.reload_manifest_from_disk() {
-                tracing::warn!("Failed to reload manifest after external commit: {}", e);
+            // Violation-only commits do not touch manifest.toml; reloading would
+            // clobber in-memory registrations with a stale on-disk manifest.
+            let has_non_violation = new_commits
+                .iter()
+                .any(|e| !matches!(e.action, Action::Violation));
+            if has_non_violation {
+                if let Err(e) = self.reload_manifest_from_disk() {
+                    tracing::warn!("Failed to reload manifest after external commit: {}", e);
+                }
             }
             if let Some(tx) = &self.ui_tx {
                 for entry in new_commits {

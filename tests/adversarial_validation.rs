@@ -62,6 +62,7 @@ fn commit_tracked(
     {
         let mut m = manifest.lock().unwrap();
         let _ = m.register(&rel, doc_type.clone(), "");
+        m.save(root).unwrap();
     }
     let info = CommitInfo {
         action: Action::Create,
