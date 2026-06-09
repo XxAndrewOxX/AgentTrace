@@ -3,7 +3,6 @@ use crate::config::{
     MergedConfig, SynthesisConfig, SynthesisMode, SynthesisProvider,
 };
 use crate::llm::providers::{is_model_pulled, is_reachable, pull_model, resolve};
-use crate::llm::synthesis_engine::SynthesisEngine;
 #[cfg(feature = "llm")]
 use crate::llm::providers::EmbeddedBackend;
 use crate::observability::CliOutput;
