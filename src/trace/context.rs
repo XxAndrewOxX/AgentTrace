@@ -107,7 +107,17 @@ pub fn synthesize_no_llm(store_root: &Path, manifest: &Manifest) -> Result<Strin
     if !scratches.is_empty() {
         out.push_str("## Scratch / Working Documents\n\n");
         for s in &scratches {
-            out.push_str(&format!("- {}\n", s.path.display()));
+            let body = std::fs::read_to_string(store_root.join(&s.path)).unwrap_or_default();
+            let snippet: String = body.chars().take(500).collect();
+            if snippet.trim().is_empty() {
+                out.push_str(&format!("- {}\n", s.path.display()));
+            } else {
+                out.push_str(&format!(
+                    "- [scratch] {}: {}\n",
+                    s.path.display(),
+                    snippet.trim().replace('\n', " ")
+                ));
+            }
         }
         out.push('\n');
     }
@@ -181,6 +191,21 @@ mod tests {
         let pending = load_pending_updates(&root).unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].update, "We chose PostgreSQL");
+    }
+
+    #[test]
+    fn test_no_llm_synthesis_includes_scratch_snippets() {
+        let tmp = TempDir::new().unwrap();
+        let (root, mut manifest) = setup(&tmp);
+        let body = "Working notes: implement idempotency for reconnect flow. ".repeat(10);
+        std::fs::write(root.join("notes.md"), &body).unwrap();
+        manifest
+            .register(&std::path::PathBuf::from("notes.md"), DocType::Scratch, "")
+            .unwrap();
+        let ctx = synthesize_no_llm(&root, &manifest).unwrap();
+        assert!(ctx.contains("## Scratch / Working Documents"));
+        assert!(ctx.contains("[scratch] notes.md:"));
+        assert!(ctx.contains("implement idempotency"));
     }
 
     #[test]

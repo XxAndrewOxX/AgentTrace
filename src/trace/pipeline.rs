@@ -218,7 +218,12 @@ pub fn apply_trace_hooks(
 
     let refresh_context = changed_files
         .iter()
-        .any(|(_, _, doc_type)| matches!(doc_type, DocType::Plan | DocType::Reference));
+        .any(|(_, _, doc_type)| {
+            matches!(
+                doc_type,
+                DocType::Plan | DocType::Reference | DocType::Scratch
+            )
+        });
     if refresh_context {
         sync_context_md(store_root, git, manifest, trace_insights.as_ref())?;
     }
@@ -326,4 +331,46 @@ fn build_trace_documents(
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::StoreInfo;
+    use crate::git_store::GitStore;
+    use crate::manifest::Manifest;
+    use tempfile::TempDir;
+
+    fn setup(tmp: &TempDir) -> (PathBuf, Manifest, GitStore) {
+        let root = tmp.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
+        let git = GitStore::init(&root).unwrap();
+        let info = StoreInfo::new("test".into());
+        let manifest = Manifest::create_empty(info, &root).unwrap();
+        (root, manifest, git)
+    }
+
+    #[test]
+    fn scratch_write_triggers_context_refresh() {
+        let tmp = TempDir::new().unwrap();
+        let (root, mut manifest, git) = setup(&tmp);
+        let scratch_path = PathBuf::from("notes.md");
+        std::fs::write(
+            root.join(&scratch_path),
+            "scratch body: reconnect watermark test",
+        )
+        .unwrap();
+        manifest
+            .register(&scratch_path, DocType::Scratch, "")
+            .unwrap();
+        manifest.save(&root).unwrap();
+
+        let changed = vec![(scratch_path, Action::Modify, DocType::Scratch)];
+        apply_trace_hooks(&root, &git, &manifest, &Actor::User, None, &changed, "cli_write")
+            .unwrap();
+
+        let ctx = std::fs::read_to_string(root.join("context.md")).expect("context.md created");
+        assert!(ctx.contains("reconnect watermark test"));
+        assert!(ctx.contains("[scratch] notes.md:"));
+    }
 }
