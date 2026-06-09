@@ -28,6 +28,7 @@ fn setup_processor(
     let store_cfg = StoreConfig {
         store: info,
         llm: None,
+        synthesis: None,
         polling: PollingConfig::default(),
     };
     let config = MergedConfig::merge(global, store_cfg);
@@ -69,6 +70,7 @@ fn ai1_agent_lock_file_attribution() {
     let store_cfg = StoreConfig {
         store: info,
         llm: None,
+        synthesis: None,
         polling: PollingConfig::default(),
     };
     let config = MergedConfig::merge(global, store_cfg);

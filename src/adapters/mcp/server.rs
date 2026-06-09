@@ -435,6 +435,7 @@ mod tests {
         let store_cfg = StoreConfig {
             store: info,
             llm: None,
+            synthesis: None,
             polling: PollingConfig::default(),
         };
         let config = MergedConfig::merge(global, store_cfg);

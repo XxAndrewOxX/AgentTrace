@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
-use std::time::Duration;
 
 static REFRESH_IN_FLIGHT: LazyLock<Mutex<HashMap<PathBuf, bool>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -22,6 +21,8 @@ const RECENT_ACTIVITY_LIMIT: usize = 15;
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct SummaryState {
     pub events_count_at_refresh: usize,
+    #[serde(default)]
+    pub ops_since_refresh: usize,
 }
 
 pub fn summary_state_path(store_root: &Path) -> PathBuf {
@@ -71,6 +72,7 @@ pub fn append_event(store_root: &Path, event: SummaryEvent) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    increment_ops(store_root)?;
     let mut events = load_all_events(store_root)?;
     events.push(event);
     if events.len() > MAX_EVENTS_RETAINED {
@@ -111,7 +113,23 @@ pub fn event_count(store_root: &Path) -> Result<usize> {
 fn save_events_watermark(store_root: &Path) -> Result<()> {
     let mut state = load_summary_state(store_root)?;
     state.events_count_at_refresh = event_count(store_root)?;
+    state.ops_since_refresh = 0;
     save_summary_state(store_root, &state)
+}
+
+pub fn increment_ops(store_root: &Path) -> Result<usize> {
+    let mut state = load_summary_state(store_root)?;
+    state.ops_since_refresh += 1;
+    let n = state.ops_since_refresh;
+    save_summary_state(store_root, &state)?;
+    Ok(n)
+}
+
+fn refresh_threshold(store_root: &Path) -> usize {
+    crate::config::MergedConfig::load(store_root)
+        .map(|c| c.synthesis.refresh_every_ops)
+        .unwrap_or(10)
+        .max(1)
 }
 
 pub fn load_recent_events(store_root: &Path, limit: usize) -> Result<Vec<SummaryEvent>> {
@@ -284,11 +302,11 @@ pub fn refresh(store_root: &Path, git: &GitStore, manifest: &Manifest) -> Result
     let plan_snippet = read_plan_snippet(store_root, manifest);
     let events_str = format_events_for_prompt(&events);
 
-    let content = if let Ok(Some(api)) = TraceInsightsFacade::from_store_root(store_root) {
+    let content = if let Ok(api) = TraceInsightsFacade::from_store_root(store_root) {
         match api.update_running_summary(&previous, &events_str, &plan_snippet) {
             Ok(s) => s,
             Err(e) => {
-                tracing::warn!("LLM running summary failed: {e}");
+                tracing::warn!("synthesis running summary failed: {e}");
                 synthesize_template_summary(store_root, manifest, &events)?
             }
         }
@@ -308,6 +326,14 @@ pub fn refresh_from_path(store_root: &Path) -> Result<()> {
 }
 
 pub fn schedule_refresh(store_root: PathBuf) {
+    let threshold = refresh_threshold(&store_root);
+    let ops = load_summary_state(&store_root)
+        .map(|s| s.ops_since_refresh)
+        .unwrap_or(0);
+    if ops < threshold {
+        return;
+    }
+
     let should_spawn = {
         let mut in_flight = REFRESH_IN_FLIGHT.lock().expect("refresh lock poisoned");
         if *in_flight.get(&store_root).unwrap_or(&false) {
@@ -322,8 +348,6 @@ pub fn schedule_refresh(store_root: PathBuf) {
     }
 
     std::thread::spawn(move || {
-        // Brief pause to batch rapid writes; git store lock prevents index races.
-        std::thread::sleep(Duration::from_millis(50));
         let events_before = event_count(&store_root).unwrap_or(0);
         if let Err(e) = refresh_from_path(&store_root) {
             tracing::warn!("running summary background refresh failed: {e}");
@@ -333,7 +357,10 @@ pub fn schedule_refresh(store_root: PathBuf) {
             .lock()
             .expect("refresh lock poisoned")
             .insert(store_root.clone(), false);
-        if events_after > events_before {
+        let pending_ops = load_summary_state(&store_root)
+            .map(|s| s.ops_since_refresh)
+            .unwrap_or(0);
+        if events_after > events_before || pending_ops >= refresh_threshold(&store_root) {
             schedule_refresh(store_root);
         }
     });
@@ -499,6 +526,7 @@ pub fn resume_here_lines(store_root: &Path) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::config::StoreInfo;
+    use std::time::Duration;
     use tempfile::TempDir;
 
     fn setup(tmp: &TempDir) -> (PathBuf, Manifest, GitStore) {
@@ -679,21 +707,33 @@ mod tests {
     fn schedule_refresh_reschedules_when_events_arrive_during_refresh() {
         let tmp = TempDir::new().unwrap();
         let (root, manifest, git) = setup(&tmp);
+        let store_cfg = crate::config::StoreConfig {
+            store: manifest.store.clone(),
+            llm: None,
+            synthesis: Some(crate::config::SynthesisConfig {
+                refresh_every_ops: 1,
+                ..Default::default()
+            }),
+            polling: crate::config::PollingConfig::default(),
+        };
+        store_cfg.save(&root).unwrap();
         std::fs::write(root.join("plan.md"), "# Plan\n- [ ] Next\n").unwrap();
         let mut m = manifest;
         m.register(&PathBuf::from("plan.md"), DocType::Plan, "")
             .unwrap();
         append_event(&root, sample_event("plan.md", "seed event")).unwrap();
         refresh_template(&root, &git, &m).unwrap();
+        append_event(&root, sample_event("plan.md", "pre-refresh event")).unwrap();
 
         schedule_refresh(root.clone());
         append_event(&root, sample_event("notes.md", "late event")).unwrap();
 
+        let expected_events = event_count(&root).unwrap();
         for _ in 0..40 {
             if load_summary_state(&root)
                 .unwrap()
                 .events_count_at_refresh
-                >= 2
+                >= expected_events
             {
                 break;
             }
@@ -702,7 +742,7 @@ mod tests {
 
         assert_eq!(
             load_summary_state(&root).unwrap().events_count_at_refresh,
-            2
+            expected_events
         );
         let summary = std::fs::read_to_string(root.join(RUNNING_SUMMARY_FILE)).unwrap();
         assert!(summary.contains("late event"));

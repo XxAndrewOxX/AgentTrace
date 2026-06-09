@@ -28,14 +28,17 @@ pub fn run_model_eval(model_path: &Path) -> ModelEvalReport {
     };
 
     let api = match TraceInsightsFacade::from_llm_config(&cfg) {
-        Ok(Some(api)) => api,
-        Ok(None) => {
+        Ok(api) if !api.is_degraded() => api,
+        Ok(_) => {
             return ModelEvalReport {
                 model_path: model_path.display().to_string(),
                 cases: vec![EvalCaseResult {
                     fixture_id: "init".into(),
                     success: false,
-                    error: Some("llm.model_path missing".into()),
+                    error: Some(
+                        "embedded model unavailable — rebuild with --features llm and valid GGUF"
+                            .into(),
+                    ),
                     summary_latency_ms: 0,
                     context_latency_ms: 0,
                     recap_latency_ms: 0,

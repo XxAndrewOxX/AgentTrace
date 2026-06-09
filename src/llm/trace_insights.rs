@@ -1,9 +1,9 @@
 #[cfg(test)]
 use super::backend::NoTraceBackend;
 use super::backend::TraceInsightsBackend;
-#[cfg(feature = "llm")]
-use super::candle_backend::CandleTraceBackend;
-use crate::config::MergedConfig;
+use super::providers::resolve;
+use super::synthesis_engine::SynthesisEngine;
+use crate::config::{CredentialsStore, MergedConfig};
 use crate::types::DocType;
 use std::path::Path;
 use thiserror::Error;
@@ -57,79 +57,89 @@ pub enum TraceInsightsError {
     BackendFailure(String),
 }
 
+struct EngineAdapter {
+    inner: Box<dyn SynthesisEngine>,
+}
+
+impl TraceInsightsBackend for EngineAdapter {
+    fn summarize_change(&self, path: &str, doc_type: &str, diff: &str) -> Result<String, String> {
+        self.inner.summarize_change(path, doc_type, diff)
+    }
+
+    fn synthesize_context(
+        &self,
+        documents: &[TraceDocument],
+        updates: &[String],
+    ) -> Result<String, String> {
+        self.inner.synthesize_context(documents, updates)
+    }
+
+    fn summarize_session(&self, session_id: &str, events: &[String]) -> Result<String, String> {
+        self.inner.summarize_session(session_id, events)
+    }
+
+    fn update_running_summary(
+        &self,
+        previous_summary: &str,
+        new_events: &str,
+        plan_snippet: &str,
+    ) -> Result<String, String> {
+        self.inner
+            .update_running_summary(previous_summary, new_events, plan_snippet)
+    }
+}
+
 pub struct TraceInsightsFacade {
     backend: Box<dyn TraceInsightsBackend>,
+    pub backend_label: String,
 }
 
 impl TraceInsightsFacade {
-    pub fn from_llm_config(
-        cfg: &crate::config::LlmConfig,
-    ) -> Result<Option<Self>, TraceInsightsError> {
-        if cfg.model_path.is_none() {
-            return Ok(None);
-        }
-        #[cfg(feature = "llm")]
-        {
-            let merged = MergedConfig {
-                store: crate::config::StoreInfo::new("".into()),
-                llm: cfg.clone(),
-                ui: crate::config::UiConfig::default(),
-                defaults: crate::config::DefaultsConfig::default(),
-                polling: crate::config::PollingConfig::default(),
-            };
-            match CandleTraceBackend::from_merged_config(&merged) {
-                Ok(Some(backend)) => {
-                    return Ok(Some(Self {
-                        backend: Box::new(backend),
-                    }))
-                }
-                Ok(None) => return Ok(None),
-                Err(e) => {
-                    tracing::warn!("Candle backend unavailable: {e}");
-                    return Ok(None);
-                }
-            }
-        }
-        #[cfg(not(feature = "llm"))]
-        {
-            let _ = cfg;
-            Ok(None)
+    pub fn from_merged_config(merged: &MergedConfig) -> Self {
+        let creds = CredentialsStore::load().unwrap_or_default();
+        let resolved = resolve(merged, &creds);
+        let info = resolved.info();
+        let label = info.label.clone();
+        Self {
+            backend: Box::new(EngineAdapter {
+                inner: resolved.into_engine(),
+            }),
+            backend_label: label,
         }
     }
 
-    pub fn from_store_root(store_root: &Path) -> Result<Option<Self>, TraceInsightsError> {
-        let merged = match MergedConfig::load(store_root) {
-            Ok(cfg) => cfg,
-            Err(_) => return Ok(None),
+    pub fn from_store_root(store_root: &Path) -> Result<Self, TraceInsightsError> {
+        let merged = MergedConfig::load(store_root).map_err(|e| {
+            TraceInsightsError::ModelUnavailable(format!("config load failed: {e}"))
+        })?;
+        Ok(Self::from_merged_config(&merged))
+    }
+
+    pub fn from_llm_config(cfg: &crate::config::LlmConfig) -> Result<Self, TraceInsightsError> {
+        let mut synthesis = crate::config::SynthesisConfig::default();
+        synthesis.mode = crate::config::SynthesisMode::Embedded;
+        synthesis.provider = crate::config::SynthesisProvider::Embedded;
+        let merged = MergedConfig {
+            store: crate::config::StoreInfo::new("eval".into()),
+            llm: cfg.clone(),
+            synthesis,
+            ui: crate::config::UiConfig::default(),
+            defaults: crate::config::DefaultsConfig::default(),
+            polling: crate::config::PollingConfig::default(),
         };
-        if merged.llm.model_path.is_none() {
-            return Ok(None);
-        }
-        #[cfg(feature = "llm")]
-        {
-            match CandleTraceBackend::from_merged_config(&merged) {
-                Ok(Some(backend)) => Ok(Some(Self {
-                    backend: Box::new(backend),
-                })),
-                Ok(None) => Ok(None),
-                Err(e) => {
-                    tracing::warn!("Candle backend unavailable: {e}");
-                    Ok(None)
-                }
-            }
-        }
-        #[cfg(not(feature = "llm"))]
-        {
-            let _ = merged;
-            Ok(None)
-        }
+        Ok(Self::from_merged_config(&merged))
     }
 
     #[cfg(test)]
     pub fn with_no_backend() -> Self {
         Self {
             backend: Box::new(NoTraceBackend),
+            backend_label: "none".into(),
         }
+    }
+
+    pub fn is_degraded(&self) -> bool {
+        self.backend_label == "degraded"
     }
 
     pub fn execute(

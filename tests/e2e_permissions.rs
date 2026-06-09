@@ -34,6 +34,7 @@ fn setup_with_agent(tmp: &TempDir, agent_name: &str) -> (Arc<Mutex<Manifest>>, C
     let store_cfg = StoreConfig {
         store: info,
         llm: None,
+        synthesis: None,
         polling: PollingConfig::default(),
     };
     let config = MergedConfig::merge(global, store_cfg);

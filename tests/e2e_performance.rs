@@ -63,6 +63,7 @@ fn ps1_poll_performance_500_docs() {
     let store_cfg = StoreConfig {
         store: info,
         llm: None,
+        synthesis: None,
         polling: PollingConfig::default(),
     };
     let config = MergedConfig::merge(global, store_cfg);
@@ -199,6 +200,7 @@ fn ps5_memory_usage_within_bounds() {
     let store_cfg = StoreConfig {
         store: info,
         llm: None,
+        synthesis: None,
         polling: PollingConfig::default(),
     };
     let config = MergedConfig::merge(global, store_cfg);

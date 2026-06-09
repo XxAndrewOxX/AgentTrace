@@ -38,6 +38,7 @@ fn make_processor(
     let store_cfg = StoreConfig {
         store: info,
         llm: None,
+        synthesis: None,
         polling: PollingConfig::default(),
     };
     let config = MergedConfig::merge(GlobalConfig::default(), store_cfg);

@@ -66,10 +66,7 @@ pub fn run(store_root: &Path, cmd: ContextCmd, output: &dyn CliOutput) -> Result
         }
         ContextCmd::Refresh => {
             let store = Store::open(store_root)?;
-            let content = if let Some(api) = TraceInsightsFacade::from_store_root(store_root)
-                .ok()
-                .flatten()
-            {
+            let content = if let Some(api) = TraceInsightsFacade::from_store_root(store_root).ok() {
                 let docs = store
                     .manifest
                     .documents()

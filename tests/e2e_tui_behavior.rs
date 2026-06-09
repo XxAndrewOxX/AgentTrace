@@ -109,6 +109,7 @@ fn tb5_proxy_new_file_detected_and_committed() {
     let store_cfg = StoreConfig {
         store: info,
         llm: None,
+        synthesis: None,
         polling: PollingConfig::default(),
     };
     let config = MergedConfig::merge(global, store_cfg);
