@@ -20,9 +20,45 @@ const RECENT_ACTIVITY_LIMIT: usize = 15;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct SummaryState {
-    pub events_count_at_refresh: usize,
     #[serde(default)]
-    pub ops_since_refresh: usize,
+    pub events_count_at_template_refresh: usize,
+    #[serde(default)]
+    pub events_count_at_synthesis_refresh: usize,
+    #[serde(default)]
+    pub ops_since_synthesis: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct SummaryStateRaw {
+    #[serde(default)]
+    events_count_at_template_refresh: usize,
+    #[serde(default)]
+    events_count_at_synthesis_refresh: usize,
+    #[serde(default)]
+    ops_since_synthesis: usize,
+    #[serde(default)]
+    events_count_at_refresh: usize,
+    #[serde(default)]
+    ops_since_refresh: usize,
+}
+
+fn migrate_summary_state(raw: SummaryStateRaw) -> SummaryState {
+    let mut state = SummaryState {
+        events_count_at_template_refresh: raw.events_count_at_template_refresh,
+        events_count_at_synthesis_refresh: raw.events_count_at_synthesis_refresh,
+        ops_since_synthesis: raw.ops_since_synthesis,
+    };
+    if state.events_count_at_template_refresh == 0
+        && state.events_count_at_synthesis_refresh == 0
+        && raw.events_count_at_refresh > 0
+    {
+        state.events_count_at_template_refresh = raw.events_count_at_refresh;
+        state.events_count_at_synthesis_refresh = raw.events_count_at_refresh;
+    }
+    if state.ops_since_synthesis == 0 && raw.ops_since_refresh > 0 {
+        state.ops_since_synthesis = raw.ops_since_refresh;
+    }
+    state
 }
 
 pub fn summary_state_path(store_root: &Path) -> PathBuf {
@@ -35,7 +71,8 @@ pub fn load_summary_state(store_root: &Path) -> Result<SummaryState> {
         return Ok(SummaryState::default());
     }
     let content = std::fs::read_to_string(&path)?;
-    Ok(toml::from_str(&content).unwrap_or_default())
+    let raw: SummaryStateRaw = toml::from_str(&content).unwrap_or_default();
+    Ok(migrate_summary_state(raw))
 }
 
 pub fn save_summary_state(store_root: &Path, state: &SummaryState) -> Result<()> {
@@ -72,7 +109,7 @@ pub fn append_event(store_root: &Path, event: SummaryEvent) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    increment_ops(store_root)?;
+    increment_synthesis_ops(store_root)?;
     let mut events = load_all_events(store_root)?;
     events.push(event);
     if events.len() > MAX_EVENTS_RETAINED {
@@ -110,17 +147,23 @@ pub fn event_count(store_root: &Path) -> Result<usize> {
     Ok(load_all_events(store_root)?.len())
 }
 
-fn save_events_watermark(store_root: &Path, events_synthesized: usize) -> Result<()> {
+fn save_template_watermark(store_root: &Path, event_count: usize) -> Result<()> {
     let mut state = load_summary_state(store_root)?;
-    state.events_count_at_refresh = events_synthesized;
-    state.ops_since_refresh = 0;
+    state.events_count_at_template_refresh = event_count;
     save_summary_state(store_root, &state)
 }
 
-pub fn increment_ops(store_root: &Path) -> Result<usize> {
+fn save_synthesis_watermark(store_root: &Path, event_count: usize) -> Result<()> {
     let mut state = load_summary_state(store_root)?;
-    state.ops_since_refresh += 1;
-    let n = state.ops_since_refresh;
+    state.events_count_at_synthesis_refresh = event_count;
+    state.ops_since_synthesis = 0;
+    save_summary_state(store_root, &state)
+}
+
+pub fn increment_synthesis_ops(store_root: &Path) -> Result<usize> {
+    let mut state = load_summary_state(store_root)?;
+    state.ops_since_synthesis += 1;
+    let n = state.ops_since_synthesis;
     save_summary_state(store_root, &state)?;
     Ok(n)
 }
@@ -292,7 +335,7 @@ pub fn refresh_template(store_root: &Path, git: &GitStore, manifest: &Manifest) 
     let content = synthesize_template_summary(store_root, manifest, &events)?;
     let mut manifest_mut = Manifest::load(store_root)?;
     write_running_summary(store_root, &content, git, &mut manifest_mut)?;
-    save_events_watermark(store_root, events.len())
+    save_template_watermark(store_root, event_count(store_root)?)
 }
 
 pub fn refresh(store_root: &Path, git: &GitStore, manifest: &Manifest) -> Result<()> {
@@ -316,7 +359,7 @@ pub fn refresh(store_root: &Path, git: &GitStore, manifest: &Manifest) -> Result
 
     let mut manifest_mut = Manifest::load(store_root)?;
     write_running_summary(store_root, &content, git, &mut manifest_mut)?;
-    save_events_watermark(store_root, events.len())
+    save_synthesis_watermark(store_root, event_count(store_root)?)
 }
 
 pub fn refresh_from_path(store_root: &Path) -> Result<()> {
@@ -337,7 +380,7 @@ pub fn wait_refresh_idle(store_root: &Path) {
         if !busy {
             let current = event_count(store_root).unwrap_or(0);
             let watermark = load_summary_state(store_root)
-                .map(|s| s.events_count_at_refresh)
+                .map(|s| s.events_count_at_synthesis_refresh)
                 .unwrap_or(0);
             if current <= watermark {
                 return;
@@ -347,15 +390,15 @@ pub fn wait_refresh_idle(store_root: &Path) {
     }
 }
 
-pub fn schedule_refresh(store_root: PathBuf) {
-    schedule_refresh_inner(store_root, false);
+pub fn schedule_synthesis_refresh(store_root: PathBuf) {
+    schedule_synthesis_refresh_inner(store_root, false);
 }
 
-fn schedule_refresh_inner(store_root: PathBuf, force: bool) {
+fn schedule_synthesis_refresh_inner(store_root: PathBuf, force: bool) {
     let threshold = refresh_threshold(&store_root);
     if !force {
         let ops = load_summary_state(&store_root)
-            .map(|s| s.ops_since_refresh)
+            .map(|s| s.ops_since_synthesis)
             .unwrap_or(0);
         if ops < threshold {
             return;
@@ -382,19 +425,19 @@ fn schedule_refresh_inner(store_root: PathBuf, force: bool) {
         }
         let events_after = event_count(&store_root).unwrap_or(events_before);
         let watermark = load_summary_state(&store_root)
-            .map(|s| s.events_count_at_refresh)
+            .map(|s| s.events_count_at_synthesis_refresh)
             .unwrap_or(0);
         REFRESH_IN_FLIGHT
             .lock()
             .expect("refresh lock poisoned")
             .insert(store_root.clone(), false);
         let pending_ops = load_summary_state(&store_root)
-            .map(|s| s.ops_since_refresh)
+            .map(|s| s.ops_since_synthesis)
             .unwrap_or(0);
         if events_after > watermark {
-            schedule_refresh_inner(store_root.clone(), true);
+            schedule_synthesis_refresh_inner(store_root.clone(), true);
         } else if pending_ops >= threshold {
-            schedule_refresh_inner(store_root, false);
+            schedule_synthesis_refresh_inner(store_root, false);
         }
     });
 }
@@ -405,9 +448,15 @@ pub fn refresh_if_stale(store_root: &Path) -> Result<()> {
     if current_count == 0 {
         return Ok(());
     }
-    let watermark = load_summary_state(store_root)?.events_count_at_refresh;
-    if !summary_path.exists() || current_count > watermark {
-        refresh_from_path(store_root)?;
+    let state = load_summary_state(store_root)?;
+    if !summary_path.exists() || current_count > state.events_count_at_template_refresh {
+        let git = GitStore::open(store_root)?;
+        let manifest = Manifest::load(store_root)?;
+        refresh_template(store_root, &git, &manifest)?;
+    }
+    let state = load_summary_state(store_root)?;
+    if state.ops_since_synthesis > 0 || current_count > state.events_count_at_synthesis_refresh {
+        schedule_synthesis_refresh(store_root.to_path_buf());
     }
     Ok(())
 }
@@ -716,7 +765,9 @@ mod tests {
         append_event(&root, sample_event("plan.md", "first event")).unwrap();
         refresh_template(&root, &git, &m).unwrap();
         assert_eq!(
-            load_summary_state(&root).unwrap().events_count_at_refresh,
+            load_summary_state(&root)
+                .unwrap()
+                .events_count_at_template_refresh,
             1
         );
 
@@ -724,7 +775,9 @@ mod tests {
         refresh_if_stale(&root).unwrap();
 
         assert_eq!(
-            load_summary_state(&root).unwrap().events_count_at_refresh,
+            load_summary_state(&root)
+                .unwrap()
+                .events_count_at_template_refresh,
             2
         );
         let summary = std::fs::read_to_string(root.join(RUNNING_SUMMARY_FILE)).unwrap();
@@ -750,7 +803,56 @@ mod tests {
     }
 
     #[test]
-    fn schedule_refresh_reschedules_when_events_arrive_during_refresh() {
+    fn template_refresh_every_write_does_not_reset_synthesis_ops() {
+        let tmp = TempDir::new().unwrap();
+        let (root, manifest, git) = setup(&tmp);
+        std::fs::write(root.join("plan.md"), "# Plan\n- [ ] Next\n").unwrap();
+        let mut m = manifest;
+        m.register(&PathBuf::from("plan.md"), DocType::Plan, "")
+            .unwrap();
+
+        for i in 0..3 {
+            append_event(&root, sample_event("plan.md", &format!("event {i}"))).unwrap();
+            refresh_template(&root, &git, &m).unwrap();
+        }
+
+        assert_eq!(
+            load_summary_state(&root).unwrap().ops_since_synthesis,
+            3
+        );
+        assert_eq!(
+            load_summary_state(&root)
+                .unwrap()
+                .events_count_at_template_refresh,
+            3
+        );
+    }
+
+    #[test]
+    fn synthesis_refresh_resets_ops_at_threshold() {
+        let tmp = TempDir::new().unwrap();
+        let (root, manifest, git) = setup(&tmp);
+        std::fs::write(root.join("plan.md"), "# Plan\n- [ ] Next\n").unwrap();
+        let mut m = manifest;
+        m.register(&PathBuf::from("plan.md"), DocType::Plan, "")
+            .unwrap();
+
+        for i in 0..10 {
+            append_event(&root, sample_event("plan.md", &format!("event {i}"))).unwrap();
+        }
+        assert_eq!(
+            load_summary_state(&root).unwrap().ops_since_synthesis,
+            10
+        );
+
+        refresh(&root, &git, &m).unwrap();
+        let state = load_summary_state(&root).unwrap();
+        assert_eq!(state.ops_since_synthesis, 0);
+        assert_eq!(state.events_count_at_synthesis_refresh, 10);
+    }
+
+    #[test]
+    fn schedule_synthesis_refresh_reschedules_when_events_arrive_during_refresh() {
         let tmp = TempDir::new().unwrap();
         let (root, manifest, git) = setup(&tmp);
         let store_cfg = crate::config::StoreConfig {
@@ -772,7 +874,7 @@ mod tests {
         append_event(&root, sample_event("plan.md", "pre-refresh event")).unwrap();
 
         wait_refresh_idle(&root);
-        schedule_refresh(root.clone());
+        schedule_synthesis_refresh(root.clone());
         append_event(&root, sample_event("notes.md", "late event")).unwrap();
 
         wait_refresh_idle(&root);
@@ -780,7 +882,9 @@ mod tests {
 
         let expected_events = event_count(&root).unwrap();
         assert_eq!(
-            load_summary_state(&root).unwrap().events_count_at_refresh,
+            load_summary_state(&root)
+                .unwrap()
+                .events_count_at_synthesis_refresh,
             expected_events
         );
         let summary = std::fs::read_to_string(root.join(RUNNING_SUMMARY_FILE)).unwrap();
