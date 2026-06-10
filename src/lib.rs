@@ -25,6 +25,7 @@ pub use trace::context;
 pub use trace::logs as log_synth;
 pub use trace::pipeline as data_plane;
 pub use trace::running_summary;
+pub use trace::session_checkpoint;
 pub use trace::session_recap;
 
 pub mod poll {
