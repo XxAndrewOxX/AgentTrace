@@ -1,6 +1,7 @@
 use crate::observability::CliOutput;
 use crate::running_summary;
 use crate::session;
+use crate::session_recap;
 use anyhow::Result;
 use clap::Subcommand;
 use std::path::Path;
@@ -22,6 +23,9 @@ pub enum ResumeCmd {
 pub fn run(store_root: &Path, cmd: ResumeCmd, output: &dyn CliOutput) -> Result<()> {
     match cmd {
         ResumeCmd::Show => {
+            if let Err(e) = session_recap::ensure_prior_session_recap(store_root) {
+                tracing::warn!("prior session recap failed: {e}");
+            }
             if let Some(sess) = session::load_session(store_root) {
                 let stale = if sess.is_stale() { " (stale)" } else { "" };
                 output.line(&format!(
@@ -40,6 +44,9 @@ pub fn run(store_root: &Path, cmd: ResumeCmd, output: &dyn CliOutput) -> Result<
             }
         }
         ResumeCmd::Refresh => {
+            if let Err(e) = session_recap::ensure_prior_session_recap(store_root) {
+                tracing::warn!("prior session recap failed: {e}");
+            }
             running_summary::refresh_from_path(store_root)?;
             output.line("running_summary.md refreshed.")?;
         }

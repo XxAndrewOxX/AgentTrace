@@ -121,6 +121,16 @@ pub fn persist_session_recap(
     Ok(())
 }
 
+/// Ensure a recap exists for a stale lock session (idempotent).
+pub fn ensure_prior_session_recap(store_root: &Path) -> Result<()> {
+    if let Some(sess) = crate::session::load_session(store_root) {
+        if sess.is_stale() {
+            maybe_recap_prior_session(store_root, &sess)?;
+        }
+    }
+    Ok(())
+}
+
 /// Generate and persist a recap for a stale session if one does not already exist.
 pub fn maybe_recap_prior_session(store_root: &Path, prior: &AgentSession) -> Result<()> {
     let path = recap_path(store_root, &prior.session_id);
@@ -269,6 +279,18 @@ mod tests {
         assert!(recap_path(root, "old-session").exists());
         let recap = std::fs::read_to_string(recap_path(root, "old-session")).unwrap();
         assert!(recap.contains("prior work"));
+    }
+
+    #[test]
+    fn ensure_prior_recap_generates_for_stale_lock() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
+        stale_lock(root, "bot", "20260605-120000");
+        append_event(root, sample_event("20260605-120000", "plan.md", "prior work")).unwrap();
+
+        ensure_prior_session_recap(root).unwrap();
+        assert!(recap_path(root, "20260605-120000").exists());
     }
 
     #[test]

@@ -95,7 +95,7 @@ pub fn start_session(store_root: &Path, name: &str, transport: &str) -> Result<A
 
 pub fn touch_session(store_root: &Path, expected_name: &str) -> Result<()> {
     if let Some(mut session) = load_session(store_root) {
-        if session.name == expected_name {
+        if session.name == expected_name && !session.is_stale() {
             session.refresh_heartbeat();
             write_lock(store_root, &session)?;
         }
