@@ -81,18 +81,26 @@ When degraded, `agent-trace model status` reports
 
 | Feature | LLM path | No-LLM fallback |
 |---------|----------|-----------------|
-| Running summary (`running_summary.md`) | `update_running_summary` | Template from plan + JSONL events |
+| Running summary (`running_summary.md`) | `update_running_summary` (every N ops) | Template from plan + JSONL events (every write) |
 | Session recap (stale reconnect) | `summarize_session` | Mechanical event list by session ID |
+| Session checkpoint (active session) | `summarize_session` (every N ops) | Mechanical event list for current session |
 | Context (`context.md`) | `synthesize_context` | Document index + scratch snippets |
 | Change summaries | `summarize_change` | Line add/remove counts |
 
 Session recaps are written to `.agent-trace/session_recaps/{session_id}.md`
-when a stale lock is replaced. Reconnecting agents see them under
-**Prior Session Recap** in `get_resume_context`.
+when a stale lock is detected (on reconnect or `get_resume_context`). Reconnecting
+agents see them under **Prior Session Recap** in `get_resume_context`.
+
+Mid-session checkpoints are written to
+`.agent-trace/session_checkpoints/{session_id}.md` at the same N-op threshold as
+LLM running-summary synthesis. Interrupt/resume within the 30-minute session window
+surfaces them as **Current Session Checkpoint**.
 
 ## Refresh cadence
 
-Running summaries refresh in the background after writes. Tune frequency in
+`running_summary.md` is rebuilt from the event log and plan on **every** tracked
+write (template path, no LLM). LLM synthesis (`update_running_summary`) and session
+checkpoints run in the background after N operations. Tune frequency in
 `.agent-trace/config.toml`:
 
 ```toml

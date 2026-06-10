@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - MCP tool `get_resume_context` — single-call resume briefing on reconnect.
 - CLI commands: `agent-trace resume show`, `resume refresh`, `resume events`.
 - Candle backend wired to `TraceInsightsFacade` when `--features llm` is enabled.
+- Mid-session checkpoints at `.agent-trace/session_checkpoints/{session_id}.md`,
+  surfaced as **Current Session Checkpoint** in `get_resume_context`.
 
 ### Fixed
 
@@ -21,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - LLM inference failures fall back to template summaries instead of hard errors.
 - `TraceInsightsFacade` uses merged global + store LLM config.
 - `.venv/` and common dev artifacts excluded from agent-trace git tracking.
+- `running_summary.md` template refresh runs on every write; LLM synthesis batches
+  at `refresh_every_ops` without resetting the synthesis counter.
+- Stale-lock session recaps generated on `get_resume_context` and `resume show`
+  without requiring an MCP process restart.
+- `touch_session` no longer refreshes heartbeats on stale locks.
 
 ## [0.1.0] - 2026-05-31
 

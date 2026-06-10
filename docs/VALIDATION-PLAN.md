@@ -121,8 +121,16 @@ Manual validation after agent disconnect/reconnect (IDE restart, crash, or stale
 3. Verify response includes: session metadata, `running_summary.md` body, plan excerpt, and `INSTRUCTIONS`.
 4. Verify `running_summary.md` updates after each MCP plan write (MC-8 in `e2e_agent_connection`).
 5. Agent should continue from "Resume Here" without reading every source file.
+6. **Stale lock without MCP restart:** after writes, manually backdate
+   `last_heartbeat` in `.agent-trace/locks/agent-lock.toml`, call
+   `get_resume_context` on the same MCP process — response must include
+   **Prior Session Recap** (MC-10).
+7. **Interrupt within 30 minutes:** write ≥ N documents (default 10), reconnect
+   MCP within the session window, call `get_resume_context` — response must include
+   **Current Session Checkpoint** (MC-11).
 
-CLI equivalent: `agent-trace resume show` after `agent-trace connect <name>`.
+CLI equivalent: `agent-trace resume show` after `agent-trace connect <name>`;
+stale-lock recap also works via `resume show` without reconnecting MCP.
 
 ## Related docs
 
