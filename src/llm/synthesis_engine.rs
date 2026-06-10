@@ -82,9 +82,7 @@ mod tests {
     #[test]
     fn degraded_summarize_change_counts_lines() {
         let b = DegradedBackend;
-        let s = b
-            .summarize_change("a.md", "plan", "+a\n+b\n-c")
-            .unwrap();
+        let s = b.summarize_change("a.md", "plan", "+a\n+b\n-c").unwrap();
         assert!(s.contains("+2"));
         assert!(s.contains("-1"));
     }

@@ -68,10 +68,12 @@ pub fn resolve(merged: &MergedConfig, creds: &CredentialsStore) -> ResolvedBacke
     match syn.mode {
         SynthesisMode::Remote => try_remote(syn, creds)
             .unwrap_or_else(|| warn_and_degraded("remote provider unavailable")),
-        SynthesisMode::Ollama => try_ollama(syn)
-            .unwrap_or_else(|| warn_and_degraded("ollama unavailable")),
-        SynthesisMode::Embedded => try_embedded(merged)
-            .unwrap_or_else(|| warn_and_degraded("embedded model unavailable")),
+        SynthesisMode::Ollama => {
+            try_ollama(syn).unwrap_or_else(|| warn_and_degraded("ollama unavailable"))
+        }
+        SynthesisMode::Embedded => {
+            try_embedded(merged).unwrap_or_else(|| warn_and_degraded("embedded model unavailable"))
+        }
         SynthesisMode::Auto => try_remote(syn, creds)
             .or_else(|| try_ollama(syn))
             .or_else(|| try_embedded(merged))
@@ -128,16 +130,19 @@ fn warn_and_degraded(reason: &str) -> ResolvedBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{GlobalConfig, StoreConfig, StoreInfo, PollingConfig};
+    use crate::config::{GlobalConfig, PollingConfig, StoreConfig, StoreInfo};
 
     #[test]
     fn auto_mode_falls_back_to_degraded_without_backends() {
-        let merged = MergedConfig::merge(GlobalConfig::default(), StoreConfig {
-            store: StoreInfo::new("t".into()),
-            llm: None,
-            synthesis: None,
-            polling: PollingConfig::default(),
-        });
+        let merged = MergedConfig::merge(
+            GlobalConfig::default(),
+            StoreConfig {
+                store: StoreInfo::new("t".into()),
+                llm: None,
+                synthesis: None,
+                polling: PollingConfig::default(),
+            },
+        );
         let creds = CredentialsStore::default();
         let resolved = resolve(&merged, &creds);
         assert!(resolved.info().degraded);

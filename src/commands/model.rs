@@ -2,9 +2,9 @@ use crate::config::{
     embedded_model_path, embedded_model_source, models_dir, CredentialsStore, GlobalConfig,
     MergedConfig, SynthesisConfig, SynthesisMode, SynthesisProvider,
 };
-use crate::llm::providers::{is_model_pulled, is_reachable, pull_model, resolve};
 #[cfg(feature = "llm")]
 use crate::llm::providers::EmbeddedBackend;
+use crate::llm::providers::{is_model_pulled, is_reachable, pull_model, resolve};
 use crate::observability::CliOutput;
 use anyhow::{bail, Context, Result};
 use clap::Subcommand;
@@ -19,9 +19,7 @@ pub enum ModelCmd {
     /// Interactive setup wizard for synthesis provider.
     Setup,
     /// Switch active provider.
-    Use {
-        provider: String,
-    },
+    Use { provider: String },
     /// Set provider and model non-interactively.
     Set {
         #[arg(long)]
@@ -58,7 +56,11 @@ pub enum CredentialsCmd {
     Clear { provider: String },
 }
 
-pub fn run(cmd: ModelCmd, store_root: Option<&std::path::Path>, output: &dyn CliOutput) -> Result<()> {
+pub fn run(
+    cmd: ModelCmd,
+    store_root: Option<&std::path::Path>,
+    output: &dyn CliOutput,
+) -> Result<()> {
     match cmd {
         ModelCmd::Status => cmd_status(store_root, output),
         ModelCmd::Setup => cmd_setup(output),
@@ -171,10 +173,7 @@ fn cmd_setup(output: &dyn CliOutput) -> Result<()> {
         creds.save()?;
     }
 
-    output.line(&format!(
-        "Model [{}]: ",
-        provider.default_model()
-    ))?;
+    output.line(&format!("Model [{}]: ", provider.default_model()))?;
     line.clear();
     io::stdin().read_line(&mut line)?;
     config.synthesis.model = if line.trim().is_empty() {
@@ -184,10 +183,7 @@ fn cmd_setup(output: &dyn CliOutput) -> Result<()> {
     };
 
     if provider == SynthesisProvider::Custom || provider == SynthesisProvider::Ollama {
-        output.line(&format!(
-            "Base URL [{}]: ",
-            provider.default_base_url()
-        ))?;
+        output.line(&format!("Base URL [{}]: ", provider.default_base_url()))?;
         line.clear();
         io::stdin().read_line(&mut line)?;
         if !line.trim().is_empty() {
@@ -351,14 +347,22 @@ fn cmd_serve_check(output: &dyn CliOutput) -> Result<()> {
     output.line(&format!(
         "Ollama at {}: {}",
         syn.effective_base_url(),
-        if reachable { "reachable" } else { "unreachable" }
+        if reachable {
+            "reachable"
+        } else {
+            "unreachable"
+        }
     ))?;
     if reachable {
         let pulled = is_model_pulled(syn).unwrap_or(false);
         output.line(&format!(
             "Model '{}': {}",
             syn.model,
-            if pulled { "pulled" } else { "not pulled — run `agent-trace model pull`" }
+            if pulled {
+                "pulled"
+            } else {
+                "not pulled — run `agent-trace model pull`"
+            }
         ))?;
     }
     #[cfg(feature = "llm")]
@@ -379,7 +383,10 @@ fn download_with_progress(url: &str, dest: &std::path::Path) -> Result<()> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(600))
         .build()?;
-    let resp = client.get(url).send().with_context(|| format!("GET {url}"))?;
+    let resp = client
+        .get(url)
+        .send()
+        .with_context(|| format!("GET {url}"))?;
     if !resp.status().is_success() {
         bail!("Download failed: HTTP {}", resp.status());
     }

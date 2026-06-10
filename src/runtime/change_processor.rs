@@ -58,8 +58,8 @@ impl ChangeProcessor {
         agent_state: AgentState,
         ui_tx: Option<tokio::sync::mpsc::Sender<UiEvent>>,
     ) -> Self {
-        let session_id = session::session_id_for_store(&git.workdir)
-            .unwrap_or_else(session::new_session_id);
+        let session_id =
+            session::session_id_for_store(&git.workdir).unwrap_or_else(session::new_session_id);
         let last_seen_oid = git.head_oid().unwrap_or_else(|_| Oid::zero());
         Self {
             git,
@@ -516,11 +516,7 @@ mod tests {
         let store = GitStore::open(tmp.path()).unwrap();
         let info = CommitInfo {
             action: Action::Create,
-            files: vec![(
-                PathBuf::from("mcp.md"),
-                Action::Create,
-                DocType::Plan,
-            )],
+            files: vec![(PathBuf::from("mcp.md"), Action::Create, DocType::Plan)],
             actor: Actor::Agent {
                 name: "claude".into(),
             },
@@ -532,13 +528,18 @@ mod tests {
 
         // In-memory manifest is stale (no mcp.md).
         assert!(
-            !manifest.lock().unwrap().is_tracked(&PathBuf::from("mcp.md")),
+            !manifest
+                .lock()
+                .unwrap()
+                .is_tracked(&PathBuf::from("mcp.md")),
             "pre-poll manifest should not track mcp.md"
         );
 
         proc.run_poll_cycle().unwrap();
 
-        let event = rx.try_recv().expect("expected NewCommit for external commit");
+        let event = rx
+            .try_recv()
+            .expect("expected NewCommit for external commit");
         match event {
             UiEvent::NewCommit(entry) => {
                 assert_eq!(entry.agent_name.as_deref(), Some("claude"));
@@ -548,7 +549,10 @@ mod tests {
         }
 
         assert!(
-            manifest.lock().unwrap().is_tracked(&PathBuf::from("mcp.md")),
+            manifest
+                .lock()
+                .unwrap()
+                .is_tracked(&PathBuf::from("mcp.md")),
             "manifest should reload from disk after external commit"
         );
     }
@@ -604,9 +608,7 @@ mod tests {
         let repo_path = tmp.path().join(".agent-trace/repo");
         let repo = git2::Repository::open(&repo_path).unwrap();
         let commit = repo
-            .find_commit(
-                git2::Oid::from_str(&commit_id).expect("valid commit oid"),
-            )
+            .find_commit(git2::Oid::from_str(&commit_id).expect("valid commit oid"))
             .unwrap();
         let msg = commit.message().unwrap_or("");
         assert!(

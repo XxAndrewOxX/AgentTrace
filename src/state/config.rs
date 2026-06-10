@@ -143,7 +143,9 @@ impl SynthesisConfig {
     pub fn provider_needs_credentials(provider: SynthesisProvider) -> bool {
         matches!(
             provider,
-            SynthesisProvider::Openai | SynthesisProvider::Anthropic | SynthesisProvider::Openrouter
+            SynthesisProvider::Openai
+                | SynthesisProvider::Anthropic
+                | SynthesisProvider::Openrouter
         )
     }
 
@@ -252,9 +254,7 @@ impl CredentialsStore {
     }
 
     pub fn set_key(&mut self, provider: SynthesisProvider, key: String) {
-        let entry = ProviderCredentials {
-            api_key: Some(key),
-        };
+        let entry = ProviderCredentials { api_key: Some(key) };
         match provider {
             SynthesisProvider::Openai => self.openai = Some(entry),
             SynthesisProvider::Anthropic => self.anthropic = Some(entry),
@@ -571,7 +571,8 @@ mod tests {
         store.set_key(SynthesisProvider::Openai, "sk-test-key".into());
         let contents = toml::to_string_pretty(&store).unwrap();
         std::fs::write(&cred_path, &contents).unwrap();
-        let loaded: CredentialsStore = toml::from_str(&std::fs::read_to_string(&cred_path).unwrap()).unwrap();
+        let loaded: CredentialsStore =
+            toml::from_str(&std::fs::read_to_string(&cred_path).unwrap()).unwrap();
         assert_eq!(
             loaded.api_key_for(SynthesisProvider::Openai),
             Some("sk-test-key".into())

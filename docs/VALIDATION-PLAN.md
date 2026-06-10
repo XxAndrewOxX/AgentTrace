@@ -10,6 +10,7 @@ gates; release workflow automates pre-publish artifact validation.
 - `cargo test --locked`
 - `cargo clippy --locked -- -D warnings`
 - `cargo fmt --check`
+- `./scripts/run_e2e.sh all` (release-mode E2E on Linux)
 
 Run locally before pushing:
 
@@ -40,7 +41,7 @@ cargo publish --dry-run
 | `performance` | Performance PS-1..5 | `e2e_performance` |
 | `tui` | TUI behavior TB-1..10 | `e2e_tui_behavior` |
 | `adversarial` | Adversarial cases (see `docs/ADVERSARIAL-VALIDATION.md`) | `adversarial_validation` |
-| `connection` | CLI + MCP AC-1..7, MC-1..8 | `e2e_agent_connection` |
+| `connection` | CLI + MCP AC-1..9, MC-1..11 | `e2e_agent_connection` |
 | `unit` | Library unit tests | `--lib` |
 | `all` | All of the above (default) | — |
 
@@ -130,7 +131,9 @@ Manual validation after agent disconnect/reconnect (IDE restart, crash, or stale
    **Current Session Checkpoint** (MC-11).
 
 CLI equivalent: `agent-trace resume show` after `agent-trace connect <name>`;
-stale-lock recap also works via `resume show` without reconnecting MCP.
+stale-lock recap also works via `resume show` without reconnecting MCP (AC-8).
+Mid-session checkpoint file is created after N writes and verified via
+`resume show` (AC-9).
 
 ## Related docs
 

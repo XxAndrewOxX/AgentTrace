@@ -109,7 +109,7 @@ fn uj_running_summary_created_on_plan_write() {
         .run(&["write", "plan.md", "--content=# Plan\n- [x] Phase 1\n"])
         .expect_success("write plan");
 
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    store.wait_for_file("running_summary.md");
 
     assert!(
         store.file_exists("running_summary.md"),

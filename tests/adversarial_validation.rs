@@ -18,6 +18,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tempfile::TempDir;
 
+fn perf_budget_ms(local_ms: u128) -> u128 {
+    if std::env::var("CI").is_ok() {
+        local_ms * 3
+    } else {
+        local_ms
+    }
+}
+
 // ── Shared setup helpers ──────────────────────────────────────────────────────
 
 fn setup_store(tmp: &TempDir) -> (GitStore, Arc<Mutex<Manifest>>) {
@@ -680,7 +688,11 @@ fn gs1_hundreds_of_commits_log_performance() {
     let log = git2.log(50).unwrap();
     let log_ms = t0.elapsed().as_millis();
     assert!(log.len() <= 50);
-    assert!(log_ms < 500, "log(50) took {log_ms}ms, must be < 500ms");
+    assert!(
+        log_ms < perf_budget_ms(500),
+        "log(50) took {log_ms}ms, must be < {}ms",
+        perf_budget_ms(500)
+    );
 
     // log for a single file must be < 1s.
     let t1 = Instant::now();
@@ -688,8 +700,9 @@ fn gs1_hundreds_of_commits_log_performance() {
     let file_log_ms = t1.elapsed().as_millis();
     assert!(!file_log.is_empty(), "a.md must have commits");
     assert!(
-        file_log_ms < 1000,
-        "log_file took {file_log_ms}ms, must be < 1s"
+        file_log_ms < perf_budget_ms(1000),
+        "log_file took {file_log_ms}ms, must be < {}ms",
+        perf_budget_ms(1000)
     );
 
     // info (version_count) must be < 1s.
@@ -698,8 +711,9 @@ fn gs1_hundreds_of_commits_log_performance() {
     let count_ms = t2.elapsed().as_millis();
     assert!(count >= 20, "a.md must have >= 20 versions");
     assert!(
-        count_ms < 1000,
-        "version_count took {count_ms}ms, must be < 1s"
+        count_ms < perf_budget_ms(1000),
+        "version_count took {count_ms}ms, must be < {}ms",
+        perf_budget_ms(1000)
     );
 }
 

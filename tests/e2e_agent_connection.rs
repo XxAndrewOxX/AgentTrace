@@ -1,10 +1,10 @@
-/// E2E tests: Agent Connection (AC-1..6, MC-1..6)
+/// E2E tests: Agent Connection (AC-1..9, MC-1..11)
 ///
 /// AC tests validate CLI connect/disconnect/write workflow.
 /// MC tests validate the MCP server (JSON-RPC 2.0 over stdio).
 #[path = "helpers.rs"]
 mod helpers;
-use helpers::TestStore;
+use helpers::{stale_lock_content, TestStore};
 
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
@@ -418,8 +418,7 @@ fn mc7_get_resume_context_returns_briefing() {
     );
     assert_eq!(write_resp["result"]["isError"], false);
 
-    // Allow background summary refresh to complete.
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    store.wait_for_summary_refresh();
 
     let resp = h.call_tool("get_resume_context", json!({}));
     assert_eq!(
@@ -453,7 +452,8 @@ fn mc8_running_summary_updates_on_mcp_write() {
     );
     assert_eq!(resp["result"]["isError"], false);
 
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    store.wait_for_file("running_summary.md");
+    store.wait_for_file_contains("running_summary.md", "plan.md");
 
     assert!(
         store.file_exists("running_summary.md"),
@@ -546,21 +546,21 @@ fn mc9_stale_mcp_reconnect_includes_prior_recap() {
             json!({"path": "plan.md", "content": "# Plan\n- [x] Work item\n"}),
         );
         assert_eq!(resp["result"]["isError"], false);
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        store.wait_for_summary_refresh();
     }
 
     let lock = store.read_file(".agent-trace/locks/agent-lock.toml");
-    let stale_lock = lock.replace(
-        lock.lines()
-            .find(|l| l.starts_with("last_heartbeat"))
-            .expect("heartbeat"),
-        "last_heartbeat=\"2020-01-01T00:00:00Z\"",
+    store.write_file(
+        ".agent-trace/locks/agent-lock.toml",
+        &stale_lock_content(&lock),
     );
-    store.write_file(".agent-trace/locks/agent-lock.toml", &stale_lock);
 
     let mut h = McpHarness::new(&store, "test-agent");
     let resp = h.call_tool("get_resume_context", json!({}));
-    assert_eq!(resp["result"]["isError"], false, "get_resume_context: {resp:?}");
+    assert_eq!(
+        resp["result"]["isError"], false,
+        "get_resume_context: {resp:?}"
+    );
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
         text.contains("Prior Session Recap"),
@@ -588,7 +588,7 @@ fn mc10_stale_recap_without_mcp_restart() {
         json!({"path": "plan.md", "content": "# Plan\n- [x] Phase 1\n- [ ] Phase 2\n"}),
     );
     assert_eq!(write_resp["result"]["isError"], false);
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    store.wait_for_summary_refresh();
 
     let lock = store.read_file(".agent-trace/locks/agent-lock.toml");
     let old_session_id = lock
@@ -597,13 +597,10 @@ fn mc10_stale_recap_without_mcp_restart() {
         .and_then(|l| l.split('=').nth(1))
         .map(|s| s.trim().trim_matches('"').to_string())
         .expect("session_id in lock");
-    let stale_lock = lock.replace(
-        lock.lines()
-            .find(|l| l.starts_with("last_heartbeat"))
-            .expect("heartbeat"),
-        "last_heartbeat=\"2020-01-01T00:00:00Z\"",
+    store.write_file(
+        ".agent-trace/locks/agent-lock.toml",
+        &stale_lock_content(&lock),
     );
-    store.write_file(".agent-trace/locks/agent-lock.toml", &stale_lock);
 
     let recap_path = format!(".agent-trace/session_recaps/{old_session_id}.md");
     assert!(
@@ -612,7 +609,10 @@ fn mc10_stale_recap_without_mcp_restart() {
     );
 
     let resp = h.call_tool("get_resume_context", json!({}));
-    assert_eq!(resp["result"]["isError"], false, "get_resume_context: {resp:?}");
+    assert_eq!(
+        resp["result"]["isError"], false,
+        "get_resume_context: {resp:?}"
+    );
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
         text.contains("Prior Session Recap"),
@@ -649,7 +649,7 @@ fn mc11_mid_session_checkpoint_in_resume_context() {
         assert_eq!(resp["result"]["isError"], false, "write {i}: {resp:?}");
     }
 
-    std::thread::sleep(std::time::Duration::from_millis(2000));
+    store.wait_for_summary_refresh();
 
     let lock = store.read_file(".agent-trace/locks/agent-lock.toml");
     let session_id = lock
@@ -659,18 +659,126 @@ fn mc11_mid_session_checkpoint_in_resume_context() {
         .map(|s| s.trim().trim_matches('"').to_string())
         .expect("session_id in lock");
     let checkpoint_path = format!(".agent-trace/session_checkpoints/{session_id}.md");
+    store.wait_for_file(&checkpoint_path);
     assert!(
         store.file_exists(&checkpoint_path),
         "session checkpoint should exist at {checkpoint_path}"
     );
 
     let resp = h.call_tool("get_resume_context", json!({}));
-    assert_eq!(resp["result"]["isError"], false, "get_resume_context: {resp:?}");
+    assert_eq!(
+        resp["result"]["isError"], false,
+        "get_resume_context: {resp:?}"
+    );
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
         text.contains("Current Session Checkpoint"),
         "resume context should include current session checkpoint: {text}"
     );
+}
+
+// ── AC-8: resume show stale recap without reconnect ───────────────────────────
+
+#[test]
+fn ac8_resume_show_stale_recap_without_reconnect() {
+    let store = TestStore::new();
+    store.write_file("plan.md", "# Plan\n- [ ] Phase 1\n");
+    store
+        .run(&["add", "plan", "plan.md"])
+        .expect_success("add plan");
+
+    store
+        .run(&["connect", "test-agent"])
+        .expect_success("connect");
+    store
+        .run(&[
+            "write",
+            "plan.md",
+            "--content",
+            "# Plan\n- [x] Phase 1\n- [ ] Phase 2\n",
+        ])
+        .expect_success("write");
+    store.wait_for_summary_refresh();
+
+    let lock = store.read_file(".agent-trace/locks/agent-lock.toml");
+    let old_session_id = lock
+        .lines()
+        .find(|l| l.starts_with("session_id"))
+        .and_then(|l| l.split('=').nth(1))
+        .map(|s| s.trim().trim_matches('"').to_string())
+        .expect("session_id in lock");
+    store.write_file(
+        ".agent-trace/locks/agent-lock.toml",
+        &stale_lock_content(&lock),
+    );
+
+    let recap_path = format!(".agent-trace/session_recaps/{old_session_id}.md");
+    assert!(
+        !store.file_exists(&recap_path),
+        "recap should not exist before resume show"
+    );
+
+    let out = store.run(&["resume", "show"]).expect_success("resume show");
+    out.assert_stdout_contains("Session:");
+    out.assert_stdout_contains("# Running Summary");
+
+    assert!(
+        store.file_exists(&recap_path),
+        "recap file should be created at {recap_path}"
+    );
+    let recap = store.read_file(&recap_path);
+    assert!(
+        recap.contains("Prior Session Recap"),
+        "recap should have header: {recap}"
+    );
+    assert!(
+        recap.contains("plan.md") || recap.contains("Phase 1"),
+        "recap should reference prior activity: {recap}"
+    );
+}
+
+// ── AC-9: resume show after mid-session writes creates checkpoint ─────────────
+
+#[test]
+fn ac9_resume_show_mid_session_checkpoint() {
+    let store = TestStore::new();
+    store.write_file("plan.md", "# Plan\n- [ ] Work\n");
+    store
+        .run(&["add", "plan", "plan.md"])
+        .expect_success("add plan");
+
+    let config = format!(
+        "{}\n[synthesis]\nrefresh_every_ops = 1\n",
+        store.read_file(".agent-trace/config.toml")
+    );
+    store.write_file(".agent-trace/config.toml", &config);
+
+    store
+        .run(&["connect", "test-agent"])
+        .expect_success("connect");
+    for i in 0..10 {
+        store
+            .run(&[
+                "write",
+                "plan.md",
+                "--content",
+                &format!("# Plan\n- [ ] Work item {i}\n"),
+            ])
+            .expect_success(&format!("write {i}"));
+    }
+
+    // CLI write subprocesses may exit before background synthesis threads finish;
+    // resume refresh runs synthesis synchronously in-process.
+    store
+        .run(&["resume", "refresh"])
+        .expect_success("resume refresh");
+    store.wait_for_file("running_summary.md");
+    store.wait_for_file_contains("running_summary.md", "plan.md");
+
+    let out = store.run(&["resume", "show"]).expect_success("resume show");
+    out.assert_stdout_contains("Session:");
+    out.assert_stdout_contains("# Running Summary");
+    out.assert_stdout_contains("plan.md");
 }
 
 // ── Helpers extension needed for stderr assertions ────────────────────────────

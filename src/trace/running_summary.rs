@@ -368,7 +368,7 @@ pub fn refresh_from_path(store_root: &Path) -> Result<()> {
     refresh(store_root, &git, &manifest)
 }
 
-#[cfg(test)]
+#[doc(hidden)]
 pub fn wait_refresh_idle(store_root: &Path) {
     for _ in 0..150 {
         let busy = REFRESH_IN_FLIGHT
@@ -503,8 +503,7 @@ pub fn assemble_resume_context(
     }
 
     if let Some(sess) = session::load_session(store_root).filter(|s| !s.is_stale()) {
-        if let Some(cp) = crate::session_checkpoint::load_checkpoint(store_root, &sess.session_id)
-        {
+        if let Some(cp) = crate::session_checkpoint::load_checkpoint(store_root, &sess.session_id) {
             out.push_str("## Current Session Checkpoint\n\n");
             let body = cp
                 .strip_prefix("# Current Session Checkpoint\n\n")
@@ -833,10 +832,7 @@ mod tests {
             refresh_template(&root, &git, &m).unwrap();
         }
 
-        assert_eq!(
-            load_summary_state(&root).unwrap().ops_since_synthesis,
-            3
-        );
+        assert_eq!(load_summary_state(&root).unwrap().ops_since_synthesis, 3);
         assert_eq!(
             load_summary_state(&root)
                 .unwrap()
@@ -857,10 +853,7 @@ mod tests {
         for i in 0..10 {
             append_event(&root, sample_event("plan.md", &format!("event {i}"))).unwrap();
         }
-        assert_eq!(
-            load_summary_state(&root).unwrap().ops_since_synthesis,
-            10
-        );
+        assert_eq!(load_summary_state(&root).unwrap().ops_since_synthesis, 10);
 
         refresh(&root, &git, &m).unwrap();
         let state = load_summary_state(&root).unwrap();
@@ -931,8 +924,8 @@ mod tests {
         )
         .unwrap();
 
-        let text = assemble_resume_context(&root, &Actor::Agent { name: "bot".into() }, false, 5)
-            .unwrap();
+        let text =
+            assemble_resume_context(&root, &Actor::Agent { name: "bot".into() }, false, 5).unwrap();
         assert!(text.contains("## Current Session Checkpoint"));
         assert!(text.contains("Mid-session work"));
     }
@@ -957,8 +950,8 @@ mod tests {
         .unwrap();
         session::start_session(&root, "bot", "cli").unwrap();
 
-        let text = assemble_resume_context(&root, &Actor::Agent { name: "bot".into() }, false, 5)
-            .unwrap();
+        let text =
+            assemble_resume_context(&root, &Actor::Agent { name: "bot".into() }, false, 5).unwrap();
         assert!(text.contains("## Prior Session Recap"));
         assert!(text.contains("Finished phase 1"));
         assert!(text.contains("Running Summary"));

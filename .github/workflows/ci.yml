@@ -50,3 +50,16 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --check
+
+  e2e:
+    name: E2E (release)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run E2E suites
+        run: ./scripts/run_e2e.sh all

@@ -66,12 +66,7 @@ pub fn generate_session_checkpoint(store_root: &Path, session: &AgentSession) ->
     let events = load_events_for_session(store_root, &session.session_id)?;
     let event_strings: Vec<String> = events
         .iter()
-        .map(|e| {
-            format!(
-                "[{}] {} {} — {}",
-                e.timestamp, e.action, e.path, e.summary
-            )
-        })
+        .map(|e| format!("[{}] {} {} — {}", e.timestamp, e.action, e.path, e.summary))
         .collect();
 
     if let Ok(api) = TraceInsightsFacade::from_store_root(store_root) {
@@ -89,10 +84,7 @@ pub fn generate_session_checkpoint(store_root: &Path, session: &AgentSession) ->
                         out.push_str("*(no recorded events)*\n");
                     } else {
                         for e in &events {
-                            out.push_str(&format!(
-                                "- {} {} — {}\n",
-                                e.action, e.path, e.summary
-                            ));
+                            out.push_str(&format!("- {} {} — {}\n", e.action, e.path, e.summary));
                         }
                     }
                     return Ok(out);
@@ -170,8 +162,16 @@ mod tests {
             started_at: "2026-06-05T12:00:00Z".into(),
             last_heartbeat: "2026-06-05T12:00:00Z".into(),
         };
-        append_event(root, sample_event("20260605-120000", "plan.md", "phase 1 done")).unwrap();
-        append_event(root, sample_event("20260605-120000", "notes.md", "follow-up")).unwrap();
+        append_event(
+            root,
+            sample_event("20260605-120000", "plan.md", "phase 1 done"),
+        )
+        .unwrap();
+        append_event(
+            root,
+            sample_event("20260605-120000", "notes.md", "follow-up"),
+        )
+        .unwrap();
         append_event(root, sample_event("other-session", "plan.md", "ignored")).unwrap();
 
         let events = load_events_for_session(root, "20260605-120000").unwrap();

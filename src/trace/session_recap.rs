@@ -21,10 +21,7 @@ pub fn load_events_for_session(store_root: &Path, session_id: &str) -> Result<Ve
         .collect())
 }
 
-pub fn synthesize_template_session_recap(
-    prior: &AgentSession,
-    events: &[SummaryEvent],
-) -> String {
+pub fn synthesize_template_session_recap(prior: &AgentSession, events: &[SummaryEvent]) -> String {
     let mut out = String::from("# Prior Session Recap\n\n");
     out.push_str(&format!(
         "*Agent: {} / {} ({})*\n",
@@ -67,12 +64,7 @@ pub fn generate_session_recap(store_root: &Path, prior: &AgentSession) -> Result
     let events = load_events_for_session(store_root, &prior.session_id)?;
     let event_strings: Vec<String> = events
         .iter()
-        .map(|e| {
-            format!(
-                "[{}] {} {} — {}",
-                e.timestamp, e.action, e.path, e.summary
-            )
-        })
+        .map(|e| format!("[{}] {} {} — {}", e.timestamp, e.action, e.path, e.summary))
         .collect();
 
     if let Ok(api) = TraceInsightsFacade::from_store_root(store_root) {
@@ -90,10 +82,7 @@ pub fn generate_session_recap(store_root: &Path, prior: &AgentSession) -> Result
                         out.push_str("*(no recorded events)*\n");
                     } else {
                         for e in &events {
-                            out.push_str(&format!(
-                                "- {} {} — {}\n",
-                                e.action, e.path, e.summary
-                            ));
+                            out.push_str(&format!("- {} {} — {}\n", e.action, e.path, e.summary));
                         }
                     }
                     return Ok(out);
@@ -108,11 +97,7 @@ pub fn generate_session_recap(store_root: &Path, prior: &AgentSession) -> Result
     Ok(synthesize_template_session_recap(prior, &events))
 }
 
-pub fn persist_session_recap(
-    store_root: &Path,
-    session_id: &str,
-    content: &str,
-) -> Result<()> {
+pub fn persist_session_recap(store_root: &Path, session_id: &str, content: &str) -> Result<()> {
     let path = recap_path(store_root, session_id);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -161,12 +146,7 @@ pub fn load_prior_session_recap(store_root: &Path) -> Option<String> {
     let mut entries: Vec<(PathBuf, std::time::SystemTime)> = std::fs::read_dir(&dir)
         .ok()?
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .map(|ext| ext == "md")
-                .unwrap_or(false)
-        })
+        .filter(|e| e.path().extension().map(|ext| ext == "md").unwrap_or(false))
         .filter_map(|e| {
             let stem = e.path().file_stem()?.to_string_lossy().to_string();
             if current_id.as_deref() == Some(stem.as_str()) {
@@ -229,8 +209,16 @@ mod tests {
             started_at: "2026-06-05T12:00:00Z".into(),
             last_heartbeat: "2020-01-01T00:00:00Z".into(),
         };
-        append_event(root, sample_event("20260605-120000", "plan.md", "phase 1 done")).unwrap();
-        append_event(root, sample_event("20260605-120000", "notes.md", "follow-up")).unwrap();
+        append_event(
+            root,
+            sample_event("20260605-120000", "plan.md", "phase 1 done"),
+        )
+        .unwrap();
+        append_event(
+            root,
+            sample_event("20260605-120000", "notes.md", "follow-up"),
+        )
+        .unwrap();
         append_event(root, sample_event("other-session", "plan.md", "ignored")).unwrap();
 
         let events = load_events_for_session(root, "20260605-120000").unwrap();
@@ -287,7 +275,11 @@ mod tests {
         let root = tmp.path();
         std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
         stale_lock(root, "bot", "20260605-120000");
-        append_event(root, sample_event("20260605-120000", "plan.md", "prior work")).unwrap();
+        append_event(
+            root,
+            sample_event("20260605-120000", "plan.md", "prior work"),
+        )
+        .unwrap();
 
         ensure_prior_session_recap(root).unwrap();
         assert!(recap_path(root, "20260605-120000").exists());

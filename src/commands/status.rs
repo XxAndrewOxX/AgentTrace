@@ -1,6 +1,6 @@
+use crate::config::CredentialsStore;
 use crate::config::MergedConfig;
 use crate::llm::providers::resolve;
-use crate::config::CredentialsStore;
 use crate::observability::CliOutput;
 use crate::store::Store;
 use crate::types::FileChange;

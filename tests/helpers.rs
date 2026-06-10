@@ -3,7 +3,60 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
+
+const FILE_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const DEFAULT_FILE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Poll until a relative path exists under the store root.
+pub fn wait_for_file(root: &Path, rel: &str, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    let path = root.join(rel);
+    while Instant::now() < deadline {
+        if path.exists() {
+            return true;
+        }
+        std::thread::sleep(FILE_POLL_INTERVAL);
+    }
+    panic!("timed out after {:?} waiting for file {:?}", timeout, path);
+}
+
+/// Poll until file content contains needle.
+pub fn wait_for_file_contains(root: &Path, rel: &str, needle: &str, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    let path = root.join(rel);
+    while Instant::now() < deadline {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if content.contains(needle) {
+                    return true;
+                }
+            }
+        }
+        std::thread::sleep(FILE_POLL_INTERVAL);
+    }
+    panic!(
+        "timed out after {:?} waiting for {:?} to contain {:?}",
+        timeout, path, needle
+    );
+}
+
+/// Wait for running-summary background synthesis to finish.
+pub fn wait_for_summary_refresh(root: &Path) {
+    agent_trace::running_summary::wait_refresh_idle(root);
+}
+
+/// Replace last_heartbeat in lock TOML with a stale timestamp.
+pub fn stale_lock_content(lock_toml: &str) -> String {
+    lock_toml.replace(
+        lock_toml
+            .lines()
+            .find(|l| l.starts_with("last_heartbeat"))
+            .expect("last_heartbeat in lock"),
+        "last_heartbeat=\"2020-01-01T00:00:00Z\"",
+    )
+}
 
 pub struct TestStore {
     pub dir: TempDir,
@@ -72,6 +125,18 @@ impl TestStore {
 
     pub fn root(&self) -> &Path {
         self.dir.path()
+    }
+
+    pub fn wait_for_summary_refresh(&self) {
+        wait_for_summary_refresh(self.root());
+    }
+
+    pub fn wait_for_file(&self, rel: &str) {
+        wait_for_file(self.root(), rel, DEFAULT_FILE_TIMEOUT);
+    }
+
+    pub fn wait_for_file_contains(&self, rel: &str, needle: &str) {
+        wait_for_file_contains(self.root(), rel, needle, DEFAULT_FILE_TIMEOUT);
     }
 }
 
