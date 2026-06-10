@@ -422,6 +422,8 @@ fn schedule_synthesis_refresh_inner(store_root: PathBuf, force: bool) {
         let events_before = event_count(&store_root).unwrap_or(0);
         if let Err(e) = refresh_from_path(&store_root) {
             tracing::warn!("running summary background refresh failed: {e}");
+        } else if let Some(sid) = crate::session::session_id_for_store(&store_root) {
+            let _ = crate::session_checkpoint::maybe_write_session_checkpoint(&store_root, &sid);
         }
         let events_after = event_count(&store_root).unwrap_or(events_before);
         let watermark = load_summary_state(&store_root)
@@ -498,6 +500,21 @@ pub fn assemble_resume_context(
             out.push('\n');
         }
         out.push('\n');
+    }
+
+    if let Some(sess) = session::load_session(store_root).filter(|s| !s.is_stale()) {
+        if let Some(cp) = crate::session_checkpoint::load_checkpoint(store_root, &sess.session_id)
+        {
+            out.push_str("## Current Session Checkpoint\n\n");
+            let body = cp
+                .strip_prefix("# Current Session Checkpoint\n\n")
+                .unwrap_or(&cp);
+            out.push_str(body);
+            if !body.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push('\n');
+        }
     }
 
     out.push_str("--- Running Summary ---\n");
@@ -892,6 +909,32 @@ mod tests {
             summary.contains("late event"),
             "summary missing late event:\n{summary}"
         );
+    }
+
+    #[test]
+    fn assemble_resume_context_includes_current_checkpoint() {
+        let tmp = TempDir::new().unwrap();
+        let (root, manifest, git) = setup(&tmp);
+        let mut m = manifest;
+        write_running_summary(
+            &root,
+            "# Running Summary\n\n## Resume Here\n\nContinue\n",
+            &git,
+            &mut m,
+        )
+        .unwrap();
+        let sess = session::start_session(&root, "bot", "cli").unwrap();
+        crate::session_checkpoint::persist_checkpoint(
+            &root,
+            &sess.session_id,
+            "# Current Session Checkpoint\n\n*Agent: bot / session (cli)*\n\nMid-session work.\n",
+        )
+        .unwrap();
+
+        let text = assemble_resume_context(&root, &Actor::Agent { name: "bot".into() }, false, 5)
+            .unwrap();
+        assert!(text.contains("## Current Session Checkpoint"));
+        assert!(text.contains("Mid-session work"));
     }
 
     #[test]
