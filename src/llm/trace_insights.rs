@@ -1,12 +1,14 @@
-#[cfg(test)]
-use super::backend::NoTraceBackend;
 use super::backend::TraceInsightsBackend;
 use super::providers::resolve;
 use super::synthesis_engine::SynthesisEngine;
 use crate::config::{CredentialsStore, MergedConfig};
+use crate::runtime::allow_degraded_mode;
 use crate::types::DocType;
 use std::path::Path;
 use thiserror::Error;
+
+#[cfg(test)]
+use super::backend::NoTraceBackend;
 
 #[derive(Debug, Clone)]
 pub struct TraceDocument {
@@ -95,24 +97,29 @@ pub struct TraceInsightsFacade {
 }
 
 impl TraceInsightsFacade {
-    pub fn from_merged_config(merged: &MergedConfig) -> Self {
+    pub fn from_merged_config(merged: &MergedConfig) -> Result<Self, TraceInsightsError> {
         let creds = CredentialsStore::load().unwrap_or_default();
         let resolved = resolve(merged, &creds);
         let info = resolved.info();
+        if info.degraded && !allow_degraded_mode() {
+            return Err(TraceInsightsError::ModelUnavailable(
+                "Synthesis backend unavailable. Run: agent-trace model setup && agent-trace model serve-check".into(),
+            ));
+        }
         let label = info.label.clone();
-        Self {
+        Ok(Self {
             backend: Box::new(EngineAdapter {
                 inner: resolved.into_engine(),
             }),
             backend_label: label,
-        }
+        })
     }
 
     pub fn from_store_root(store_root: &Path) -> Result<Self, TraceInsightsError> {
         let merged = MergedConfig::load(store_root).map_err(|e| {
             TraceInsightsError::ModelUnavailable(format!("config load failed: {e}"))
         })?;
-        Ok(Self::from_merged_config(&merged))
+        Self::from_merged_config(&merged)
     }
 
     pub fn from_llm_config(cfg: &crate::config::LlmConfig) -> Result<Self, TraceInsightsError> {
@@ -127,7 +134,7 @@ impl TraceInsightsFacade {
             defaults: crate::config::DefaultsConfig::default(),
             polling: crate::config::PollingConfig::default(),
         };
-        Ok(Self::from_merged_config(&merged))
+        Self::from_merged_config(&merged)
     }
 
     #[cfg(test)]

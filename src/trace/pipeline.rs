@@ -121,7 +121,7 @@ pub fn apply_trace_hooks(
     if changed_files.is_empty() {
         return Ok(());
     }
-    let trace_insights = TraceInsightsFacade::from_store_root(store_root).ok();
+    let trace_insights = TraceInsightsFacade::from_store_root(store_root)?;
 
     if actor.is_agent() {
         if let (Some(agent_name), Some(sid)) = (actor.agent_name(), session_id) {
@@ -129,12 +129,12 @@ pub fn apply_trace_hooks(
                 .iter()
                 .map(|(path, _, doc_type)| {
                     let stats = git.diff_stats(path, None, None).unwrap_or_default();
-                    let summary = if let Some(api) = trace_insights.as_ref() {
+                    let summary = {
                         let diff = format!(
                             "+{} lines\n-{} lines\n",
                             stats.lines_added, stats.lines_removed
                         );
-                        match api.summarize_change(path, doc_type, &diff) {
+                        match trace_insights.summarize_change(path, doc_type, &diff) {
                             Ok(s) => s,
                             Err(e) => {
                                 tracing::warn!(
@@ -145,8 +145,6 @@ pub fn apply_trace_hooks(
                                 summarize_change_no_llm(path, doc_type, &stats, agent_name)
                             }
                         }
-                    } else {
-                        summarize_change_no_llm(path, doc_type, &stats, agent_name)
                     };
                     Ok(LogSynthEntry {
                         timestamp: Utc::now(),
@@ -161,34 +159,36 @@ pub fn apply_trace_hooks(
 
     for (path, action, doc_type) in changed_files {
         let stats = git.diff_stats(path, None, None).unwrap_or_default();
-        let event_summary = if let Some(api) = trace_insights.as_ref() {
+        let event_summary = {
             let diff = format!(
                 "+{} lines\n-{} lines\n",
                 stats.lines_added, stats.lines_removed
             );
-            match api.summarize_change(path, doc_type, &diff) {
+            match trace_insights.summarize_change(path, doc_type, &diff) {
                 Ok(s) => s,
                 Err(e) => {
-                    tracing::warn!(
-                        "LLM summarize_change failed for event {}, using template: {}",
-                        path.display(),
-                        e
-                    );
-                    summarize_change_no_llm(
-                        path,
-                        doc_type,
-                        &stats,
-                        actor.agent_name().unwrap_or("system"),
-                    )
+                    if trace_insights.is_degraded() {
+                        summarize_change_no_llm(
+                            path,
+                            doc_type,
+                            &stats,
+                            actor.agent_name().unwrap_or("system"),
+                        )
+                    } else {
+                        tracing::warn!(
+                            "LLM summarize_change failed for event {}, using template: {}",
+                            path.display(),
+                            e
+                        );
+                        summarize_change_no_llm(
+                            path,
+                            doc_type,
+                            &stats,
+                            actor.agent_name().unwrap_or("system"),
+                        )
+                    }
                 }
             }
-        } else {
-            summarize_change_no_llm(
-                path,
-                doc_type,
-                &stats,
-                actor.agent_name().unwrap_or("system"),
-            )
         };
         let event = SummaryEvent {
             timestamp: Utc::now().to_rfc3339(),
@@ -220,7 +220,7 @@ pub fn apply_trace_hooks(
         )
     });
     if refresh_context {
-        sync_context_md(store_root, git, manifest, trace_insights.as_ref())?;
+        sync_context_md(store_root, git, manifest, &trace_insights)?;
     }
 
     Ok(())
@@ -262,23 +262,23 @@ fn sync_context_md(
     store_root: &Path,
     git: &crate::git_store::GitStore,
     manifest: &crate::manifest::Manifest,
-    trace_insights: Option<&TraceInsightsFacade>,
+    trace_insights: &TraceInsightsFacade,
 ) -> anyhow::Result<()> {
-    let new_content = if let Some(api) = trace_insights {
+    let new_content = if trace_insights.is_degraded() {
+        crate::trace::context::synthesize_no_llm(store_root, manifest)?
+    } else {
         let docs = build_trace_documents(store_root, manifest);
         let updates = load_pending_updates(store_root)?
             .into_iter()
             .map(|u| u.update)
             .collect::<Vec<_>>();
-        match api.synthesize_context(&docs, &updates) {
+        match trace_insights.synthesize_context(&docs, &updates) {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!("LLM synthesize_context failed, using template: {e}");
                 crate::trace::context::synthesize_no_llm(store_root, manifest)?
             }
         }
-    } else {
-        crate::trace::context::synthesize_no_llm(store_root, manifest)?
     };
     let target = store_root.join("context.md");
     let existing = std::fs::read_to_string(&target).unwrap_or_default();
@@ -341,7 +341,14 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
         let git = GitStore::init(&root).unwrap();
         let info = StoreInfo::new("test".into());
-        let manifest = Manifest::create_empty(info, &root).unwrap();
+        let manifest = Manifest::create_empty(info.clone(), &root).unwrap();
+        let store_cfg = crate::config::StoreConfig {
+            store: info,
+            llm: None,
+            synthesis: None,
+            polling: crate::config::PollingConfig::default(),
+        };
+        store_cfg.save(&root).unwrap();
         (root, manifest, git)
     }
 

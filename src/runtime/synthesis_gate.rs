@@ -6,7 +6,11 @@ use anyhow::{bail, Context, Result};
 use std::path::Path;
 
 /// Test-only escape hatch — never documented for end users.
+/// In-process unit tests (`cfg(test)`) also allow degraded mode.
 pub fn allow_degraded_mode() -> bool {
+    if cfg!(test) {
+        return true;
+    }
     std::env::var("AGENT_TRACE_ALLOW_DEGRADED").as_deref() == Ok("1")
 }
 
@@ -57,10 +61,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn allow_degraded_respects_env() {
-        std::env::set_var("AGENT_TRACE_ALLOW_DEGRADED", "1");
+    fn allow_degraded_in_unit_test_builds() {
         assert!(allow_degraded_mode());
-        std::env::remove_var("AGENT_TRACE_ALLOW_DEGRADED");
-        assert!(!allow_degraded_mode());
     }
 }

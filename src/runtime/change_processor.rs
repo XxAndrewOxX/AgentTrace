@@ -359,6 +359,7 @@ mod tests {
             synthesis: None,
             polling: PollingConfig::default(),
         };
+        store_cfg.save(root).unwrap();
         let config = MergedConfig::merge(global, store_cfg);
         (git, Arc::new(Mutex::new(manifest)), config)
     }

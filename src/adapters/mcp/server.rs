@@ -442,6 +442,7 @@ mod tests {
             synthesis: None,
             polling: PollingConfig::default(),
         };
+        store_cfg.save(&root).unwrap();
         let config = MergedConfig::merge(global, store_cfg);
         // Silence unused warning — we init git which sets up the repo
         drop((git, manifest, config));

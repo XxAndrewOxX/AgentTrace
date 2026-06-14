@@ -95,6 +95,7 @@ impl TestStore {
         let output = Command::new(&self.bin)
             .args(args)
             .current_dir(self.dir.path())
+            .env("AGENT_TRACE_ALLOW_DEGRADED", "1")
             .output()
             .expect("run agent-trace");
         CmdOutput { output }
@@ -212,6 +213,7 @@ impl TestStore {
         std::process::Command::new(&self.bin)
             .args(args)
             .current_dir(self.dir.path())
+            .env("AGENT_TRACE_ALLOW_DEGRADED", "1")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())

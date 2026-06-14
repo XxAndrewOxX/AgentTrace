@@ -34,6 +34,13 @@ fn setup_store(tmp: &TempDir) -> (GitStore, Arc<Mutex<Manifest>>) {
     let git = GitStore::init(root).unwrap();
     let info = StoreInfo::new("test".into());
     let manifest = Manifest::create_empty(info.clone(), root).unwrap();
+    let store_cfg = StoreConfig {
+        store: info,
+        llm: None,
+        synthesis: None,
+        polling: PollingConfig::default(),
+    };
+    store_cfg.save(root).unwrap();
     (git, Arc::new(Mutex::new(manifest)))
 }
 
