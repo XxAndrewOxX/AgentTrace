@@ -56,6 +56,8 @@ distribution plan.
 ## Quick Start
 
 ```bash
+agent-trace model setup
+agent-trace model serve-check
 agent-trace init .
 agent-trace add plan plan.md
 agent-trace connect my-agent

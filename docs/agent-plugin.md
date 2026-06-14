@@ -46,30 +46,29 @@ The MCP server exposes:
 
 ### Synthesis requirements
 
-Plugins should document that synthesis is optional but improves resume quality.
-Point users to:
+Plugins must document that synthesis is **required** before `init`:
 
 ```bash
 agent-trace model setup
-agent-trace model status
+agent-trace model serve-check
+agent-trace init .
 ```
 
 See [`docs/MODEL-SETUP.md`](MODEL-SETUP.md) for provider setup (Ollama +
 `qwen2.5:1.5b` is the default local path), credentials, and the `auto` fallback
-chain to embedded/degraded mechanical output.
+chain.
 
-### Scratch bridge
+### Scratch documents
 
-When no LLM is configured, agents maintain continuity via scratch documents:
+Agents should maintain continuity via scratch documents:
 
 - Write phase notes to scratch files (`progress.md`, `notes.md`, etc.)
 - On reconnect, call `get_resume_context` before `list_documents` or `read_file`
 - The briefing includes `running_summary.md`, **Prior Session Recap** (after a
   stale lock handoff), plan excerpts, and resume instructions
-- Scratch snippets are folded into `context.md` on refresh even without synthesis
 
-Plugin setup instructions should mention both `model setup` and the scratch
-bridge so agents work out of the box with degraded synthesis.
+Plugin setup instructions should mention both `model setup` and scratch docs for
+phase tracking.
 
 This keeps packaging simple: Cargo, GitHub Releases, and agent plugins all use
 the same binary artifact. Prebuilt binaries are published via GitHub Releases

@@ -1,23 +1,36 @@
 # Model Setup — Synthesis Provider Guide
 
-Agent Trace uses a **synthesis engine** to generate running summaries, session
-recaps, context documents, and change summaries. Synthesis is optional: when no
-backend is available, mechanical template fallbacks still produce usable output.
+Agent Trace **requires** a reachable synthesis backend before any store command
+(including `init`). Configure the model first, verify health, then initialize
+your workspace.
 
-## Quick start
+## Required setup flow
 
 ```bash
-# Interactive wizard (recommended)
+# 1. Interactive wizard (writes ~/.config/agent-trace/config.toml)
 agent-trace model setup
 
-# Verify the active backend
-agent-trace model status
+# 2. Verify the active backend
+agent-trace model serve-check
 agent-trace model test
+
+# 3. Only then initialize and use the store
+agent-trace init .
+agent-trace mcp --path . --actor my-agent
 ```
 
 Configuration is stored globally at `~/.config/agent-trace/config.toml` (or the
 platform equivalent). Per-store overrides can be set in
 `.agent-trace/config.toml`.
+
+If no backend is reachable, commands fail with:
+
+```text
+Synthesis backend unavailable. Run: agent-trace model setup && agent-trace model serve-check
+```
+
+Release builds without `--features llm` require Ollama (or a remote API) unless
+you ship an embedded GGUF model separately.
 
 ## Providers
 
@@ -64,7 +77,8 @@ Default base URL: `http://127.0.0.1:11434/v1`
 1. **Remote** — configured provider with valid credentials (if required)
 2. **Ollama** — local daemon at the configured base URL
 3. **Embedded** — GGUF model on disk (`agent-trace model pull <size>`)
-4. **Degraded** — mechanical templates (line counts, event lists, document index)
+
+If all backends fail, commands exit with the synthesis-unavailable error above.
 
 Set an explicit mode to skip the chain:
 
@@ -74,45 +88,43 @@ agent-trace model set --mode ollama
 agent-trace model set --mode embedded
 ```
 
-When degraded, `agent-trace model status` reports
-`Synthesis: degraded (no backend)`.
-
 ## What synthesis powers
 
-| Feature | LLM path | No-LLM fallback |
-|---------|----------|-----------------|
-| Running summary (`running_summary.md`) | `update_running_summary` (every N ops) | Template from plan + JSONL events (every write) |
+| Feature | LLM path | Fallback when LLM call fails |
+|---------|----------|------------------------------|
+| Running summary (`running_summary.md`) | `update_running_summary` (every N ops) | Template from plan + JSONL events |
 | Session recap (stale reconnect) | `summarize_session` | Mechanical event list by session ID |
 | Session checkpoint (active session) | `summarize_session` (every N ops) | Mechanical event list for current session |
 | Context (`context.md`) | `synthesize_context` | Document index + scratch snippets |
 | Change summaries | `summarize_change` | Line add/remove counts |
 
+Activity events (filesystem changes under the store root) drive template refresh
+on every op and LLM synthesis every `refresh_every_ops` (default 10).
+
 Session recaps are written to `.agent-trace/session_recaps/{session_id}.md`
-when a stale lock is detected (on reconnect or `get_resume_context`). Reconnecting
-agents see them under **Prior Session Recap** in `get_resume_context`.
+when a stale lock is detected (on reconnect or `get_resume_context`).
 
 Mid-session checkpoints are written to
 `.agent-trace/session_checkpoints/{session_id}.md` at the same N-op threshold as
-LLM running-summary synthesis. Interrupt/resume within the 30-minute session window
-surfaces them as **Current Session Checkpoint**.
+LLM running-summary synthesis.
 
 ## Refresh cadence
 
-`running_summary.md` is rebuilt from the event log and plan on **every** tracked
-write (template path, no LLM). LLM synthesis (`update_running_summary`) and session
-checkpoints run in the background after N operations. Tune frequency in
+`running_summary.md` is rebuilt from the event log and plan on **every** activity
+event (template path). LLM synthesis (`update_running_summary`) and session
+checkpoints run in the background after N activity events. Tune frequency in
 `.agent-trace/config.toml`:
 
 ```toml
 [synthesis]
-refresh_every_ops = 10   # default: every 10 document operations
+refresh_every_ops = 10   # default: every 10 activity events
 ```
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
-| `degraded` in `model status` | Run `model setup`; for Ollama, `model serve-check` |
+| `Synthesis backend unavailable` on any command | Run `model setup`; for Ollama, `model serve-check` |
 | Ollama unreachable | Start daemon: `ollama serve` |
 | Model not found | `agent-trace model pull 1.5b` or `ollama pull qwen2.5:1.5b` |
 | Remote 401/403 | `agent-trace model credentials set <provider>` |
@@ -121,5 +133,5 @@ refresh_every_ops = 10   # default: every 10 document operations
 ## Related docs
 
 - [`INSTALL.md`](INSTALL.md) — install paths and MCP startup
-- [`agent-plugin.md`](agent-plugin.md) — agent integration and scratch bridge
+- [`agent-plugin.md`](agent-plugin.md) — agent integration
 - [`VALIDATION-PLAN.md`](VALIDATION-PLAN.md) — E2E and release checks

@@ -112,6 +112,14 @@ cargo build --locked
 
 ## Agent and MCP setup
 
+Configure synthesis **before** initializing a store:
+
+```bash
+agent-trace model setup
+agent-trace model serve-check
+agent-trace init .
+```
+
 Agent integrations should use the same released CLI binary. The MCP server is
 started through:
 
@@ -127,33 +135,30 @@ For local source builds, use:
 
 The MCP server exposes document tools such as `read_file`, `write_file`,
 `list_documents`, `get_permissions`, `get_resume_context`, and `add_document`.
+A background activity monitor polls filesystem changes for the store lifetime
+(MCP and TUI both spawn it).
 
-### Synthesis (optional but recommended)
+### Synthesis (required)
 
-Running summaries, session recaps, and context synthesis use an LLM when
-configured. Without a backend, Agent Trace falls back to mechanical templates
-from the JSONL event log and manifest.
+Running summaries, session recaps, and context synthesis require a reachable
+backend. Without one, store commands (including `init`) fail fast.
 
 ```bash
 agent-trace model setup      # interactive provider wizard
-agent-trace model status     # show active backend
+agent-trace model serve-check
 agent-trace model test       # sample synthesis latency check
+agent-trace init .
 ```
 
 See [`docs/MODEL-SETUP.md`](MODEL-SETUP.md) for Ollama, Qwen 2.5, remote API
 keys, and the `auto` fallback chain.
 
-### Scratch bridge (no-LLM continuity)
+### Scratch documents for agent continuity
 
-When synthesis is unavailable, agents should rely on the **scratch bridge**:
-
-1. Track phase progress in a scratch doc (for example `progress.md` or
-   `notes.md`) via `write_file` — scratch docs are always agent-writable.
-2. Call `get_resume_context` on reconnect; it includes `running_summary.md`,
-   any **Prior Session Recap** from a stale lock handoff, and plan excerpts.
-3. Scratch snippets also appear in `context.md` when refreshed without an LLM.
-
-This keeps session continuity even when `model status` reports `degraded`.
+Track phase progress in scratch docs (for example `progress.md` or `notes.md`)
+via `write_file` — scratch docs are always agent-writable. On reconnect, call
+`get_resume_context`; it includes `running_summary.md`, any **Prior Session
+Recap** from a stale lock handoff, and plan excerpts.
 
 ## Validation
 

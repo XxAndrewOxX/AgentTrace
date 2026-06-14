@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** A reachable synthesis backend is required before any store command
+  (including `init`). Run `agent-trace model setup` and `model serve-check` first.
+- Activity ops: any filesystem change under the store root counts toward synthesis
+  thresholds (not just MCP writes to tracked docs). MCP and TUI spawn a background
+  activity monitor.
+- Git commit summaries distinguish template vs LLM running-summary refresh.
+
 ### Added
 
 - Running summary subsystem: `.agent-trace/summary_events.jsonl` event log and
