@@ -85,17 +85,21 @@ pub fn save_summary_state(store_root: &Path, state: &SummaryState) -> Result<()>
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct SummaryEvent {
     pub timestamp: String,
     pub session_id: Option<String>,
     pub agent_name: Option<String>,
     pub actor: String,
     pub action: String,
+    #[serde(default)]
+    pub change_kind: String,
     pub path: String,
     pub doc_type: String,
     pub summary: String,
     pub source: String,
+    #[serde(default)]
+    pub detected_by: String,
     pub lines_added: usize,
     pub lines_removed: usize,
 }
@@ -109,8 +113,18 @@ pub fn append_event(store_root: &Path, event: SummaryEvent) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    increment_synthesis_ops(store_root)?;
     let mut events = load_all_events(store_root)?;
+    if let Some(last) = events.last() {
+        if is_near_duplicate(last, &event) {
+            tracing::debug!(
+                "skipping duplicate activity event for {} ({})",
+                event.path,
+                event.change_kind
+            );
+            return Ok(());
+        }
+    }
+    increment_synthesis_ops(store_root)?;
     events.push(event);
     if events.len() > MAX_EVENTS_RETAINED {
         let skip = events.len() - MAX_EVENTS_RETAINED;
@@ -128,6 +142,39 @@ pub fn append_event(store_root: &Path, event: SummaryEvent) -> Result<()> {
     };
     std::fs::write(&path, content)?;
     Ok(())
+}
+
+fn is_near_duplicate(last: &SummaryEvent, event: &SummaryEvent) -> bool {
+    if last.path != event.path {
+        return false;
+    }
+    let kind = if event.change_kind.is_empty() {
+        &event.action
+    } else {
+        &event.change_kind
+    };
+    let last_kind = if last.change_kind.is_empty() {
+        &last.action
+    } else {
+        &last.change_kind
+    };
+    if last_kind != kind {
+        return false;
+    }
+    // Only suppress cross-source duplicates (e.g. MCP commit + poll detecting same file).
+    if last.detected_by.is_empty()
+        || event.detected_by.is_empty()
+        || last.detected_by == event.detected_by
+    {
+        return false;
+    }
+    let Ok(t1) = chrono::DateTime::parse_from_rfc3339(&last.timestamp) else {
+        return false;
+    };
+    let Ok(t2) = chrono::DateTime::parse_from_rfc3339(&event.timestamp) else {
+        return false;
+    };
+    (t2 - t1).num_seconds().abs() <= 5
 }
 
 pub fn load_all_events(store_root: &Path) -> Result<Vec<SummaryEvent>> {
@@ -303,6 +350,7 @@ pub fn write_running_summary(
     content: &str,
     git: &GitStore,
     manifest: &mut Manifest,
+    commit_label: &str,
 ) -> Result<()> {
     let rel = PathBuf::from(RUNNING_SUMMARY_FILE);
     let existed = store_root.join(&rel).exists();
@@ -322,7 +370,7 @@ pub fn write_running_summary(
         action: action.clone(),
         files: vec![(rel, action, DocType::Context)],
         actor: Actor::System,
-        summary: "refresh running summary".into(),
+        summary: format!("refresh running summary ({commit_label})"),
         agent_name: None,
         session_id: None,
     };
@@ -334,7 +382,7 @@ pub fn refresh_template(store_root: &Path, git: &GitStore, manifest: &Manifest) 
     let events = load_recent_events(store_root, 50)?;
     let content = synthesize_template_summary(store_root, manifest, &events)?;
     let mut manifest_mut = Manifest::load(store_root)?;
-    write_running_summary(store_root, &content, git, &mut manifest_mut)?;
+    write_running_summary(store_root, &content, git, &mut manifest_mut, "template")?;
     save_template_watermark(store_root, event_count(store_root)?)
 }
 
@@ -345,20 +393,36 @@ pub fn refresh(store_root: &Path, git: &GitStore, manifest: &Manifest) -> Result
     let plan_snippet = read_plan_snippet(store_root, manifest);
     let events_str = format_events_for_prompt(&events);
 
-    let content = if let Ok(api) = TraceInsightsFacade::from_store_root(store_root) {
+    let api = TraceInsightsFacade::from_store_root(store_root).map_err(|e| anyhow::anyhow!(e))?;
+    let start = std::time::Instant::now();
+    let used_llm = !api.is_degraded();
+    let (content, commit_label) = if used_llm {
         match api.update_running_summary(&previous, &events_str, &plan_snippet) {
-            Ok(s) => s,
+            Ok(s) => {
+                tracing::info!(
+                    "LLM running summary synthesis succeeded (backend={}, latency_ms={})",
+                    api.backend_label,
+                    start.elapsed().as_millis()
+                );
+                (s, api.backend_label.clone())
+            }
             Err(e) => {
                 tracing::warn!("synthesis running summary failed: {e}");
-                synthesize_template_summary(store_root, manifest, &events)?
+                (
+                    synthesize_template_summary(store_root, manifest, &events)?,
+                    "template".into(),
+                )
             }
         }
     } else {
-        synthesize_template_summary(store_root, manifest, &events)?
+        (
+            synthesize_template_summary(store_root, manifest, &events)?,
+            "template".into(),
+        )
     };
 
     let mut manifest_mut = Manifest::load(store_root)?;
-    write_running_summary(store_root, &content, git, &mut manifest_mut)?;
+    write_running_summary(store_root, &content, git, &mut manifest_mut, &commit_label)?;
     save_synthesis_watermark(store_root, event_count(store_root)?)
 }
 
@@ -645,7 +709,14 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
         let git = GitStore::init(&root).unwrap();
         let info = StoreInfo::new("test".into());
-        let manifest = Manifest::create_empty(info, &root).unwrap();
+        let manifest = Manifest::create_empty(info.clone(), &root).unwrap();
+        let store_cfg = crate::config::StoreConfig {
+            store: info,
+            llm: None,
+            synthesis: None,
+            polling: crate::config::PollingConfig::default(),
+        };
+        store_cfg.save(&root).unwrap();
         (root, manifest, git)
     }
 
@@ -663,8 +734,10 @@ mod tests {
             doc_type: "plan".into(),
             summary: "Updated phase 2".into(),
             source: "mcp_write".into(),
+            detected_by: "mcp".into(),
             lines_added: 5,
             lines_removed: 1,
+            change_kind: "modify".into(),
         };
         append_event(&root, event).unwrap();
         assert!(events_path(&root).exists());
@@ -696,8 +769,10 @@ mod tests {
             doc_type: "plan".into(),
             summary: "Phase 2 complete".into(),
             source: "mcp_write".into(),
+            detected_by: "mcp".into(),
             lines_added: 3,
             lines_removed: 0,
+            change_kind: "modify".into(),
         }];
         let summary = synthesize_template_summary(&root, &m, &events).unwrap();
         assert!(summary.contains("# Running Summary"));
@@ -712,7 +787,7 @@ mod tests {
         let (root, manifest, git) = setup(&tmp);
         let mut m = manifest;
         let content = "# Running Summary\n\ntest\n";
-        write_running_summary(&root, content, &git, &mut m).unwrap();
+        write_running_summary(&root, content, &git, &mut m, "template").unwrap();
         assert!(root.join(RUNNING_SUMMARY_FILE).exists());
         assert!(m.is_tracked(&PathBuf::from(RUNNING_SUMMARY_FILE)));
         assert_eq!(
@@ -743,8 +818,10 @@ mod tests {
                 doc_type: "plan".into(),
                 summary: "updated plan".into(),
                 source: "mcp_write".into(),
+                detected_by: "mcp".into(),
                 lines_added: 2,
                 lines_removed: 0,
+                change_kind: "modify".into(),
             },
         )
         .unwrap();
@@ -765,8 +842,10 @@ mod tests {
             doc_type: "scratch".into(),
             summary: summary.into(),
             source: "mcp_write".into(),
+            detected_by: "mcp".into(),
             lines_added: 1,
             lines_removed: 0,
+            change_kind: "modify".into(),
         }
     }
 
@@ -914,6 +993,7 @@ mod tests {
             "# Running Summary\n\n## Resume Here\n\nContinue\n",
             &git,
             &mut m,
+            "template",
         )
         .unwrap();
         let sess = session::start_session(&root, "bot", "cli").unwrap();
@@ -940,6 +1020,7 @@ mod tests {
             "# Running Summary\n\n## Resume Here\n\nContinue\n",
             &git,
             &mut m,
+            "template",
         )
         .unwrap();
         crate::session_recap::persist_session_recap(
@@ -974,8 +1055,10 @@ mod tests {
                     doc_type: "scratch".into(),
                     summary: format!("event {i}"),
                     source: "poll".into(),
+                    detected_by: "poll".into(),
                     lines_added: 0,
                     lines_removed: 0,
+                    change_kind: "modify".into(),
                 },
             )
             .unwrap();

@@ -58,8 +58,8 @@ pub fn run(store_root: &Path, cmd: ResumeCmd, output: &dyn CliOutput) -> Result<
                 output.line(&format!("Last {} event(s):", events.len()))?;
                 for e in events {
                     output.line(&format!(
-                        "  [{}] {} {} — {} ({})",
-                        e.timestamp, e.action, e.path, e.summary, e.source
+                        "  [{}] {} {} — {} (source={}, detected_by={})",
+                        e.timestamp, e.action, e.path, e.summary, e.source, e.detected_by
                     ))?;
                 }
             }
@@ -95,6 +95,7 @@ mod tests {
             "# Running Summary\n\ntest body\n",
             &git,
             &mut manifest,
+            "template",
         )
         .unwrap();
 
@@ -118,8 +119,10 @@ mod tests {
                 doc_type: "plan".into(),
                 summary: "test".into(),
                 source: "cli_write".into(),
+                detected_by: "cli".into(),
                 lines_added: 1,
                 lines_removed: 0,
+                change_kind: "modify".into(),
             },
         )
         .unwrap();
@@ -139,6 +142,7 @@ mod tests {
             "# Running Summary\n\n## Resume Here\n\nDo the thing\n",
             &git,
             &mut manifest,
+            "template",
         )
         .unwrap();
         let text = assemble_resume_context(root, &Actor::User, false, 5).unwrap();

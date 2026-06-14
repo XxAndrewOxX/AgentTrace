@@ -192,8 +192,10 @@ mod tests {
             doc_type: "plan".into(),
             summary: summary.into(),
             source: "mcp_write".into(),
+            detected_by: "mcp".into(),
             lines_added: 1,
             lines_removed: 0,
+            change_kind: "modify".into(),
         }
     }
 

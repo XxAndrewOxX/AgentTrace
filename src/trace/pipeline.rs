@@ -21,6 +21,15 @@ pub enum WriteDocumentError {
     Other(#[from] anyhow::Error),
 }
 
+fn detected_by_from_source(source: &str) -> &'static str {
+    match source {
+        "mcp_write" | "mcp" => "mcp",
+        "cli_write" | "cli" => "cli",
+        "poll" => "poll",
+        _ => "system",
+    }
+}
+
 fn source_from_prefix(summary_prefix: &str) -> &'static str {
     if summary_prefix.starts_with("mcp") {
         "mcp_write"
@@ -196,10 +205,12 @@ pub fn apply_trace_hooks(
             agent_name: actor.agent_name().map(String::from),
             actor: actor.to_string(),
             action: action.to_string(),
+            change_kind: action.to_string(),
             path: path.display().to_string(),
             doc_type: doc_type.to_string(),
             summary: event_summary,
             source: source.to_string(),
+            detected_by: detected_by_from_source(source).to_string(),
             lines_added: stats.lines_added,
             lines_removed: stats.lines_removed,
         };
