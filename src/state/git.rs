@@ -144,7 +144,7 @@ impl GitStore {
                     .map(PathBuf::from)
                     .unwrap_or_else(|| new_path.clone());
 
-                if !is_md(&new_path) && !is_md(&old_path) {
+                if !should_track_activity(&new_path) && !should_track_activity(&old_path) {
                     continue;
                 }
                 changes.push(FileChange::Renamed {
@@ -159,7 +159,7 @@ impl GitStore {
                 None => continue,
             };
 
-            if !is_md(&path) {
+            if !should_track_activity(&path) {
                 continue;
             }
 
@@ -651,8 +651,28 @@ fn parse_file_line(s: &str) -> Option<(PathBuf, Action, DocType)> {
     Some((path, action, doc_type))
 }
 
-fn is_md(p: &Path) -> bool {
-    p.extension().and_then(|e| e.to_str()) == Some("md")
+/// Whether a filesystem path should count as an activity event (poll / ops counter).
+pub fn should_track_activity(path: &Path) -> bool {
+    for component in path.components() {
+        let name = component.as_os_str().to_string_lossy();
+        if matches!(
+            name.as_ref(),
+            ".agent-trace" | ".git" | ".venv" | "venv" | "node_modules" | "__pycache__"
+                | "target" | "dist"
+        ) {
+            return false;
+        }
+    }
+    if path
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy() == ".DS_Store")
+    {
+        return false;
+    }
+    if path.extension().and_then(|e| e.to_str()) == Some("pyc") {
+        return false;
+    }
+    true
 }
 
 fn commit_touches_file(repo: &Repository, commit: &git2::Commit<'_>, path: &str) -> Result<bool> {
@@ -726,9 +746,36 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_changes_tracks_non_md() {
+        let (_tmp, store) = setup_store();
+        std::fs::write(store.workdir.join("script.py"), "print('hi')").unwrap();
+        let changes = store.detect_changes().unwrap();
+        assert_eq!(changes.len(), 1);
+        assert!(matches!(changes[0], FileChange::New(_)));
+    }
+
+    #[test]
+    fn test_detect_changes_excludes_venv() {
+        let (_tmp, store) = setup_store();
+        std::fs::create_dir_all(store.workdir.join(".venv/lib")).unwrap();
+        std::fs::write(store.workdir.join(".venv/lib/site.py"), "x").unwrap();
+        let changes = store.detect_changes().unwrap();
+        assert!(changes.is_empty());
+    }
+
+    #[test]
+    fn test_should_track_activity_rules() {
+        assert!(should_track_activity(&PathBuf::from("src/main.rs")));
+        assert!(should_track_activity(&PathBuf::from("notes.md")));
+        assert!(!should_track_activity(&PathBuf::from(".venv/lib/x.py")));
+        assert!(!should_track_activity(&PathBuf::from("node_modules/pkg/index.js")));
+        assert!(!should_track_activity(&PathBuf::from(".agent-trace/config.toml")));
+    }
+
+    #[test]
     fn test_detect_changes_no_non_md() {
         let (_tmp, store) = setup_store();
-        std::fs::write(store.workdir.join("file.txt"), "ignored").unwrap();
+        std::fs::write(store.workdir.join(".DS_Store"), "ignored").unwrap();
         let changes = store.detect_changes().unwrap();
         assert!(changes.is_empty());
     }

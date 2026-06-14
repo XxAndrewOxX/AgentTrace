@@ -87,13 +87,20 @@ pub fn run(path: &Path, scan: bool, output: &dyn CliOutput) -> Result<()> {
     {
         let agent_trace_info = crate::git_store::CommitInfo {
             action: crate::types::Action::Create,
-            files: vec![(
-                std::path::PathBuf::from("AGENT-TRACE.md"),
-                crate::types::Action::Create,
-                crate::types::DocType::Reference,
-            )],
+            files: vec![
+                (
+                    std::path::PathBuf::from("AGENT-TRACE.md"),
+                    crate::types::Action::Create,
+                    crate::types::DocType::Reference,
+                ),
+                (
+                    std::path::PathBuf::from(".gitignore"),
+                    crate::types::Action::Create,
+                    DocType::Reference,
+                ),
+            ],
             actor: crate::types::Actor::System,
-            summary: "init: create AGENT-TRACE.md".into(),
+            summary: "init: create AGENT-TRACE.md and .gitignore".into(),
             agent_name: None,
             session_id: None,
         };
