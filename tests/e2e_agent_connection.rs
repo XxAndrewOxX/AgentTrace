@@ -5,6 +5,7 @@
 #[path = "helpers.rs"]
 mod helpers;
 use helpers::{stale_lock_content, TestStore};
+use std::time::Duration;
 
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
@@ -779,6 +780,91 @@ fn ac9_resume_show_mid_session_checkpoint() {
     out.assert_stdout_contains("Session:");
     out.assert_stdout_contains("# Running Summary");
     out.assert_stdout_contains("plan.md");
+}
+
+// ── MC-12: shell .py edit counts as poll-detected op ─────────────────────────
+
+#[test]
+fn mc12_shell_py_edit_counts_as_poll_op() {
+    let store = TestStore::new();
+    store.set_fast_polling();
+    store
+        .run(&["connect", "shell-agent"])
+        .expect_success("connect");
+    let _mcp = McpHarness::new(&store, "shell-agent");
+
+    store.write_file("worker.py", "print('agent shell work')\n");
+
+    store.wait_for_file(".agent-trace/summary_events.jsonl");
+    store.wait_for_file_contains(".agent-trace/summary_events.jsonl", "worker.py");
+    let events = store.read_file(".agent-trace/summary_events.jsonl");
+    assert!(
+        events.contains("\"detected_by\":\"poll\"") || events.contains(r#""detected_by": "poll""#),
+        "expected poll-detected event for worker.py:\n{events}"
+    );
+}
+
+// ── MC-13: .venv changes do not increment ops ────────────────────────────────
+
+#[test]
+fn mc13_venv_changes_excluded_from_ops() {
+    let store = TestStore::new();
+    store.set_fast_polling();
+    let _mcp = McpHarness::new(&store, "test-agent");
+
+    store.write_file("seed.md", "# seed\n");
+    store.run(&["add", "scratch", "seed.md"]).expect_success("add");
+    store
+        .run(&["write", "seed.md", "--content", "# seed v2\n"])
+        .expect_success("write seed");
+    store.wait_for_event_count(1);
+
+    store.write_file(".venv/lib/python3/site.py", "ignored package file\n");
+    std::thread::sleep(Duration::from_secs(3));
+
+    let events = store.read_file(".agent-trace/summary_events.jsonl");
+    assert!(
+        !events.contains(".venv"),
+        ".venv changes should not appear in summary events:\n{events}"
+    );
+}
+
+// ── MC-14: 10 filesystem ops trigger LLM synthesis (mock backend) ─────────────
+
+#[test]
+fn mc14_ten_ops_trigger_llm_synthesis_with_mock_ollama() {
+    let mock = helpers::MockSynthesisServer::start();
+    let store = TestStore::new();
+    store.set_fast_polling();
+    store.configure_mock_synthesis(&mock, 10);
+
+    store
+        .run(&["connect", "llm-agent"])
+        .expect_success("connect");
+    let _mcp = McpHarness::new(&store, "llm-agent");
+
+    for i in 0..10 {
+        store.write_file(
+            &format!("task{i}.py"),
+            &format!("# task step {i}\n"),
+        );
+        std::thread::sleep(Duration::from_millis(150));
+    }
+
+    store.wait_for_event_count(10);
+    store.wait_for_summary_refresh();
+    store
+        .run(&["resume", "refresh"])
+        .expect_success("resume refresh");
+    store.wait_for_file_contains("running_summary.md", "Mock LLM synthesis output");
+
+    let log = store.run(&["log", "--limit", "8"]).expect_success("log");
+    let log_out = log.stdout();
+    assert!(
+        log_out.contains("refresh running summary (ollama)")
+            || log_out.contains("refresh running summary (llm:"),
+        "expected LLM-labelled running summary commit in git log:\n{log_out}"
+    );
 }
 
 // ── Helpers extension needed for stderr assertions ────────────────────────────

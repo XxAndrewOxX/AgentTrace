@@ -29,6 +29,7 @@ fn perf_budget_ms(local_ms: u128) -> u128 {
 // ── Shared setup helpers ──────────────────────────────────────────────────────
 
 fn setup_store(tmp: &TempDir) -> (GitStore, Arc<Mutex<Manifest>>) {
+    std::env::set_var("AGENT_TRACE_ALLOW_DEGRADED", "1");
     let root = tmp.path();
     std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
     let git = GitStore::init(root).unwrap();
