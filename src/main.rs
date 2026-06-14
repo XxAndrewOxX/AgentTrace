@@ -4,6 +4,7 @@ use agent_trace::commands::model::ModelCmd;
 use agent_trace::commands::resume::ResumeCmd;
 use agent_trace::mcp;
 use agent_trace::observability::{self, TerminalOutput};
+use agent_trace::runtime::require_synthesis_backend;
 use agent_trace::types::DocType;
 
 use anyhow::Result;
@@ -238,10 +239,30 @@ pub enum Commands {
 
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
+fn store_root_for_command(cmd: &Commands) -> PathBuf {
+    match cmd {
+        Commands::Init { path, .. } => path.clone(),
+        Commands::Open { path, .. } | Commands::Status { path, .. } => {
+            path.clone().unwrap_or_else(|| PathBuf::from("."))
+        }
+        Commands::Mcp { path, .. } => path.clone(),
+        _ => PathBuf::from("."),
+    }
+}
+
+fn requires_synthesis_gate(cmd: &Commands) -> bool {
+    !matches!(cmd, Commands::Model { .. })
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     observability::init_tracing(cli.verbose)?;
     let output = TerminalOutput::new(cli.quiet);
+
+    if requires_synthesis_gate(&cli.command) {
+        let root = store_root_for_command(&cli.command);
+        require_synthesis_backend(Some(root.as_path()))?;
+    }
 
     match cli.command {
         Commands::Init { path, scan } => commands::init::run(&path, scan, &output),
