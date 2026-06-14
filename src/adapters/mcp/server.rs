@@ -1,9 +1,12 @@
 use crate::agent_trace_md;
+use crate::config::MergedConfig;
 use crate::data_plane::{self, WriteDocumentError};
 use crate::git_store::CommitInfo;
+use crate::manifest::Manifest;
 use crate::observability::format_permission_denied;
 use crate::permissions::{check_permission, Overrides, PermissionResult};
 use crate::running_summary;
+use crate::runtime::ActivityMonitor;
 use crate::session::{self, AgentState};
 use crate::store::Store;
 use crate::types::{Action, Actor, DocType};
@@ -11,9 +14,20 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 pub fn run(root: &Path, actor_name: Option<String>) -> Result<()> {
-    let agent_state = AgentState::new(actor_name);
+    let config = MergedConfig::load(root)?;
+    let manifest = Arc::new(Mutex::new(Manifest::load(root)?));
+    let agent_state = AgentState::new(actor_name.clone());
+    let _monitor = ActivityMonitor::try_start(
+        root,
+        config,
+        manifest,
+        AgentState::new(actor_name.clone()),
+        None,
+    )?;
+
     let actor = agent_state.current_actor(root);
     let mut session_id = session::session_id_for_actor(root, &actor);
     if let Some(name) = actor.agent_name() {

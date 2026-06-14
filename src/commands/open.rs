@@ -3,7 +3,7 @@ use crate::git_store::GitStore;
 use crate::llm::{spawn_llm_task, LlmRequest, LlmResponse, NoLlm};
 use crate::manifest::Manifest;
 use crate::observability::CliOutput;
-use crate::poll::{ChangeProcessor, InstanceLock, UiEvent};
+use crate::runtime::{ActivityMonitor, UiEvent};
 use crate::session::AgentState;
 use crate::tui::app::App;
 use crate::tui::banner;
@@ -79,16 +79,6 @@ pub fn run(
         });
     }
 
-    // Acquire instance lock.
-    let _instance_lock = match InstanceLock::acquire(&store_root) {
-        Ok(lock) => lock,
-        Err(e) => {
-            output.warn(&format!("Warning: {e}"))?;
-            output.warn("Opening in read-only mode (poll loop disabled).")?;
-            return run_readonly(&store_root, manifest, agent_name, ascii);
-        }
-    };
-
     // Load initial git log for changelog panel.
     let git = GitStore::open(&store_root)?;
     let initial_log = git.log(50).unwrap_or_default();
@@ -96,34 +86,22 @@ pub fn run(
     // Load command history.
     let history = load_command_history(&store_root);
 
-    // Create UI channel.
+    // Create UI channel and start the shared activity monitor.
     let (ui_tx, ui_rx) = tokio::sync::mpsc::channel::<UiEvent>(64);
-
-    // Build the change processor.
-    let agent_state = AgentState::new(agent_name);
-    let processor = ChangeProcessor::new(
-        git,
-        manifest.clone(),
+    let agent_state = AgentState::new(agent_name.clone());
+    let monitor = ActivityMonitor::try_start(
+        &store_root,
         config.clone(),
+        manifest.clone(),
         agent_state,
         Some(ui_tx),
-    );
-
-    // Spawn the poll loop.
-    let poll_interval_ms = config.polling.interval_ms;
-    let processor = Arc::new(Mutex::new(processor));
-    let processor_clone = processor.clone();
-
-    runtime.spawn(async move {
-        loop {
-            tokio::time::sleep(tokio::time::Duration::from_millis(poll_interval_ms)).await;
-            if let Ok(mut p) = processor_clone.lock() {
-                if let Err(e) = p.run_poll_cycle() {
-                    tracing::warn!("Poll cycle error: {}", e);
-                }
-            }
-        }
-    });
+    )?;
+    if monitor.is_none() {
+        output.warn("Warning: Another agent-trace instance is running (poll loop disabled).")?;
+        output.warn("Opening in read-only mode.")?;
+        return run_readonly(&store_root, manifest, agent_name, ascii);
+    }
+    let _monitor = monitor.unwrap();
 
     // Enter TUI.
     enable_raw_mode()?;

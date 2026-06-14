@@ -5,7 +5,7 @@ use crate::runtime::{AgentState, ChangeProcessor, InstanceLock, UiEvent};
 use anyhow::Result;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use tokio::runtime::Runtime;
+use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 
 /// Background filesystem activity monitor (poll loop + instance lock).
@@ -23,7 +23,6 @@ impl ActivityMonitor {
         manifest: Arc<Mutex<Manifest>>,
         agent_state: AgentState,
         ui_tx: Option<Sender<UiEvent>>,
-        runtime: &Runtime,
     ) -> Result<Option<Self>> {
         let instance_lock = match InstanceLock::acquire(store_root) {
             Ok(lock) => lock,
@@ -45,9 +44,9 @@ impl ActivityMonitor {
         let poll_interval_ms = config.polling.interval_ms;
         let processor_clone = processor.clone();
 
-        runtime.spawn(async move {
+        std::thread::spawn(move || {
             loop {
-                tokio::time::sleep(tokio::time::Duration::from_millis(poll_interval_ms)).await;
+                std::thread::sleep(Duration::from_millis(poll_interval_ms));
                 if let Ok(mut p) = processor_clone.lock() {
                     if let Err(e) = p.run_poll_cycle() {
                         tracing::warn!("Poll cycle error: {e}");
@@ -78,7 +77,6 @@ mod tests {
         let _ = git;
         let info = StoreInfo::new("test".into());
         let manifest = Manifest::create_empty(info.clone(), root).unwrap();
-        let global = GlobalConfig::default();
         let store_cfg = StoreConfig {
             store: info,
             llm: None,
@@ -88,16 +86,16 @@ mod tests {
                 ..PollingConfig::default()
             },
         };
+        store_cfg.save(root).unwrap();
+        let global = GlobalConfig::default();
         let config = MergedConfig::merge(global, store_cfg);
         let manifest = Arc::new(Mutex::new(manifest));
-        let runtime = Runtime::new().unwrap();
         let monitor = ActivityMonitor::try_start(
             root,
             config,
             manifest,
             AgentState::new(None),
             None,
-            &runtime,
         )
         .unwrap();
         assert!(monitor.is_some());
