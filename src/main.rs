@@ -251,7 +251,13 @@ fn store_root_for_command(cmd: &Commands) -> PathBuf {
 }
 
 fn requires_synthesis_gate(cmd: &Commands) -> bool {
-    !matches!(cmd, Commands::Model { .. })
+    // Model subcommands handle their own backend checks; Init and Connect
+    // don't synthesize; Mcp starts a server.
+    !matches!(
+        cmd,
+        Commands::Model { .. } | Commands::Init { .. } | Commands::Connect { .. }
+            | Commands::Disconnect | Commands::Mcp { .. }
+    )
 }
 
 fn main() -> Result<()> {

@@ -39,14 +39,17 @@ pub enum ModelCmd {
     Test,
     /// List known models per provider.
     List,
-    /// Pull Ollama model or download embedded GGUF.
+    /// Pull an Ollama model by name or short alias (e.g. 1.5b, qwen2.5:1.5b).
     Pull {
-        /// Size key: 0.5b, 1.5b, 3b (embedded) or Ollama tag suffix.
+        /// Model tag or short alias (default: 1.5b → qwen2.5:1.5b).
         #[arg(default_value = "1.5b")]
         size: String,
     },
     /// Check whether Ollama is reachable and the configured model is pulled.
     ServeCheck,
+    /// Ensure Ollama daemon is running and configured model is pulled.
+    /// Starts ollama serve if unreachable, pulls model if missing.
+    Ensure,
 }
 
 #[derive(Subcommand, Debug)]
@@ -62,7 +65,7 @@ pub fn run(
 ) -> Result<()> {
     match cmd {
         ModelCmd::Status => cmd_status(store_root, output),
-        ModelCmd::Setup => cmd_setup(output),
+        ModelCmd::Setup => cmd_setup(store_root, output),
         ModelCmd::Use { provider } => cmd_use(&provider, output),
         ModelCmd::Set {
             provider,
@@ -75,6 +78,7 @@ pub fn run(
         ModelCmd::List => cmd_list(output),
         ModelCmd::Pull { size } => cmd_pull(&size, output),
         ModelCmd::ServeCheck => cmd_serve_check(output),
+        ModelCmd::Ensure => cmd_ensure(store_root, output),
     }
 }
 
@@ -154,7 +158,7 @@ fn cmd_status(store_root: Option<&std::path::Path>, output: &dyn CliOutput) -> R
     Ok(())
 }
 
-fn cmd_setup(output: &dyn CliOutput) -> Result<()> {
+fn cmd_setup(store_root: Option<&std::path::Path>, output: &dyn CliOutput) -> Result<()> {
     output.line("Agent Trace — synthesis setup")?;
     output.line("Providers: openai, anthropic, openrouter, ollama, custom")?;
     output.line("Enter provider [ollama]: ")?;
@@ -184,7 +188,7 @@ fn cmd_setup(output: &dyn CliOutput) -> Result<()> {
     config.synthesis.model = if line.trim().is_empty() {
         provider.default_model().into()
     } else {
-        line.trim().into()
+        normalize_model_alias(line.trim())
     };
 
     if provider == SynthesisProvider::Custom || provider == SynthesisProvider::Ollama {
@@ -197,17 +201,34 @@ fn cmd_setup(output: &dyn CliOutput) -> Result<()> {
     }
 
     config.save()?;
-    let merged = MergedConfig::merge(
-        config.clone(),
-        crate::config::StoreConfig {
-            store: crate::config::StoreInfo::new("global".into()),
-            llm: None,
-            synthesis: None,
-            polling: crate::config::PollingConfig::default(),
-        },
-    );
+
+    // For Ollama providers, run ensure_ready to start daemon and pull model
+    if provider == SynthesisProvider::Ollama || provider == SynthesisProvider::Custom {
+        output.line("Ensuring Ollama daemon and model are ready…")?;
+        let merged = load_merged(store_root)?;
+        match Llm::ensure_ready(&merged) {
+            Ok(report) => {
+                for line in report.display().lines() {
+                    output.line(&format!("  {line}"))?;
+                }
+            }
+            Err(e) => output.warn(&format!("  Warning: {e} — run `agent-trace model ensure`"))?,
+        }
+    }
+
+    let merged = load_merged(store_root)?;
     output.line(&synthesis_status_line(&merged))?;
     output.line("Run `agent-trace model test` to verify.")?;
+    Ok(())
+}
+
+fn cmd_ensure(store_root: Option<&std::path::Path>, output: &dyn CliOutput) -> Result<()> {
+    let merged = load_merged(store_root)?;
+    output.line("Ensuring Ollama daemon and model are ready…")?;
+    let report = Llm::ensure_ready(&merged)?;
+    for line in report.display().lines() {
+        output.line(line)?;
+    }
     Ok(())
 }
 
@@ -338,7 +359,7 @@ fn cmd_serve_check(output: &dyn CliOutput) -> Result<()> {
         if reachable {
             "reachable"
         } else {
-            "unreachable — run `agent-trace model ensure` to start daemon"
+            "unreachable"
         }
     ))?;
     if reachable {
@@ -349,9 +370,14 @@ fn cmd_serve_check(output: &dyn CliOutput) -> Result<()> {
             if pulled {
                 "pulled"
             } else {
-                "not pulled — run `agent-trace model ensure`"
+                "not pulled"
             }
         ))?;
+        if !pulled {
+            output.line("  → Run `agent-trace model ensure` to pull the model automatically")?;
+        }
+    } else {
+        output.line("  → Run `agent-trace model ensure` to start the daemon and pull the model")?;
     }
     Ok(())
 }
