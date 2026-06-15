@@ -230,14 +230,16 @@ pub fn apply_trace_hooks(
 
     sync_agent_trace_md(store_root, git, manifest)?;
 
-    let refresh_context = changed_files.iter().any(|(_, _, doc_type)| {
-        matches!(
-            doc_type,
-            DocType::Plan | DocType::Reference | DocType::Scratch
-        )
-    });
-    if refresh_context {
-        sync_context_md(store_root, git, manifest, &trace_insights)?;
+    // WS-B: refresh context on *any* tracked file activity — not just curated
+    // doc types — so shell edits to source files (e.g. worker.py) are reflected
+    // in context.md too.
+    let changed_paths: Vec<PathBuf> = changed_files
+        .iter()
+        .map(|(p, _, _)| p.clone())
+        .filter(|p| crate::git_store::should_track_activity(p))
+        .collect();
+    if !changed_paths.is_empty() {
+        sync_context_md(store_root, git, manifest, &trace_insights, &changed_paths)?;
     }
 
     Ok(())
@@ -280,6 +282,7 @@ fn sync_context_md(
     git: &crate::git_store::GitStore,
     manifest: &crate::manifest::Manifest,
     trace_insights: &TraceInsightsFacade,
+    changed_paths: &[PathBuf],
 ) -> anyhow::Result<()> {
     // `is_degraded()` is only reachable under the test/escape-hatch path (the
     // gate above already bailed otherwise). It must use the template — never the
@@ -290,7 +293,7 @@ fn sync_context_md(
             "template".to_string(),
         )
     } else {
-        let docs = build_trace_documents(store_root, manifest);
+        let docs = build_trace_documents(store_root, manifest, changed_paths);
         let updates = load_pending_updates(store_root)?
             .into_iter()
             .map(|u| u.update)
@@ -340,8 +343,10 @@ fn sync_context_md(
 fn build_trace_documents(
     store_root: &Path,
     manifest: &crate::manifest::Manifest,
+    changed_paths: &[PathBuf],
 ) -> Vec<TraceDocument> {
-    manifest
+    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let mut docs: Vec<TraceDocument> = manifest
         .documents()
         .iter()
         .filter(|d| {
@@ -351,6 +356,7 @@ fn build_trace_documents(
             )
         })
         .map(|d| {
+            seen.insert(d.path.clone());
             let content = std::fs::read_to_string(store_root.join(&d.path)).unwrap_or_default();
             let snippet: String = content.chars().take(2000).collect();
             TraceDocument {
@@ -359,7 +365,31 @@ fn build_trace_documents(
                 content_snippet: snippet,
             }
         })
-        .collect()
+        .collect();
+
+    // WS-B: include unmanifested files that were just touched (e.g. source files
+    // edited via the shell) so the synthesized context reflects real activity,
+    // without registering them as managed documents. They are labelled Scratch
+    // for synthesis purposes only.
+    for path in changed_paths {
+        if seen.contains(path) || !crate::git_store::should_track_activity(path) {
+            continue;
+        }
+        let full = store_root.join(path);
+        if !full.is_file() {
+            continue;
+        }
+        seen.insert(path.clone());
+        let content = std::fs::read_to_string(&full).unwrap_or_default();
+        let snippet: String = content.chars().take(2000).collect();
+        docs.push(TraceDocument {
+            path: path.display().to_string(),
+            doc_type: DocType::Scratch,
+            content_snippet: snippet,
+        });
+    }
+
+    docs
 }
 
 #[cfg(test)]
@@ -416,5 +446,50 @@ mod tests {
         let ctx = std::fs::read_to_string(root.join("context.md")).expect("context.md created");
         assert!(ctx.contains("reconnect watermark test"));
         assert!(ctx.contains("[scratch] notes.md:"));
+    }
+
+    #[test]
+    fn build_trace_documents_includes_unmanifested_changed_paths() {
+        let tmp = TempDir::new().unwrap();
+        let (root, mut manifest, _git) = setup(&tmp);
+
+        // A managed plan document.
+        std::fs::write(root.join("plan.md"), "# Plan\n- [ ] step one\n").unwrap();
+        manifest
+            .register(&PathBuf::from("plan.md"), DocType::Plan, "")
+            .unwrap();
+
+        // An unmanaged source file touched by a shell edit.
+        std::fs::write(root.join("worker.py"), "print('worker activity')\n").unwrap();
+
+        let docs = build_trace_documents(&root, &manifest, &[PathBuf::from("worker.py")]);
+
+        assert!(
+            docs.iter().any(|d| d.path == "plan.md"),
+            "should include manifest plan document"
+        );
+        let worker = docs
+            .iter()
+            .find(|d| d.path == "worker.py")
+            .expect("should include unmanifested changed path");
+        assert_eq!(worker.doc_type, DocType::Scratch);
+        assert!(worker.content_snippet.contains("worker activity"));
+
+        // Unmanaged file must NOT be registered in the manifest.
+        assert!(!manifest.is_tracked(&PathBuf::from("worker.py")));
+    }
+
+    #[test]
+    fn build_trace_documents_does_not_duplicate_managed_paths() {
+        let tmp = TempDir::new().unwrap();
+        let (root, mut manifest, _git) = setup(&tmp);
+        std::fs::write(root.join("notes.md"), "scratch note\n").unwrap();
+        manifest
+            .register(&PathBuf::from("notes.md"), DocType::Scratch, "")
+            .unwrap();
+
+        let docs = build_trace_documents(&root, &manifest, &[PathBuf::from("notes.md")]);
+        let count = docs.iter().filter(|d| d.path == "notes.md").count();
+        assert_eq!(count, 1, "managed + changed path must not be duplicated");
     }
 }
