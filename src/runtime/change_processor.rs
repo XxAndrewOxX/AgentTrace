@@ -115,6 +115,14 @@ impl ChangeProcessor {
     pub fn run_poll_cycle(&mut self) -> Result<()> {
         self.refresh_session_id();
 
+        // Reload the manifest from disk at the start of each cycle. Disk is the
+        // source of truth: out-of-process writers (MCP/CLI) persist the manifest
+        // before committing, so reloading here keeps the poll loop's in-memory
+        // view consistent and avoids drift.
+        if let Err(e) = self.reload_manifest_from_disk() {
+            tracing::warn!("Failed to reload manifest at poll cycle start: {e}");
+        }
+
         let store_root = self.git.workdir.clone();
         let changes = self.git.detect_changes()?;
         let mut own_commit_oid: Option<Oid> = None;
@@ -483,6 +491,9 @@ mod tests {
             let mut m = manifest.lock().unwrap();
             m.register(&PathBuf::from("context.md"), DocType::Context, "")
                 .unwrap();
+            // Persist so the poll cycle's start-of-cycle reload sees it (disk is
+            // the source of truth).
+            m.save(tmp.path()).unwrap();
         }
 
         // Agent modifies context.md.
