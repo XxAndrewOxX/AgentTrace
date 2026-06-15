@@ -7,10 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Breaking changes
+
+- **Embedded/Candle provider removed.** The `embedded` provider and `mode =
+  "embedded"` are no longer functional. Existing configs using these values are
+  automatically migrated to `provider = "ollama"` / `mode = "auto"` at load time.
+  Rebuild with no `--features llm` (only default features needed).
+- **`[llm]` config section removed.** `model_path`, `embedded_model_source`, and
+  related GGUF fields are no longer read. Use `[synthesis]` only.
+- **`model pull <size>` no longer downloads GGUF.** `model pull 0.5b` now pulls
+  the Ollama tag `qwen2.5:0.5b` instead of downloading a GGUF file.
+- **`TraceInsightsFacade` renamed to `Llm`.** Library consumers: update imports.
+  `TraceInsightsFacade` is kept as a deprecated type alias for one release.
+- **Gate error message updated.** Synthesis-unavailable errors now say
+  `agent-trace model ensure` instead of `model setup && model serve-check`.
+
+### Added
+
+- **Ollama lifecycle management (`model ensure`).** New command that:
+  - Detects whether the Ollama daemon is reachable via HTTP
+  - Spawns `ollama serve` if not reachable (unless `AGENT_TRACE_NO_OLLAMA_START=1`)
+  - Polls until reachable (up to 30s)
+  - Pulls the configured model if not present
+- **`OLLAMA_BIN` env variable** — override path to the Ollama binary.
+- **`AGENT_TRACE_NO_OLLAMA_START=1`** — skip daemon spawn (useful for CI/E2E).
+- **Model alias normalization** — `1.5b` → `qwen2.5:1.5b`, `0.5b` → `qwen2.5:0.5b`.
+- **`SynthesisConfig::effective_model()`** — returns configured model or provider default.
+- **`Llm::ensure_ready()`**, `Llm::require_backend()`, `Llm::backend_info()` on
+  unified LLM facade.
+- `model setup` now calls `model ensure` for Ollama/Custom providers.
+
 ### Changed
 
 - **Breaking:** A reachable synthesis backend is required before any store command
-  (including `init`). Run `agent-trace model setup` and `model serve-check` first.
+  (excluding `init`, `connect`, `disconnect`, `mcp`). Run `agent-trace model ensure` first.
 - **Pipeline synthesis gate:** the post-write pipeline (`apply_trace_hooks`,
   `sync_context_md`, `context refresh`) now also enforces the synthesis gate, not
   just CLI startup. A degraded backend with no escape hatch fails fast instead of

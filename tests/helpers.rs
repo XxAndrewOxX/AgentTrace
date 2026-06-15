@@ -6,7 +6,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -17,23 +17,39 @@ const DEFAULT_FILE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Minimal OpenAI-compatible HTTP server for synthesis E2E tests.
 pub struct MockSynthesisServer {
     pub base_url: String,
+    /// Native Ollama base (without /v1) for api/tags and api/pull endpoints.
+    pub native_base_url: String,
     _handle: JoinHandle<()>,
 }
 
 impl MockSynthesisServer {
+    /// Start a mock server with a pre-listed model "qwen2.5:1.5b" (already pulled).
     pub fn start() -> Self {
+        let models = Arc::new(Mutex::new(vec!["qwen2.5:1.5b".to_string()]));
+        Self::start_with_models(models)
+    }
+
+    /// Start with an empty model list (no models pulled initially).
+    pub fn start_empty() -> Self {
+        let models = Arc::new(Mutex::new(vec![]));
+        Self::start_with_models(models)
+    }
+
+    fn start_with_models(models: Arc<Mutex<Vec<String>>>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock synthesis server");
         let addr = listener.local_addr().expect("mock server addr");
         let base_url = format!("http://{addr}/v1");
-        let running = Arc::new(AtomicBool::new(true));
-        let run_flag = running.clone();
+        let native_base_url = format!("http://{addr}");
+        let run_flag = Arc::new(AtomicBool::new(true));
+        let run_flag_clone = run_flag.clone();
         let handle = thread::spawn(move || {
             for stream in listener.incoming() {
-                if !run_flag.load(Ordering::Relaxed) {
+                if !run_flag_clone.load(Ordering::Relaxed) {
                     break;
                 }
                 if let Ok(stream) = stream {
-                    handle_mock_connection(stream);
+                    let models = models.clone();
+                    handle_mock_connection(stream, models);
                 }
             }
         });
@@ -41,16 +57,17 @@ impl MockSynthesisServer {
         std::thread::sleep(Duration::from_millis(20));
         Self {
             base_url,
+            native_base_url,
             _handle: handle,
         }
     }
 }
 
-fn handle_mock_connection(stream: TcpStream) {
+fn handle_mock_connection(stream: TcpStream, models: Arc<Mutex<Vec<String>>>) {
     thread::spawn(move || {
         let mut stream = stream;
         let mut buf = Vec::new();
-        let mut chunk = [0u8; 4096];
+        let mut chunk = [0u8; 8192];
         loop {
             match stream.read(&mut chunk) {
                 Ok(0) => break,
@@ -63,12 +80,45 @@ fn handle_mock_connection(stream: TcpStream) {
                 Err(_) => return,
             }
         }
-        let req = String::from_utf8_lossy(&buf);
-        let response_body = if req.contains("GET /v1/models") || req.contains("GET /models") {
-            r#"{"object":"list","data":[{"id":"test-model"}]}"#
+        let req = String::from_utf8_lossy(&buf).to_string();
+
+        let response_body: String = if req.contains("GET /v1/models") || req.starts_with("GET /models") {
+            // OpenAI-compat health check
+            let locked = models.lock().unwrap();
+            let data: Vec<String> = locked.iter().map(|m| format!(r#"{{"id":"{}"}}"#, m)).collect();
+            format!(r#"{{"object":"list","data":[{}]}}"#, data.join(","))
+        } else if req.starts_with("GET /api/tags") {
+            // Native Ollama tags endpoint
+            let locked = models.lock().unwrap();
+            let data: Vec<String> = locked
+                .iter()
+                .map(|m| format!(r#"{{"name":"{}","size":1}}"#, m))
+                .collect();
+            format!(r#"{{"models":[{}]}}"#, data.join(","))
+        } else if req.starts_with("POST /api/pull") {
+            // Pull model — add to model list
+            // Parse model name from body (look for "name":"...")
+            let body_start = req.find("\r\n\r\n").map(|i| i + 4).unwrap_or(req.len());
+            let body = &req[body_start..];
+            if let Some(start) = body.find(r#""name""#) {
+                let after = &body[start + 6..];
+                if let Some(q1) = after.find('"') {
+                    let after_q1 = &after[q1 + 1..];
+                    if let Some(q2) = after_q1.find('"') {
+                        let model_name = after_q1[..q2].to_string();
+                        if !model_name.is_empty() {
+                            models.lock().unwrap().push(model_name);
+                        }
+                    }
+                }
+            }
+            r#"{"status":"success"}"#.to_string()
+        } else if req.contains("POST /v1/chat/completions") || req.contains("POST /chat/completions") {
+            r##"{"choices":[{"message":{"content":"# Running Summary\n\nMock LLM synthesis output for E2E.\n\n## Recent Activity\n\n- mock event\n"}}]}"##.to_string()
         } else {
-            r##"{"choices":[{"message":{"content":"# Running Summary\n\nMock LLM synthesis output for E2E.\n\n## Recent Activity\n\n- mock event\n"}}]}"##
+            r#"{"status":"ok"}"#.to_string()
         };
+
         let http = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             response_body.len(),
@@ -182,6 +232,18 @@ impl TestStore {
         CmdOutput { output }
     }
 
+    /// Run agent-trace strictly with AGENT_TRACE_NO_OLLAMA_START=1 (won't spawn ollama).
+    pub fn run_strict_no_spawn(&self, args: &[&str]) -> CmdOutput {
+        let output = Command::new(&self.bin)
+            .args(args)
+            .current_dir(self.dir.path())
+            .env_remove("AGENT_TRACE_ALLOW_DEGRADED")
+            .env("AGENT_TRACE_NO_OLLAMA_START", "1")
+            .output()
+            .expect("run agent-trace (strict, no spawn)");
+        CmdOutput { output }
+    }
+
     /// Run agent-trace with --agent flag.
     pub fn run_as_agent(&self, agent: &str, args: &[&str]) -> CmdOutput {
         let mut full_args = vec!["--agent", agent];
@@ -237,7 +299,22 @@ impl TestStore {
             cfg.push('\n');
         }
         cfg.push_str(&format!(
-            "\n[synthesis]\nmode = \"ollama\"\nprovider = \"ollama\"\nmodel = \"test-model\"\nbase_url = \"{}\"\nrefresh_every_ops = {refresh_every_ops}\n",
+            "\n[synthesis]\nmode = \"ollama\"\nprovider = \"ollama\"\nmodel = \"qwen2.5:1.5b\"\nbase_url = \"{}\"\nrefresh_every_ops = {refresh_every_ops}\n",
+            mock.base_url
+        ));
+        self.write_file(".agent-trace/config.toml", &cfg);
+    }
+
+    /// Configure mock synthesis pointing at the Ollama-native base URL.
+    /// Used for lifecycle tests (MC-17..19) where /api/tags and /api/pull are tested.
+    pub fn configure_mock_ollama(&self, mock: &MockSynthesisServer, model: &str) {
+        let mut cfg = self.read_file(".agent-trace/config.toml");
+        if !cfg.ends_with('\n') {
+            cfg.push('\n');
+        }
+        // base_url points to /v1 for health check; lifecycle derives native base by stripping /v1
+        cfg.push_str(&format!(
+            "\n[synthesis]\nmode = \"ollama\"\nprovider = \"ollama\"\nmodel = \"{model}\"\nbase_url = \"{}\"\n",
             mock.base_url
         ));
         self.write_file(".agent-trace/config.toml", &cfg);
