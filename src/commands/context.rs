@@ -94,11 +94,27 @@ pub fn run(store_root: &Path, cmd: ContextCmd, output: &dyn CliOutput) -> Result
                     .into_iter()
                     .map(|u| u.update)
                     .collect::<Vec<_>>();
-                match api.synthesize_context(&docs, &updates) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        tracing::warn!("LLM synthesize_context failed, using template: {e}");
-                        synthesize_no_llm(store_root, &store.manifest)?
+                // Mirror the pipeline policy: a degraded backend uses the
+                // template (only reachable under the escape hatch since the CLI
+                // synthesis gate already blocks degraded mode otherwise); a
+                // transient LLM error falls back to the template with a warning.
+                if api.is_degraded() {
+                    synthesize_no_llm(store_root, &store.manifest)?
+                } else {
+                    let start = std::time::Instant::now();
+                    match api.synthesize_context(&docs, &updates) {
+                        Ok(s) => {
+                            tracing::info!(
+                                "LLM context synthesis succeeded (backend={}, latency_ms={})",
+                                api.backend_label,
+                                start.elapsed().as_millis()
+                            );
+                            s
+                        }
+                        Err(e) => {
+                            tracing::warn!("LLM synthesize_context failed, using template: {e}");
+                            synthesize_no_llm(store_root, &store.manifest)?
+                        }
                     }
                 }
             } else {
