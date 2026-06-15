@@ -1,4 +1,4 @@
-/// E2E tests: Agent Connection (AC-1..9, MC-1..11)
+/// E2E tests: Agent Connection (AC-1..9, MC-1..18)
 ///
 /// AC tests validate CLI connect/disconnect/write workflow.
 /// MC tests validate the MCP server (JSON-RPC 2.0 over stdio).
@@ -865,6 +865,113 @@ fn mc14_ten_ops_trigger_llm_synthesis_with_mock_ollama() {
             || log_out.contains("refresh running summary (llm:"),
         "expected LLM-labelled running summary commit in git log:\n{log_out}"
     );
+}
+
+// ── MC-15: strict synthesis gate fails without a backend ──────────────────────
+
+#[test]
+fn mc15_strict_status_fails_without_backend() {
+    let store = TestStore::new();
+    // Make the "no reachable backend" condition deterministic regardless of any
+    // real local Ollama.
+    store.configure_unreachable_synthesis();
+
+    let out = store
+        .run_strict(&["status"])
+        .expect_failure("strict status without backend");
+    out.assert_stderr_contains("Synthesis backend unavailable");
+}
+
+// ── MC-16: shell .py edit refreshes context.md via LLM, not the manifest ──────
+
+#[test]
+fn mc16_shell_py_edit_updates_context_via_mock_llm() {
+    let mock = helpers::MockSynthesisServer::start();
+    let store = TestStore::new();
+    store.set_fast_polling();
+    store.configure_mock_synthesis(&mock, 10);
+
+    store
+        .run(&["connect", "shell-agent"])
+        .expect_success("connect");
+    let _mcp = McpHarness::new(&store, "shell-agent");
+
+    // Edit a source file via the shell (not via MCP) — it is not in the manifest.
+    store.write_file(
+        "worker.py",
+        "def handler():\n    return 'worker payload'\n",
+    );
+
+    store.wait_for_file_contains(".agent-trace/summary_events.jsonl", "worker.py");
+    // The LLM (mock) context synthesis ran and rewrote context.md.
+    store.wait_for_file_contains("context.md", "Mock LLM synthesis output");
+
+    // worker.py must stay out of the curated manifest.
+    let manifest = store.read_file(".agent-trace/manifest.toml");
+    assert!(
+        !manifest.contains("worker.py"),
+        "worker.py must not be registered in the manifest:\n{manifest}"
+    );
+}
+
+// ── MC-17: dual poll acquirers produce a single activity event ────────────────
+
+#[test]
+fn mc17_dual_monitor_single_activity_event() {
+    let store = TestStore::new();
+    store.set_fast_polling();
+    store
+        .run(&["connect", "dual-agent"])
+        .expect_success("connect");
+
+    // First MCP process becomes the poll leader (acquires poll.lock on startup).
+    let _mcp1 = McpHarness::new(&store, "dual-agent");
+    std::thread::sleep(Duration::from_millis(300));
+    // Second MCP process for the same store: must NOT run a duplicate poll loop.
+    let _mcp2 = McpHarness::new(&store, "dual-agent");
+    std::thread::sleep(Duration::from_millis(300));
+
+    store.write_file("dual.py", "print('dual edit')\n");
+
+    store.wait_for_file_contains(".agent-trace/summary_events.jsonl", "dual.py");
+    // Give a would-be duplicate from the second monitor time to (not) appear.
+    std::thread::sleep(Duration::from_secs(2));
+
+    let events = store.read_file(".agent-trace/summary_events.jsonl");
+    let count = events.lines().filter(|l| l.contains("dual.py")).count();
+    assert_eq!(
+        count, 1,
+        "exactly one activity event expected for dual.py with dual monitors:\n{events}"
+    );
+}
+
+// ── MC-18: new source file committed + tracked in JSONL, absent from manifest ──
+
+#[test]
+fn mc18_new_source_file_committed_not_in_manifest() {
+    let store = TestStore::new();
+    store.set_fast_polling();
+    store
+        .run(&["connect", "src-agent"])
+        .expect_success("connect");
+    let _mcp = McpHarness::new(&store, "src-agent");
+
+    store.write_file("task.py", "# new task\nprint('task')\n");
+
+    store.wait_for_file_contains(".agent-trace/summary_events.jsonl", "task.py");
+
+    // Committed to git (the agent-trace log lists the file path).
+    let log = store.run(&["log", "--limit", "20"]).expect_success("log");
+    log.assert_stdout_contains("task.py");
+
+    // Absent from the manifest and from the curated document listing.
+    let manifest = store.read_file(".agent-trace/manifest.toml");
+    assert!(
+        !manifest.contains("task.py"),
+        "task.py must not be registered in the manifest:\n{manifest}"
+    );
+    let ls = store.run(&["ls"]).expect_success("ls");
+    ls.assert_stdout_not_contains("task.py");
 }
 
 // ── Helpers extension needed for stderr assertions ────────────────────────────

@@ -170,6 +170,18 @@ impl TestStore {
         CmdOutput { output }
     }
 
+    /// Run agent-trace WITHOUT the degraded-mode escape hatch, so the synthesis
+    /// gate is enforced strictly. Used by gate tests (MC-15).
+    pub fn run_strict(&self, args: &[&str]) -> CmdOutput {
+        let output = Command::new(&self.bin)
+            .args(args)
+            .current_dir(self.dir.path())
+            .env_remove("AGENT_TRACE_ALLOW_DEGRADED")
+            .output()
+            .expect("run agent-trace (strict)");
+        CmdOutput { output }
+    }
+
     /// Run agent-trace with --agent flag.
     pub fn run_as_agent(&self, agent: &str, args: &[&str]) -> CmdOutput {
         let mut full_args = vec!["--agent", agent];
@@ -228,6 +240,20 @@ impl TestStore {
             "\n[synthesis]\nmode = \"ollama\"\nprovider = \"ollama\"\nmodel = \"test-model\"\nbase_url = \"{}\"\nrefresh_every_ops = {refresh_every_ops}\n",
             mock.base_url
         ));
+        self.write_file(".agent-trace/config.toml", &cfg);
+    }
+
+    /// Point synthesis at an unreachable Ollama endpoint so the backend resolves
+    /// as degraded regardless of any real local backend. Used by strict gate
+    /// tests (MC-15) to make the "no backend" condition deterministic.
+    pub fn configure_unreachable_synthesis(&self) {
+        let mut cfg = self.read_file(".agent-trace/config.toml");
+        if !cfg.ends_with('\n') {
+            cfg.push('\n');
+        }
+        cfg.push_str(
+            "\n[synthesis]\nmode = \"ollama\"\nprovider = \"ollama\"\nmodel = \"none\"\nbase_url = \"http://127.0.0.1:1\"\n",
+        );
         self.write_file(".agent-trace/config.toml", &cfg);
     }
 
