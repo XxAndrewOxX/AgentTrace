@@ -4,7 +4,9 @@ use crate::config::{
 };
 #[cfg(feature = "llm")]
 use crate::llm::providers::EmbeddedBackend;
-use crate::llm::providers::{is_model_pulled, is_reachable, pull_model, resolve};
+use crate::llm::providers::{
+    is_model_pulled, is_reachable, normalize_model_alias, pull_model, resolve,
+};
 use crate::observability::CliOutput;
 use anyhow::{bail, Context, Result};
 use clap::Subcommand;
@@ -308,12 +310,15 @@ fn cmd_list(output: &dyn CliOutput) -> Result<()> {
 }
 
 fn cmd_pull(size: &str, output: &dyn CliOutput) -> Result<()> {
-    if size.contains(':') || size.starts_with("qwen") {
-        output.line(&format!("Pulling Ollama model {size}…"))?;
-        pull_model(size).with_context(|| format!("ollama pull {size}"))?;
+    let normalized = normalize_model_alias(size);
+    if normalized.contains(':') || normalized.starts_with("qwen") || size.contains(':') {
+        output.line(&format!("Pulling Ollama model {normalized}…"))?;
+        let config = GlobalConfig::load()?;
+        pull_model(&config.synthesis, &normalized)
+            .with_context(|| format!("ollama pull {normalized}"))?;
         let mut config = GlobalConfig::load()?;
         config.synthesis.provider = SynthesisProvider::Ollama;
-        config.synthesis.model = size.into();
+        config.synthesis.model = normalized;
         config.save()?;
         output.line("Ollama model pulled and config updated.")?;
         return Ok(());
