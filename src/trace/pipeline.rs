@@ -130,6 +130,12 @@ pub fn apply_trace_hooks(
     if changed_files.is_empty() {
         return Ok(());
     }
+
+    // Pipeline synthesis gate: never emit degraded artifacts from the post-write
+    // pipeline. When no reachable backend is configured (and the test/escape
+    // hatch is not set) this fails fast instead of silently degrading.
+    crate::runtime::require_synthesis_backend(Some(store_root))?;
+
     let trace_insights = TraceInsightsFacade::from_store_root(store_root)?;
 
     if actor.is_agent() {
@@ -275,19 +281,36 @@ fn sync_context_md(
     manifest: &crate::manifest::Manifest,
     trace_insights: &TraceInsightsFacade,
 ) -> anyhow::Result<()> {
-    let new_content = if trace_insights.is_degraded() {
-        crate::trace::context::synthesize_no_llm(store_root, manifest)?
+    // `is_degraded()` is only reachable under the test/escape-hatch path (the
+    // gate above already bailed otherwise). It must use the template — never the
+    // backend, which would emit a "*(Synthesis degraded …)*" artifact.
+    let (new_content, commit_label) = if trace_insights.is_degraded() {
+        (
+            crate::trace::context::synthesize_no_llm(store_root, manifest)?,
+            "template".to_string(),
+        )
     } else {
         let docs = build_trace_documents(store_root, manifest);
         let updates = load_pending_updates(store_root)?
             .into_iter()
             .map(|u| u.update)
             .collect::<Vec<_>>();
+        let start = std::time::Instant::now();
         match trace_insights.synthesize_context(&docs, &updates) {
-            Ok(s) => s,
+            Ok(s) => {
+                tracing::info!(
+                    "LLM context synthesis succeeded (backend={}, latency_ms={})",
+                    trace_insights.backend_label,
+                    start.elapsed().as_millis()
+                );
+                (s, format!("llm: {}", trace_insights.backend_label))
+            }
             Err(e) => {
                 tracing::warn!("LLM synthesize_context failed, using template: {e}");
-                crate::trace::context::synthesize_no_llm(store_root, manifest)?
+                (
+                    crate::trace::context::synthesize_no_llm(store_root, manifest)?,
+                    "template".to_string(),
+                )
             }
         }
     };
@@ -306,7 +329,7 @@ fn sync_context_md(
             DocType::Context,
         )],
         actor: Actor::System,
-        summary: "refresh synthesized context".into(),
+        summary: format!("refresh synthesized context ({commit_label})"),
         agent_name: None,
         session_id: None,
     };
