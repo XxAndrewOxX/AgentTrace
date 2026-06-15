@@ -122,23 +122,6 @@ impl TraceInsightsFacade {
         Self::from_merged_config(&merged)
     }
 
-    pub fn from_llm_config(cfg: &crate::config::LlmConfig) -> Result<Self, TraceInsightsError> {
-        let synthesis = crate::config::SynthesisConfig {
-            mode: crate::config::SynthesisMode::Embedded,
-            provider: crate::config::SynthesisProvider::Embedded,
-            ..Default::default()
-        };
-        let merged = MergedConfig {
-            store: crate::config::StoreInfo::new("eval".into()),
-            llm: cfg.clone(),
-            synthesis,
-            ui: crate::config::UiConfig::default(),
-            defaults: crate::config::DefaultsConfig::default(),
-            polling: crate::config::PollingConfig::default(),
-        };
-        Self::from_merged_config(&merged)
-    }
-
     #[cfg(test)]
     pub fn with_no_backend() -> Self {
         Self {

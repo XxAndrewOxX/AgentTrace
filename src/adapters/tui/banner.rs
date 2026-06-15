@@ -1,4 +1,5 @@
-use crate::llm::LlmEngine;
+use crate::config::{CredentialsStore, MergedConfig};
+use crate::llm::providers::resolve;
 use crate::manifest::Manifest;
 use crate::observability::CliOutput;
 use crate::running_summary;
@@ -8,8 +9,8 @@ use std::path::Path;
 /// Print the startup banner to stdout before entering TUI mode.
 pub fn print_banner(
     store_root: &Path,
+    config: &MergedConfig,
     manifest: &Manifest,
-    llm: &dyn LlmEngine,
     ascii: bool,
     output: &dyn CliOutput,
 ) -> Result<()> {
@@ -43,14 +44,19 @@ pub fn print_banner(
     ))?;
     output.line("")?;
     output.line(&format!("  Documents tracked : {}", manifest.len()))?;
+
+    // Show synthesis backend label
+    let creds = CredentialsStore::load().unwrap_or_default();
+    let backend_info = resolve(config, &creds).info();
     output.line(&format!(
-        "  LLM               : {}",
-        if llm.is_loaded() {
-            "loaded"
+        "  Synthesis         : {}",
+        if backend_info.degraded {
+            "degraded (run: agent-trace model ensure)".to_string()
         } else {
-            "not configured"
+            backend_info.label.clone()
         }
     ))?;
+
     if store_root.join("running_summary.md").exists() {
         let resume_lines = running_summary::resume_here_lines(store_root);
         if !resume_lines.is_empty() {
@@ -68,8 +74,7 @@ pub fn print_banner(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::StoreInfo;
-    use crate::llm::NoLlm;
+    use crate::config::{GlobalConfig, PollingConfig, StoreConfig, StoreInfo};
     use crate::manifest::Manifest;
     use crate::observability::NoopOutput;
     use tempfile::TempDir;
@@ -80,9 +85,17 @@ mod tests {
         let root = tmp.path();
         std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
         let info = StoreInfo::new("test".into());
-        let manifest = Manifest::create_empty(info, root).unwrap();
-        // Just verify it doesn't panic.
-        print_banner(root, &manifest, &NoLlm, false, &NoopOutput).unwrap();
-        print_banner(root, &manifest, &NoLlm, true, &NoopOutput).unwrap();
+        let manifest = Manifest::create_empty(info.clone(), root).unwrap();
+        let config = MergedConfig::merge(
+            GlobalConfig::default(),
+            StoreConfig {
+                store: info,
+                llm: None,
+                synthesis: None,
+                polling: PollingConfig::default(),
+            },
+        );
+        print_banner(root, &config, &manifest, false, &NoopOutput).unwrap();
+        print_banner(root, &config, &manifest, true, &NoopOutput).unwrap();
     }
 }

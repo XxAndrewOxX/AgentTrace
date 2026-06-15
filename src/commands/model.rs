@@ -1,17 +1,13 @@
 use crate::config::{
-    embedded_model_path, embedded_model_source, models_dir, CredentialsStore, GlobalConfig,
-    MergedConfig, SynthesisConfig, SynthesisMode, SynthesisProvider,
+    CredentialsStore, GlobalConfig, MergedConfig, SynthesisConfig, SynthesisMode, SynthesisProvider,
 };
-#[cfg(feature = "llm")]
-use crate::llm::providers::EmbeddedBackend;
 use crate::llm::providers::{
     is_model_pulled, is_reachable, normalize_model_alias, pull_model, resolve,
 };
 use crate::observability::CliOutput;
 use anyhow::{bail, Context, Result};
 use clap::Subcommand;
-use indicatif::{ProgressBar, ProgressStyle};
-use std::io::{self, Read, Write};
+use std::io;
 use std::time::Instant;
 
 #[derive(Subcommand, Debug)]
@@ -88,8 +84,11 @@ fn parse_provider(s: &str) -> Result<SynthesisProvider> {
         "openrouter" => Ok(SynthesisProvider::Openrouter),
         "ollama" => Ok(SynthesisProvider::Ollama),
         "custom" => Ok(SynthesisProvider::Custom),
-        "embedded" => Ok(SynthesisProvider::Embedded),
-        other => bail!("Unknown provider '{other}'. Use: openai, anthropic, openrouter, ollama, custom, embedded"),
+        "embedded" => {
+            tracing::warn!("'embedded' provider is deprecated and will use Ollama instead");
+            Ok(SynthesisProvider::Ollama)
+        }
+        other => bail!("Unknown provider '{other}'. Use: openai, anthropic, openrouter, ollama, custom"),
     }
 }
 
@@ -98,8 +97,11 @@ fn parse_mode(s: &str) -> Result<SynthesisMode> {
         "auto" => Ok(SynthesisMode::Auto),
         "remote" => Ok(SynthesisMode::Remote),
         "ollama" => Ok(SynthesisMode::Ollama),
-        "embedded" => Ok(SynthesisMode::Embedded),
-        other => bail!("Unknown mode '{other}'. Use: auto, remote, ollama, embedded"),
+        "embedded" => {
+            tracing::warn!("'embedded' mode is deprecated; using 'auto' instead");
+            Ok(SynthesisMode::Auto)
+        }
+        other => bail!("Unknown mode '{other}'. Use: auto, remote, ollama"),
     }
 }
 
@@ -153,7 +155,7 @@ fn cmd_status(store_root: Option<&std::path::Path>, output: &dyn CliOutput) -> R
 
 fn cmd_setup(output: &dyn CliOutput) -> Result<()> {
     output.line("Agent Trace — synthesis setup")?;
-    output.line("Providers: openai, anthropic, openrouter, ollama, custom, embedded")?;
+    output.line("Providers: openai, anthropic, openrouter, ollama, custom")?;
     output.line("Enter provider [ollama]: ")?;
     let mut line = String::new();
     io::stdin().read_line(&mut line)?;
@@ -296,12 +298,12 @@ fn cmd_test(store_root: Option<&std::path::Path>, output: &dyn CliOutput) -> Res
 
 fn cmd_list(output: &dyn CliOutput) -> Result<()> {
     output.line("Ollama (local):")?;
-    for m in ["qwen2.5:0.5b", "qwen2.5:1.5b", "qwen2.5:3b"] {
+    for m in ["qwen2.5:0.5b", "qwen2.5:1.5b", "qwen2.5:3b", "llama3.2:3b", "phi4:latest"] {
         output.line(&format!("  {m}"))?;
     }
-    output.line("Embedded GGUF:")?;
-    for s in ["0.5b", "1.5b", "3b"] {
-        output.line(&format!("  {s} → {}", embedded_model_path(s).display()))?;
+    output.line("Aliases (short form for ollama pull):")?;
+    for (alias, full) in [("0.5b", "qwen2.5:0.5b"), ("1.5b", "qwen2.5:1.5b"), ("3b", "qwen2.5:3b")] {
+        output.line(&format!("  {alias} → {full}"))?;
     }
     output.line("Remote examples:")?;
     output.line("  openai/gpt-4o-mini")?;
@@ -311,37 +313,15 @@ fn cmd_list(output: &dyn CliOutput) -> Result<()> {
 
 fn cmd_pull(size: &str, output: &dyn CliOutput) -> Result<()> {
     let normalized = normalize_model_alias(size);
-    if normalized.contains(':') || normalized.starts_with("qwen") || size.contains(':') {
-        output.line(&format!("Pulling Ollama model {normalized}…"))?;
-        let config = GlobalConfig::load()?;
-        pull_model(&config.synthesis, &normalized)
-            .with_context(|| format!("ollama pull {normalized}"))?;
-        let mut config = GlobalConfig::load()?;
-        config.synthesis.provider = SynthesisProvider::Ollama;
-        config.synthesis.model = normalized;
-        config.save()?;
-        output.line("Ollama model pulled and config updated.")?;
-        return Ok(());
-    }
-
-    let (repo, filename) = embedded_model_source(size)
-        .ok_or_else(|| anyhow::anyhow!("Unknown embedded size '{size}'. Use: 0.5b, 1.5b, 3b"))?;
-    let dest_dir = models_dir();
-    std::fs::create_dir_all(&dest_dir)?;
-    let dest_path = embedded_model_path(size);
-    if dest_path.exists() {
-        output.line(&format!("Model already present: {}", dest_path.display()))?;
-    } else {
-        let url = format!("https://huggingface.co/{repo}/resolve/main/{filename}");
-        output.line(&format!("Downloading {filename}…"))?;
-        download_with_progress(&url, &dest_path)?;
-        output.line(&format!("Saved to {}", dest_path.display()))?;
-    }
+    output.line(&format!("Pulling Ollama model {normalized}…"))?;
+    let config = GlobalConfig::load()?;
+    pull_model(&config.synthesis, &normalized)
+        .with_context(|| format!("ollama pull {normalized}"))?;
     let mut config = GlobalConfig::load()?;
-    config.llm.model_path = Some(dest_path);
-    config.synthesis.fallback.embedded_model = size.into();
+    config.synthesis.provider = SynthesisProvider::Ollama;
+    config.synthesis.model = normalized;
     config.save()?;
-    output.line("Global config updated with embedded model path.")?;
+    output.line("Ollama model pulled and config updated.")?;
     Ok(())
 }
 
@@ -355,74 +335,24 @@ fn cmd_serve_check(output: &dyn CliOutput) -> Result<()> {
         if reachable {
             "reachable"
         } else {
-            "unreachable"
+            "unreachable — run `agent-trace model ensure` to start daemon"
         }
     ))?;
     if reachable {
         let pulled = is_model_pulled(syn).unwrap_or(false);
         output.line(&format!(
             "Model '{}': {}",
-            syn.model,
+            syn.effective_model(),
             if pulled {
                 "pulled"
             } else {
-                "not pulled — run `agent-trace model pull`"
+                "not pulled — run `agent-trace model ensure`"
             }
         ))?;
     }
-    #[cfg(feature = "llm")]
-    if let Some(path) = EmbeddedBackend::try_from_config(syn, &config.llm) {
-        output.line(&format!(
-            "Embedded GGUF: available ({})",
-            path.model_path().display()
-        ))?;
-    } else {
-        output.line("Embedded GGUF: not available")?;
-    }
-    #[cfg(not(feature = "llm"))]
-    output.line("Embedded GGUF: not compiled (rebuild with --features llm)")?;
     Ok(())
 }
 
-fn download_with_progress(url: &str, dest: &std::path::Path) -> Result<()> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(600))
-        .build()?;
-    let resp = client
-        .get(url)
-        .send()
-        .with_context(|| format!("GET {url}"))?;
-    if !resp.status().is_success() {
-        bail!("Download failed: HTTP {}", resp.status());
-    }
-    let total = resp.content_length().unwrap_or(0);
-    let pb = ProgressBar::new(total);
-    pb.set_style(
-        ProgressStyle::with_template(
-            "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})",
-        )
-        .unwrap()
-        .progress_chars("#>-"),
-    );
-    let tmp = dest.with_extension("gguf.tmp");
-    let mut file =
-        std::fs::File::create(&tmp).with_context(|| format!("Creating {}", tmp.display()))?;
-    let mut downloaded: u64 = 0;
-    let mut buf = [0u8; 65536];
-    let mut reader = resp;
-    loop {
-        let n = reader.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        file.write_all(&buf[..n])?;
-        downloaded += n as u64;
-        pb.set_position(downloaded);
-    }
-    pb.finish_with_message("download complete");
-    std::fs::rename(&tmp, dest)?;
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {
@@ -436,10 +366,19 @@ mod tests {
     }
 
     #[test]
-    fn embedded_model_paths_exist_for_known_sizes() {
-        for s in ["0.5b", "1.5b", "3b"] {
-            assert!(embedded_model_source(s).is_some());
-            assert!(embedded_model_path(s).to_string_lossy().contains("qwen"));
-        }
+    fn parse_provider_embedded_deprecated_migrates_to_ollama() {
+        assert_eq!(parse_provider("embedded").unwrap(), SynthesisProvider::Ollama);
+    }
+
+    #[test]
+    fn parse_mode_embedded_deprecated_migrates_to_auto() {
+        assert_eq!(parse_mode("embedded").unwrap(), SynthesisMode::Auto);
+    }
+
+    #[test]
+    fn pull_normalizes_short_alias() {
+        // Verify normalization logic works
+        assert_eq!(normalize_model_alias("1.5b"), "qwen2.5:1.5b");
+        assert_eq!(normalize_model_alias("0.5b"), "qwen2.5:0.5b");
     }
 }

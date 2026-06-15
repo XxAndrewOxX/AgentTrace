@@ -1,6 +1,5 @@
 use crate::config::MergedConfig;
 use crate::git_store::GitStore;
-use crate::llm::{spawn_llm_task, LlmRequest, LlmResponse, NoLlm};
 use crate::manifest::Manifest;
 use crate::observability::CliOutput;
 use crate::runtime::{ActivityMonitor, InstanceLock, UiEvent};
@@ -33,25 +32,10 @@ pub fn run(
     let manifest = Manifest::load(&store_root)?;
     let manifest = Arc::new(Mutex::new(manifest));
 
-    // Try to load LLM model if configured. Fall back to NoLlm silently.
-    let llm_engine: Arc<dyn crate::llm::LlmEngine> = match &config.llm.model_path {
-        Some(path) if path.exists() => match crate::llm::candle::CandleLlm::load(path) {
-            Ok(m) => {
-                tracing::info!("LLM loaded from {}", path.display());
-                Arc::new(m)
-            }
-            Err(e) => {
-                tracing::warn!("LLM load failed ({}), using NoLlm", e);
-                Arc::new(NoLlm)
-            }
-        },
-        _ => Arc::new(NoLlm),
-    };
-
     // Print startup banner before entering raw mode.
     {
         let m = manifest.lock().unwrap();
-        banner::print_banner(&store_root, &m, llm_engine.as_ref(), ascii, output)?;
+        banner::print_banner(&store_root, &config, &m, ascii, output)?;
     }
 
     // Install panic hook to restore terminal on panic.
@@ -66,18 +50,6 @@ pub fn run(
         );
         original_hook(panic_info);
     }));
-
-    // Start the LLM background task.
-    let (_llm_req_tx, llm_req_rx) = tokio::sync::mpsc::channel::<LlmRequest>(32);
-    let (llm_res_tx, _llm_res_rx) = tokio::sync::mpsc::channel::<LlmResponse>(32);
-
-    let runtime = tokio::runtime::Runtime::new()?;
-    {
-        let engine = llm_engine.clone();
-        runtime.spawn(async move {
-            spawn_llm_task(engine, llm_req_rx, llm_res_tx);
-        });
-    }
 
     // Load initial git log for changelog panel.
     let git = GitStore::open(&store_root)?;

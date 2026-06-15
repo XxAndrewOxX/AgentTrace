@@ -1,0 +1,9 @@
+[store]
+id = "6c5c7755-39ad-4fde-bb25-2736f81a518a"
+name = "agent_trace"
+created = "2026-06-14T20:49:33.347041Z"
+agent_trace_version = "0.1.0"
+
+[polling]
+interval_ms = 1000
+enabled = true

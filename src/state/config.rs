@@ -13,6 +13,8 @@ pub enum SynthesisMode {
     Auto,
     Remote,
     Ollama,
+    /// Legacy: configs with mode=embedded are migrated to Auto at load time.
+    #[serde(alias = "embedded")]
     Embedded,
 }
 
@@ -25,6 +27,8 @@ pub enum SynthesisProvider {
     Anthropic,
     Openrouter,
     Custom,
+    /// Legacy: configs with provider=embedded are treated as Ollama.
+    #[serde(alias = "embedded")]
     Embedded,
 }
 
@@ -36,7 +40,7 @@ impl SynthesisProvider {
             Self::Openrouter => "openrouter",
             Self::Ollama => "ollama",
             Self::Custom => "custom",
-            Self::Embedded => "embedded",
+            Self::Embedded => "ollama", // legacy: treat as ollama
         }
     }
 
@@ -47,7 +51,7 @@ impl SynthesisProvider {
             Self::Openrouter => "openai/gpt-4o-mini",
             Self::Ollama => "qwen2.5:1.5b",
             Self::Custom => "gpt-4o-mini",
-            Self::Embedded => "qwen2.5-0.5b",
+            Self::Embedded => "qwen2.5:1.5b", // legacy: migrate to ollama default
         }
     }
 
@@ -58,7 +62,7 @@ impl SynthesisProvider {
             Self::Openrouter => "https://openrouter.ai/api/v1",
             Self::Ollama => "http://127.0.0.1:11434/v1",
             Self::Custom => "http://127.0.0.1:11434/v1",
-            Self::Embedded => "",
+            Self::Embedded => "http://127.0.0.1:11434/v1", // legacy: migrate to ollama
         }
     }
 }
@@ -133,6 +137,15 @@ impl Default for SynthesisConfig {
 }
 
 impl SynthesisConfig {
+    /// Return the configured model, or the provider's default if blank.
+    pub fn effective_model(&self) -> String {
+        if self.model.trim().is_empty() {
+            self.provider.default_model().into()
+        } else {
+            self.model.clone()
+        }
+    }
+
     pub fn effective_base_url(&self) -> String {
         self.base_url
             .clone()

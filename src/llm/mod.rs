@@ -1,7 +1,4 @@
 pub mod backend;
-pub mod candle;
-pub mod candle_backend;
-pub mod llama_cpp;
 pub mod prompts;
 pub mod providers;
 pub mod synthesis_engine;
@@ -82,9 +79,7 @@ pub enum LlmResponse {
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
 
-/// Immutable inference interface. Implement this for `NoLlm` and for wrappers
-/// that don't need a mutable KV cache (e.g. stateless REST-backed engines).
-/// `CandleLlm` uses a separate `CandleLlmMut` + `spawn_candle_task` instead.
+/// Immutable inference interface for stateless REST-backed engines.
 pub trait LlmEngine: Send + Sync {
     fn classify(&self, content: &str) -> Result<Classification>;
     fn summarize_change(&self, path: &str, doc_type: &str, diff: &str) -> Result<String>;
@@ -132,11 +127,9 @@ impl LlmEngine for NoLlm {
     }
 }
 
-// ── Async Task (immutable engine: NoLlm or future REST backend) ───────────────
+// ── Async Task (immutable engine) ─────────────────────────────────────────────
 
 /// Spawn a background task that services `LlmRequest`s using an immutable engine.
-/// For `CandleLlmMut` (which requires `&mut self` for KV-cache inference),
-/// use `spawn_candle_task` instead.
 pub fn spawn_llm_task(
     engine: std::sync::Arc<dyn LlmEngine>,
     mut request_rx: tokio::sync::mpsc::Receiver<LlmRequest>,
@@ -180,70 +173,6 @@ pub fn spawn_llm_task(
                         updates,
                     } => {
                         let result = engine
-                            .synthesize_context(&documents, &updates)
-                            .map_err(|e| e.to_string());
-                        LlmResponse::Context { id, result }
-                    }
-                };
-                let _ = tx.blocking_send(response);
-            });
-        }
-    });
-}
-
-// ── Async Task (CandleLlmMut — requires mutable KV cache) ────────────────────
-
-/// Spawn a background task for `CandleLlmMut`. The model is owned exclusively
-/// by the task thread; all requests are serialized through a mutex so the KV
-/// cache is never concurrently accessed.
-#[cfg(feature = "llm")]
-pub fn spawn_candle_task(
-    model: candle::CandleLlmMut,
-    mut request_rx: tokio::sync::mpsc::Receiver<LlmRequest>,
-    response_tx: tokio::sync::mpsc::Sender<LlmResponse>,
-) {
-    use std::sync::{Arc, Mutex};
-    let model = Arc::new(Mutex::new(model));
-
-    tokio::spawn(async move {
-        while let Some(request) = request_rx.recv().await {
-            let model = model.clone();
-            let tx = response_tx.clone();
-
-            tokio::task::spawn_blocking(move || {
-                let mut m = model.lock().unwrap();
-                let response = match request {
-                    LlmRequest::Classify { id, content } => {
-                        let result = m.classify(&content).map_err(|e| e.to_string());
-                        LlmResponse::Classification { id, result }
-                    }
-                    LlmRequest::SummarizeChange {
-                        id,
-                        path,
-                        doc_type,
-                        diff,
-                    } => {
-                        let result = m
-                            .summarize_change(&path, &doc_type, &diff)
-                            .map_err(|e| e.to_string());
-                        LlmResponse::Summary { id, result }
-                    }
-                    LlmRequest::ParseCommand {
-                        id,
-                        input,
-                        manifest_summary,
-                    } => {
-                        let result = m
-                            .parse_command(&input, &manifest_summary)
-                            .map_err(|e| e.to_string());
-                        LlmResponse::ParsedCommand { id, result }
-                    }
-                    LlmRequest::SynthesizeContext {
-                        id,
-                        documents,
-                        updates,
-                    } => {
-                        let result = m
                             .synthesize_context(&documents, &updates)
                             .map_err(|e| e.to_string());
                         LlmResponse::Context { id, result }

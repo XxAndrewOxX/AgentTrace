@@ -199,7 +199,7 @@ fn tb8_no_llm_engine_is_not_loaded() {
 
 #[test]
 fn tb9_startup_banner_content() {
-    use agent_trace::llm::NoLlm;
+    use agent_trace::config::{GlobalConfig, MergedConfig, PollingConfig, StoreConfig};
     use agent_trace::observability::NoopOutput;
     use agent_trace::tui::banner;
 
@@ -207,20 +207,21 @@ fn tb9_startup_banner_content() {
     let root = tmp.path();
     std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
     let info = StoreInfo::new("test".into());
-    let manifest = Manifest::create_empty(info, root).unwrap();
-    let no_llm = NoLlm;
+    let manifest = Manifest::create_empty(info.clone(), root).unwrap();
+    let config = MergedConfig::merge(
+        GlobalConfig::default(),
+        StoreConfig {
+            store: info,
+            llm: None,
+            synthesis: None,
+            polling: PollingConfig::default(),
+        },
+    );
 
-    // Capture banner output.
-    // banner::print_banner writes to stdout. Redirect via a separate check.
-    // Verify it doesn't panic and that the LLM engine is not reported as loaded.
-    assert!(!no_llm.is_loaded());
-
-    // The banner should contain version info (agent-trace v0.1.0) and document count.
+    // The banner should contain version info and document count.
     // We test the banner function compiles and runs without panicking.
-    // It writes to stdout which we can't easily capture in a library test,
-    // so we just call it and verify no panic.
-    banner::print_banner(root, &manifest, &no_llm, false, &NoopOutput).unwrap();
-    banner::print_banner(root, &manifest, &no_llm, true, &NoopOutput).unwrap(); // ASCII mode.
+    banner::print_banner(root, &config, &manifest, false, &NoopOutput).unwrap();
+    banner::print_banner(root, &config, &manifest, true, &NoopOutput).unwrap(); // ASCII mode.
 }
 
 // ── TB-10: Clean Exit States ─────────────────────────────────────────────────

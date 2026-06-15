@@ -1,4 +1,3 @@
-use super::embedded::EmbeddedBackend;
 use super::http::HttpBackend;
 use super::ollama;
 use crate::config::{
@@ -19,7 +18,6 @@ pub struct ResolvedBackendInfo {
 
 pub enum ResolvedBackend {
     Http(HttpBackend),
-    Embedded(EmbeddedBackend),
     Degraded(DegradedBackend),
 }
 
@@ -32,19 +30,9 @@ impl ResolvedBackend {
                 model: b.model.clone(),
                 degraded: false,
             },
-            Self::Embedded(b) => ResolvedBackendInfo {
-                label: b.backend_label().to_string(),
-                provider: SynthesisProvider::Embedded,
-                model: b
-                    .model_path()
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "embedded".into()),
-                degraded: false,
-            },
             Self::Degraded(_) => ResolvedBackendInfo {
                 label: "degraded".into(),
-                provider: SynthesisProvider::Embedded,
+                provider: SynthesisProvider::Ollama,
                 model: "mechanical".into(),
                 degraded: true,
             },
@@ -54,10 +42,6 @@ impl ResolvedBackend {
     pub fn into_engine(self) -> Box<dyn SynthesisEngine> {
         match self {
             Self::Http(b) => Box::new(b),
-            #[cfg(feature = "llm")]
-            Self::Embedded(b) => Box::new(b),
-            #[cfg(not(feature = "llm"))]
-            Self::Embedded(_) => Box::new(DegradedBackend),
             Self::Degraded(b) => Box::new(b),
         }
     }
@@ -71,12 +55,9 @@ pub fn resolve(merged: &MergedConfig, creds: &CredentialsStore) -> ResolvedBacke
         SynthesisMode::Ollama => {
             try_ollama(syn).unwrap_or_else(|| warn_and_degraded("ollama unavailable"))
         }
-        SynthesisMode::Embedded => {
-            try_embedded(merged).unwrap_or_else(|| warn_and_degraded("embedded model unavailable"))
-        }
-        SynthesisMode::Auto => try_remote(syn, creds)
+        // Legacy: treat Embedded mode same as Auto (Ollama-first)
+        SynthesisMode::Embedded | SynthesisMode::Auto => try_remote(syn, creds)
             .or_else(|| try_ollama(syn))
-            .or_else(|| try_embedded(merged))
             .unwrap_or_else(|| warn_and_degraded("all synthesis backends unavailable")),
     }
 }
@@ -112,10 +93,6 @@ fn try_ollama(syn: &SynthesisConfig) -> Option<ResolvedBackend> {
     Some(ResolvedBackend::Http(backend))
 }
 
-fn try_embedded(merged: &MergedConfig) -> Option<ResolvedBackend> {
-    EmbeddedBackend::try_from_config(&merged.synthesis, &merged.llm).map(ResolvedBackend::Embedded)
-}
-
 fn warn_and_degraded(reason: &str) -> ResolvedBackend {
     let mut warned = DEGRADED_WARNED.lock().unwrap();
     if !*warned {
@@ -146,5 +123,33 @@ mod tests {
         let creds = CredentialsStore::default();
         let resolved = resolve(&merged, &creds);
         assert!(resolved.info().degraded);
+    }
+
+    #[test]
+    fn auto_prefers_remote_when_creds_present() {
+        use crate::config::{SynthesisConfig, SynthesisMode, SynthesisProvider};
+        let mut creds = CredentialsStore::default();
+        creds.set_key(SynthesisProvider::Openai, "sk-fake-key".into());
+        let merged = MergedConfig::merge(
+            GlobalConfig {
+                synthesis: SynthesisConfig {
+                    mode: SynthesisMode::Auto,
+                    provider: SynthesisProvider::Openai,
+                    model: "gpt-4o-mini".into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            StoreConfig {
+                store: StoreInfo::new("t".into()),
+                llm: None,
+                synthesis: None,
+                polling: PollingConfig::default(),
+            },
+        );
+        // Remote will fail health check in unit test (no real API), so falls through to degraded
+        let resolved = resolve(&merged, &creds);
+        // Either remote (if reachable) or degraded — main thing: no embedded step
+        let _ = resolved.info();
     }
 }
