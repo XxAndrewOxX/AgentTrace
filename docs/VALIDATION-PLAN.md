@@ -41,7 +41,7 @@ cargo publish --dry-run
 | `performance` | Performance PS-1..5 | `e2e_performance` |
 | `tui` | TUI behavior TB-1..10 | `e2e_tui_behavior` |
 | `adversarial` | Adversarial cases (see `docs/ADVERSARIAL-VALIDATION.md`) | `adversarial_validation` |
-| `connection` | CLI + MCP AC-1..9, MC-1..11 | `e2e_agent_connection` |
+| `connection` | CLI + MCP AC-1..9, MC-1..18 | `e2e_agent_connection` |
 | `unit` | Library unit tests | `--lib` |
 | `all` | All of the above (default) | — |
 
@@ -134,6 +134,30 @@ CLI equivalent: `agent-trace resume show` after `agent-trace connect <name>`;
 stale-lock recap also works via `resume show` without reconnecting MCP (AC-8).
 Mid-session checkpoint file is created after N writes and verified via
 `resume show` (AC-9).
+
+## Synthesis gate + activity ops (MC-15..18)
+
+Added to the `connection` suite (`e2e_agent_connection`) to cover the pipeline
+synthesis gate, cross-process poll leadership, and the manifest-bloat policy.
+Gate tests use `TestStore::run_strict()` (no `AGENT_TRACE_ALLOW_DEGRADED`).
+
+| ID | Type | Pass criteria |
+|----|------|---------------|
+| MC-15 | E2E | `run_strict(["status"])` on a fresh store with no backend → exit ≠ 0, stderr contains `Synthesis backend unavailable` |
+| MC-16 | E2E | Shell-edit `worker.py` (not in manifest) with a mock LLM backend → `context.md` mentions the file; manifest has no `worker.py` entry |
+| MC-17 | E2E | Two poll acquirers (MCP + held `poll.lock`) → one shell edit yields exactly one `summary_events.jsonl` line |
+| MC-18 | E2E | New `task.py` created via shell → committed to git + recorded in JSONL, but absent from `manifest.toml` |
+
+### Manual validation
+
+1. `model setup` + `model serve-check` → `init` → `mcp` (no `ALLOW_DEGRADED`).
+2. Terminal 1: agent client with MCP; Terminal 2: `agent-trace open` (read-only TUI,
+   poll leadership stays with the MCP process).
+3. Agent edits a `.py` via shell (not MCP) → Terminal 2 changelog + `resume events`
+   show `detected_by: poll`, exactly once.
+4. After 10 file ops → git log shows both `refresh running summary (ollama/...)` and
+   `refresh synthesized context (llm: ollama/...)`.
+5. `agent-trace ls` does **not** list arbitrary `.py` files.
 
 ## Related docs
 

@@ -53,7 +53,7 @@ case "$SUITE" in
         run_suite "Adversarial Validation (35 cases)" "adversarial_validation"
         ;;
     connection)
-        run_suite "Agent Connection Tests (AC-1..9, MC-1..11)" "e2e_agent_connection"
+        run_suite "Agent Connection Tests (AC-1..9, MC-1..18)" "e2e_agent_connection"
         ;;
     live)
         echo ""
@@ -81,7 +81,7 @@ case "$SUITE" in
         run_suite "Performance Tests (PS-1..5)"         "e2e_performance"
         run_suite "TUI Behavior Tests (TB-1..10)"       "e2e_tui_behavior"
         run_suite "Adversarial Validation (35 cases)"   "adversarial_validation"
-        run_suite "Agent Connection Tests (AC-1..9, MC-1..11)" "e2e_agent_connection"
+        run_suite "Agent Connection Tests (AC-1..9, MC-1..18)" "e2e_agent_connection"
         ;;
     *)
         echo "Unknown suite: $SUITE"
