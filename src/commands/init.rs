@@ -152,7 +152,7 @@ pub fn run(path: &Path, scan: bool, output: &dyn CliOutput) -> Result<()> {
         "Initialised agent-trace store at {}",
         path.display()
     ))?;
-    output.line("Next: run `agent-trace model setup` (or `model pull 0.5b` for offline GGUF).")?;
+    output.line("Store ready. Use `agent-trace mcp` or `agent-trace open` to start monitoring.")?;
     Ok(())
 }
 
