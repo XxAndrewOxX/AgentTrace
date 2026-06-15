@@ -68,25 +68,6 @@ impl SynthesisProvider {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SynthesisFallback {
-    /// GGUF size key for embedded fallback (e.g. "0.5b", "1.5b").
-    #[serde(default = "default_embedded_model")]
-    pub embedded_model: String,
-}
-
-fn default_embedded_model() -> String {
-    "0.5b".into()
-}
-
-impl Default for SynthesisFallback {
-    fn default() -> Self {
-        Self {
-            embedded_model: default_embedded_model(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SynthesisConfig {
     #[serde(default)]
     pub mode: SynthesisMode,
@@ -101,8 +82,9 @@ pub struct SynthesisConfig {
     pub temperature: f32,
     #[serde(default = "default_refresh_every_ops")]
     pub refresh_every_ops: usize,
-    #[serde(default)]
-    pub fallback: SynthesisFallback,
+    /// Legacy field — ignored; kept for deserializing old config files.
+    #[serde(skip_serializing, default)]
+    pub fallback: serde_json::Value,
 }
 
 fn default_synthesis_model() -> String {
@@ -131,7 +113,7 @@ impl Default for SynthesisConfig {
             max_tokens: default_max_tokens(),
             temperature: default_synthesis_temperature(),
             refresh_every_ops: default_refresh_every_ops(),
-            fallback: SynthesisFallback::default(),
+            fallback: serde_json::Value::Null,
         }
     }
 }
@@ -186,7 +168,7 @@ impl SynthesisConfig {
             } else {
                 ov.refresh_every_ops
             },
-            fallback: ov.fallback.clone(),
+            fallback: serde_json::Value::Null,
         }
     }
 }
@@ -305,6 +287,8 @@ pub fn credentials_path() -> PathBuf {
         .join("credentials.toml")
 }
 
+/// Legacy config path helpers retained for reading old data directories.
+/// These paths are no longer written by agent-trace.
 pub fn models_dir() -> PathBuf {
     dirs_next::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -312,56 +296,22 @@ pub fn models_dir() -> PathBuf {
         .join("models")
 }
 
-/// Path to an embedded Qwen2.5 GGUF by size key.
-pub fn embedded_model_path(size_key: &str) -> PathBuf {
-    let filename = match size_key {
-        "0.5b" => "qwen2.5-0.5b-instruct-q4_k_m.gguf",
-        "1.5b" => "qwen2.5-1.5b-instruct-q4_k_m.gguf",
-        "3b" => "qwen2.5-3b-instruct-q4_k_m.gguf",
-        other => return models_dir().join(format!("qwen2.5-{other}-instruct.gguf")),
-    };
-    models_dir().join(filename)
-}
-
-/// HuggingFace source for embedded Qwen2.5 GGUF downloads.
-pub fn embedded_model_source(size_key: &str) -> Option<(&'static str, &'static str)> {
-    match size_key {
-        "0.5b" => Some((
-            "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
-            "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
-        )),
-        "1.5b" => Some((
-            "bartowski/Qwen2.5-1.5B-Instruct-GGUF",
-            "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
-        )),
-        "3b" => Some((
-            "bartowski/Qwen2.5-3B-Instruct-GGUF",
-            "Qwen2.5-3B-Instruct-Q4_K_M.gguf",
-        )),
-        _ => None,
-    }
-}
-
-// ── LLM Config ──────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Legacy LLM config — kept for serde deserialization of old config files.
+/// No longer written or used; the embedded/Candle path was removed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct LlmConfig {
-    /// Path to the GGUF model file, or None if not configured.
     pub model_path: Option<PathBuf>,
-    /// Maximum context window in tokens.
+    #[serde(default = "default_llm_max_tokens")]
     pub max_tokens: usize,
-    /// Temperature for generation.
+    #[serde(default = "default_llm_temperature")]
     pub temperature: f32,
 }
 
-impl Default for LlmConfig {
-    fn default() -> Self {
-        Self {
-            model_path: None,
-            max_tokens: 4096,
-            temperature: 0.7,
-        }
-    }
+fn default_llm_max_tokens() -> usize {
+    4096
+}
+fn default_llm_temperature() -> f32 {
+    0.7
 }
 
 // ── UI Config ────────────────────────────────────────────────────────────────
@@ -409,7 +359,8 @@ impl Default for DefaultsConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct GlobalConfig {
-    #[serde(default)]
+    /// Legacy field — ignored; kept for deserializing old global configs.
+    #[serde(skip_serializing, default)]
     pub llm: LlmConfig,
     #[serde(default)]
     pub synthesis: SynthesisConfig,
@@ -527,7 +478,6 @@ pub fn store_config_path(store_root: &Path) -> PathBuf {
 pub struct MergedConfig {
     #[allow(dead_code)]
     pub store: StoreInfo,
-    pub llm: LlmConfig,
     pub synthesis: SynthesisConfig,
     #[allow(dead_code)]
     pub ui: UiConfig,
@@ -540,7 +490,6 @@ impl Default for MergedConfig {
     fn default() -> Self {
         let global = GlobalConfig::default();
         Self {
-            llm: global.llm,
             synthesis: global.synthesis,
             ui: global.ui,
             defaults: global.defaults,
@@ -553,7 +502,6 @@ impl Default for MergedConfig {
 impl MergedConfig {
     pub fn merge(global: GlobalConfig, store: StoreConfig) -> Self {
         Self {
-            llm: store.llm.unwrap_or(global.llm),
             synthesis: SynthesisConfig::merge(global.synthesis, store.synthesis.as_ref()),
             ui: global.ui,
             defaults: global.defaults,
@@ -583,10 +531,23 @@ mod tests {
     #[test]
     fn test_global_config_defaults() {
         let cfg = GlobalConfig::default();
-        assert_eq!(cfg.llm, LlmConfig::default());
         assert_eq!(cfg.synthesis.model, "qwen2.5:1.5b");
         assert_eq!(cfg.ui, UiConfig::default());
         assert_eq!(cfg.defaults, DefaultsConfig::default());
+    }
+
+    #[test]
+    fn test_effective_model_returns_default_when_blank() {
+        let mut syn = SynthesisConfig::default();
+        syn.model = String::new();
+        assert_eq!(syn.effective_model(), syn.provider.default_model());
+    }
+
+    #[test]
+    fn test_effective_model_returns_configured() {
+        let mut syn = SynthesisConfig::default();
+        syn.model = "llama3:8b".into();
+        assert_eq!(syn.effective_model(), "llama3:8b");
     }
 
     #[test]
@@ -633,44 +594,41 @@ mod tests {
         let info = StoreInfo::new("test-store".into());
         let cfg = StoreConfig {
             store: info,
-            llm: Some(LlmConfig {
-                model_path: Some(PathBuf::from("/tmp/model.gguf")),
-                max_tokens: 2048,
-                temperature: 0.5,
+            llm: None,
+            synthesis: Some(SynthesisConfig {
+                model: "qwen2.5:1.5b".into(),
+                ..Default::default()
             }),
-            synthesis: None,
             polling: PollingConfig::default(),
         };
         cfg.save(store_root).unwrap();
 
         let loaded = StoreConfig::load(store_root).unwrap();
         assert_eq!(loaded.store.name, "test-store");
-        assert_eq!(loaded.llm.as_ref().unwrap().max_tokens, 2048);
+        assert_eq!(loaded.synthesis.as_ref().unwrap().model, "qwen2.5:1.5b");
     }
 
     #[test]
-    fn test_merged_config_llm_override() {
-        let global = GlobalConfig {
-            llm: LlmConfig {
-                model_path: None,
-                max_tokens: 4096,
-                temperature: 0.7,
-            },
-            ..Default::default()
-        };
-        let store_llm = LlmConfig {
-            model_path: Some(PathBuf::from("/tmp/model.gguf")),
-            max_tokens: 2048,
-            temperature: 0.5,
-        };
-        let store = StoreConfig {
-            store: StoreInfo::new("s".into()),
-            llm: Some(store_llm.clone()),
-            synthesis: None,
-            polling: PollingConfig::default(),
-        };
-        let merged = MergedConfig::merge(global, store);
-        assert_eq!(merged.llm, store_llm);
+    fn test_legacy_llm_config_in_store_still_deserializes() {
+        // Old configs with [llm] sections should still parse without error
+        let tmp = TempDir::new().unwrap();
+        let store_root = tmp.path();
+        let path = store_config_path(store_root);
+        let toml_content = r#"
+[store]
+id = "00000000-0000-0000-0000-000000000001"
+name = "legacy"
+created = "2024-01-01T00:00:00Z"
+agent_trace_version = "0.0.1"
+
+[llm]
+model_path = "/tmp/model.gguf"
+max_tokens = 2048
+temperature = 0.5
+"#;
+        write_toml(&path, toml_content);
+        let loaded = StoreConfig::load(store_root).unwrap();
+        assert_eq!(loaded.store.name, "legacy");
     }
 
     #[test]
