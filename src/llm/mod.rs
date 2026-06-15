@@ -1,8 +1,12 @@
 pub mod backend;
 pub mod prompts;
-pub mod providers;
+pub(crate) mod providers;
 pub mod synthesis_engine;
 pub mod trace_insights;
+
+// ── Public API re-exports ─────────────────────────────────────────────────────
+pub use trace_insights::{Llm, LlmError, TraceDocument, TraceInsightsFacade, TraceInsightsError};
+pub use providers::resolver::ResolvedBackendInfo;
 
 use crate::types::DocType;
 use anyhow::Result;

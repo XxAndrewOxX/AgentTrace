@@ -1,8 +1,9 @@
 use crate::config::{
     CredentialsStore, GlobalConfig, MergedConfig, SynthesisConfig, SynthesisMode, SynthesisProvider,
 };
+use crate::llm::Llm;
 use crate::llm::providers::{
-    is_model_pulled, is_reachable, normalize_model_alias, pull_model, resolve,
+    is_model_pulled, is_reachable, normalize_model_alias, pull_model,
 };
 use crate::observability::CliOutput;
 use anyhow::{bail, Context, Result};
@@ -112,21 +113,21 @@ fn load_merged(store_root: Option<&std::path::Path>) -> Result<MergedConfig> {
         }
     }
     let global = GlobalConfig::load()?;
-    Ok(MergedConfig {
-        store: crate::config::StoreInfo::new("global".into()),
-        llm: global.llm,
-        synthesis: global.synthesis,
-        ui: global.ui,
-        defaults: global.defaults,
-        polling: crate::config::PollingConfig::default(),
-    })
+    Ok(MergedConfig::merge(
+        global,
+        crate::config::StoreConfig {
+            store: crate::config::StoreInfo::new("global".into()),
+            llm: None,
+            synthesis: None,
+            polling: crate::config::PollingConfig::default(),
+        },
+    ))
 }
 
 fn synthesis_status_line(merged: &MergedConfig) -> String {
-    let creds = CredentialsStore::load().unwrap_or_default();
-    let info = resolve(merged, &creds).info();
+    let info = Llm::backend_info_from_config(merged);
     if info.degraded {
-        "Synthesis: degraded (no backend) — run `agent-trace model setup`".into()
+        "Synthesis: degraded (no backend) — run `agent-trace model ensure`".into()
     } else {
         format!("Synthesis: {} (ok)", info.label)
     }
@@ -134,13 +135,13 @@ fn synthesis_status_line(merged: &MergedConfig) -> String {
 
 fn cmd_status(store_root: Option<&std::path::Path>, output: &dyn CliOutput) -> Result<()> {
     let merged = load_merged(store_root)?;
-    let creds = CredentialsStore::load().unwrap_or_default();
     let syn = &merged.synthesis;
-    let info = resolve(&merged, &creds).info();
+    let info = Llm::backend_info_from_config(&merged);
+    let creds = CredentialsStore::load().unwrap_or_default();
 
     output.line(&format!("Mode:     {:?}", syn.mode))?;
     output.line(&format!("Provider: {}", syn.provider.slug()))?;
-    output.line(&format!("Model:    {}", syn.model))?;
+    output.line(&format!("Model:    {}", syn.effective_model()))?;
     output.line(&format!("Base URL: {}", syn.effective_base_url()))?;
     if let Some(key) = creds.redacted_key(syn.provider) {
         output.line(&format!("API key:  {key}"))?;
@@ -196,14 +197,16 @@ fn cmd_setup(output: &dyn CliOutput) -> Result<()> {
     }
 
     config.save()?;
-    output.line(&synthesis_status_line(&MergedConfig {
-        store: crate::config::StoreInfo::new("global".into()),
-        llm: config.llm.clone(),
-        synthesis: config.synthesis.clone(),
-        ui: config.ui.clone(),
-        defaults: config.defaults.clone(),
-        polling: crate::config::PollingConfig::default(),
-    }))?;
+    let merged = MergedConfig::merge(
+        config.clone(),
+        crate::config::StoreConfig {
+            store: crate::config::StoreInfo::new("global".into()),
+            llm: None,
+            synthesis: None,
+            polling: crate::config::PollingConfig::default(),
+        },
+    );
+    output.line(&synthesis_status_line(&merged))?;
     output.line("Run `agent-trace model test` to verify.")?;
     Ok(())
 }
@@ -276,18 +279,18 @@ fn cmd_credentials(sub: CredentialsCmd, output: &dyn CliOutput) -> Result<()> {
 
 fn cmd_test(store_root: Option<&std::path::Path>, output: &dyn CliOutput) -> Result<()> {
     let merged = load_merged(store_root)?;
-    let creds = CredentialsStore::load().unwrap_or_default();
-    let engine = resolve(&merged, &creds).into_engine();
+    let api = Llm::from_merged_config(&merged)
+        .map_err(|e| anyhow::anyhow!("Cannot initialize LLM backend: {e}"))?;
     let start = Instant::now();
-    let result = engine.summarize_change(
-        "plan.md",
-        "plan",
+    let result = api.summarize_change(
+        std::path::Path::new("plan.md"),
+        &crate::types::DocType::Plan,
         "+Added phase 2 checklist\n-Removed stale blocker\n",
     );
     let elapsed = start.elapsed();
     match result {
         Ok(text) => {
-            output.line(&format!("Backend: {}", engine.backend_label()))?;
+            output.line(&format!("Backend: {}", api.backend_label))?;
             output.line(&format!("Latency: {:.0}ms", elapsed.as_millis()))?;
             output.line(&format!("Sample: {text}"))?;
         }

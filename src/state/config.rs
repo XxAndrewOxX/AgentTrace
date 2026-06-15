@@ -536,6 +536,20 @@ pub struct MergedConfig {
     pub polling: PollingConfig,
 }
 
+impl Default for MergedConfig {
+    fn default() -> Self {
+        let global = GlobalConfig::default();
+        Self {
+            llm: global.llm,
+            synthesis: global.synthesis,
+            ui: global.ui,
+            defaults: global.defaults,
+            polling: PollingConfig::default(),
+            store: StoreInfo::new("default".into()),
+        }
+    }
+}
+
 impl MergedConfig {
     pub fn merge(global: GlobalConfig, store: StoreConfig) -> Self {
         Self {

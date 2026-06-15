@@ -254,6 +254,7 @@ impl SynthesisEngine for HttpBackend {
 }
 
 impl HttpBackend {
+    #[allow(dead_code)]
     pub fn classify(&self, content: &str) -> Result<Classification> {
         let user = classify_prompt(content);
         let output = self.complete("Reply with exactly one document type word.", &user)?;
@@ -264,6 +265,7 @@ impl HttpBackend {
         })
     }
 
+    #[allow(dead_code)]
     pub fn parse_command(&self, input: &str, manifest_summary: &str) -> Result<ParsedCommand> {
         let user = parse_command_prompt(input, manifest_summary);
         let output = self.complete("Reply with valid JSON only.", &user)?;

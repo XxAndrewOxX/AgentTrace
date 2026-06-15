@@ -1,6 +1,5 @@
-use crate::config::CredentialsStore;
 use crate::config::MergedConfig;
-use crate::llm::providers::resolve;
+use crate::llm::Llm;
 use crate::observability::CliOutput;
 use crate::store::Store;
 use crate::types::FileChange;
@@ -11,10 +10,9 @@ pub fn run(store_root: &Path, output: &dyn CliOutput) -> Result<()> {
     let store = Store::open(store_root)?;
 
     if let Ok(merged) = MergedConfig::load(store_root) {
-        let creds = CredentialsStore::load().unwrap_or_default();
-        let info = resolve(&merged, &creds).info();
+        let info = Llm::backend_info_from_config(&merged);
         let line = if info.degraded {
-            "Synthesis: degraded (no backend)".to_string()
+            "Synthesis: degraded (no backend) — run `agent-trace model ensure`".to_string()
         } else {
             format!("Synthesis: {} (ok)", info.label)
         };
