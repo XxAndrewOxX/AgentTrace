@@ -19,6 +19,9 @@ fn setup_processor(
     tmp: &TempDir,
     agent_name: Option<&str>,
 ) -> (Arc<Mutex<Manifest>>, ChangeProcessor) {
+    // In-process poll tests have no synthesis backend; opt into degraded mode so
+    // the poll gate commits documents (mirrors AGENT_TRACE_ALLOW_DEGRADED=1).
+    std::env::set_var("AGENT_TRACE_ALLOW_DEGRADED", "1");
     let root = tmp.path();
     std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
     let git = GitStore::init(root).unwrap();
@@ -31,6 +34,9 @@ fn setup_processor(
         synthesis: None,
         polling: PollingConfig::default(),
     };
+    // Persist config so the poll synthesis gate (which reloads config from disk)
+    // can resolve a backend — mirrors a real `agent-trace init` store.
+    store_cfg.save(root).unwrap();
     let config = MergedConfig::merge(global, store_cfg);
     let agent = AgentState::new(agent_name.map(|s| s.to_string()));
     let manifest = Arc::new(Mutex::new(manifest));
@@ -43,6 +49,16 @@ fn commit_file(root: &std::path::Path, name: &str, content: &str, doc_type: DocT
         std::fs::create_dir_all(parent).unwrap();
     }
     std::fs::write(root.join(name), content).unwrap();
+    // Persist the registration to disk so the poll loop (which reloads the
+    // manifest from disk each cycle, treating disk as the source of truth) sees
+    // the correct doc type — mirroring `agent-trace add`.
+    let mut manifest = Manifest::load(root).unwrap();
+    if manifest.find_by_path(&PathBuf::from(name)).is_none() {
+        manifest
+            .register(&PathBuf::from(name), doc_type.clone(), "")
+            .unwrap();
+        manifest.save(root).unwrap();
+    }
     let git = GitStore::open(root).unwrap();
     let info = CommitInfo {
         action: Action::Create,
@@ -59,6 +75,7 @@ fn commit_file(root: &std::path::Path, name: &str, content: &str, doc_type: DocT
 
 #[test]
 fn ai1_agent_lock_file_attribution() {
+    std::env::set_var("AGENT_TRACE_ALLOW_DEGRADED", "1");
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
@@ -73,6 +90,7 @@ fn ai1_agent_lock_file_attribution() {
         synthesis: None,
         polling: PollingConfig::default(),
     };
+    store_cfg.save(root).unwrap();
     let config = MergedConfig::merge(global, store_cfg);
 
     // Create a plan file in git first.
@@ -224,10 +242,10 @@ fn ai5_agent_cannot_modify_log() {
     assert_eq!(content, "# Log\n\nSession start", "log should be reverted");
 }
 
-// ── AI-6: Agent Creates File → Registered as Scratch ─────────────────────────
+// ── AI-6: Agent Creates File → Committed but Not Manifest-Registered ──────────
 
 #[test]
-fn ai6_agent_new_file_registered_as_scratch() {
+fn ai6_agent_new_file_committed_not_registered() {
     let tmp = TempDir::new().unwrap();
     let (manifest, mut proc) = setup_processor(&tmp, Some("test-agent"));
 
@@ -238,13 +256,23 @@ fn ai6_agent_new_file_registered_as_scratch() {
     .unwrap();
     proc.run_poll_cycle().unwrap();
 
+    // WS-C: agent-created files are committed to git as activity but are NOT
+    // auto-registered in the curated manifest (only explicit `add`/MCP writes
+    // populate it). The permission check treats them as ephemeral Scratch.
     let m = manifest.lock().unwrap();
-    let doc = m.find_by_path(&PathBuf::from("project-status.md"));
-    assert!(doc.is_some(), "file should be tracked");
-    assert_eq!(
-        doc.unwrap().doc_type,
-        DocType::Scratch,
-        "agent-created files should be Scratch"
+    assert!(
+        m.find_by_path(&PathBuf::from("project-status.md")).is_none(),
+        "poll must not auto-register agent-created files in the manifest"
+    );
+    drop(m);
+
+    let git2 = GitStore::open(tmp.path()).unwrap();
+    assert!(
+        !git2
+            .log_file(&PathBuf::from("project-status.md"), 5)
+            .unwrap()
+            .is_empty(),
+        "agent-created file should still be committed to git"
     );
 }
 

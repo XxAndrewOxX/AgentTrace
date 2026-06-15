@@ -21,12 +21,26 @@ fn perf_budget_ms(local_ms: u128) -> u128 {
 }
 
 fn setup_large_store(n_files: usize, n_dirs: usize) -> (TempDir, Arc<Mutex<Manifest>>) {
+    // In-process poll tests have no synthesis backend; opt into degraded mode so
+    // the poll gate commits documents (mirrors AGENT_TRACE_ALLOW_DEGRADED=1).
+    std::env::set_var("AGENT_TRACE_ALLOW_DEGRADED", "1");
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
     let git = GitStore::init(root).unwrap();
     let info = StoreInfo::new("perf-test".into());
     let mut manifest = Manifest::create_empty(info.clone(), root).unwrap();
+
+    // Persist config so the poll synthesis gate (which reloads config from disk)
+    // can resolve a backend — mirrors a real `agent-trace init` store.
+    StoreConfig {
+        store: info.clone(),
+        llm: None,
+        synthesis: None,
+        polling: PollingConfig::default(),
+    }
+    .save(root)
+    .unwrap();
 
     // Generate files across directories.
     let files_per_dir = n_files / n_dirs;
@@ -125,6 +139,7 @@ fn ps2_startup_time_200_docs() {
 
 #[test]
 fn ps3_git_log_performance() {
+    std::env::set_var("AGENT_TRACE_ALLOW_DEGRADED", "1");
     // Create a store with many commits.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();

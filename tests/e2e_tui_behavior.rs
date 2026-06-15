@@ -98,6 +98,9 @@ fn tb5_proxy_new_file_detected_and_committed() {
     use std::path::PathBuf;
     use tempfile::TempDir;
 
+    // In-process poll tests have no synthesis backend; opt into degraded mode so
+    // the poll gate commits documents (mirrors AGENT_TRACE_ALLOW_DEGRADED=1).
+    std::env::set_var("AGENT_TRACE_ALLOW_DEGRADED", "1");
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
@@ -112,6 +115,9 @@ fn tb5_proxy_new_file_detected_and_committed() {
         synthesis: None,
         polling: PollingConfig::default(),
     };
+    // Persist config so the poll synthesis gate (which reloads config from disk)
+    // can resolve a backend — mirrors a real `agent-trace init` store.
+    store_cfg.save(root).unwrap();
     let config = MergedConfig::merge(global, store_cfg);
     let agent = AgentState::new(None);
     let mut proc = ChangeProcessor::new(git, manifest.clone(), config, agent, None);
@@ -120,11 +126,22 @@ fn tb5_proxy_new_file_detected_and_committed() {
     std::fs::write(root.join("newfile.md"), "# New File").unwrap();
     proc.run_poll_cycle().unwrap();
 
-    // File should be tracked now.
+    // WS-C: poll commits new files to git as activity but does NOT auto-register
+    // them in the curated manifest.
     let m = manifest.lock().unwrap();
     assert!(
-        m.is_tracked(&PathBuf::from("newfile.md")),
-        "new file should be tracked after poll"
+        !m.is_tracked(&PathBuf::from("newfile.md")),
+        "poll must not auto-register new files in the manifest"
+    );
+    drop(m);
+
+    let git2 = GitStore::open(root).unwrap();
+    assert!(
+        !git2
+            .log_file(&PathBuf::from("newfile.md"), 5)
+            .unwrap()
+            .is_empty(),
+        "new file should still be committed to git"
     );
 }
 

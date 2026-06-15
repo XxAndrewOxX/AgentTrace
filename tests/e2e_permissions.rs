@@ -24,6 +24,9 @@ fn no_overrides() -> Overrides {
 }
 
 fn setup_with_agent(tmp: &TempDir, agent_name: &str) -> (Arc<Mutex<Manifest>>, ChangeProcessor) {
+    // In-process poll tests have no synthesis backend; opt into degraded mode so
+    // the poll gate commits documents (mirrors AGENT_TRACE_ALLOW_DEGRADED=1).
+    std::env::set_var("AGENT_TRACE_ALLOW_DEGRADED", "1");
     let root = tmp.path();
     std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
     let git = GitStore::init(root).unwrap();
@@ -37,6 +40,9 @@ fn setup_with_agent(tmp: &TempDir, agent_name: &str) -> (Arc<Mutex<Manifest>>, C
         synthesis: None,
         polling: PollingConfig::default(),
     };
+    // Persist config so the poll synthesis gate (which reloads config from disk)
+    // can resolve a backend — mirrors a real `agent-trace init` store.
+    store_cfg.save(root).unwrap();
     let config = MergedConfig::merge(global, store_cfg);
     let ag = AgentState::new(Some(agent_name.to_string()));
     let proc = ChangeProcessor::new(git, manifest.clone(), config, ag, None);
@@ -48,6 +54,16 @@ fn commit_as(root: &std::path::Path, name: &str, content: &str, doc_type: DocTyp
         std::fs::create_dir_all(parent).unwrap();
     }
     std::fs::write(root.join(name), content).unwrap();
+    // Persist the registration to disk so the poll loop (which reloads the
+    // manifest from disk each cycle, treating disk as the source of truth) sees
+    // the correct doc type — mirroring `agent-trace add`.
+    let mut manifest = Manifest::load(root).unwrap();
+    if manifest.find_by_path(&PathBuf::from(name)).is_none() {
+        manifest
+            .register(&PathBuf::from(name), doc_type.clone(), "")
+            .unwrap();
+        manifest.save(root).unwrap();
+    }
     let git = GitStore::open(root).unwrap();
     let info = CommitInfo {
         action: Action::Create,
@@ -490,11 +506,13 @@ fn pi3_reclassify_changes_enforcement() {
         "plan modification by agent should be allowed"
     );
 
-    // Reclassify to reference.
+    // Reclassify to reference (persist to disk so the poll loop's start-of-cycle
+    // reload reflects the new type).
     {
         let mut m = manifest.lock().unwrap();
         m.reclassify(&PathBuf::from("doc.md"), DocType::Reference)
             .unwrap();
+        m.save(tmp.path()).unwrap();
     }
 
     // Re-commit the file so the git store has the reference version.
