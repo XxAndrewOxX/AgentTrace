@@ -136,8 +136,6 @@ impl ChangeProcessor {
 
         let mut allowed: Vec<(PathBuf, Action, DocType)> = Vec::new();
         let mut violations: Vec<Violation> = Vec::new();
-        // Track newly-registered paths so we can roll back if the git commit fails.
-        let mut newly_registered: Vec<PathBuf> = Vec::new();
 
         let mut manifest = self.manifest.lock().unwrap();
 
@@ -155,15 +153,19 @@ impl ChangeProcessor {
 
             match perm {
                 PermissionResult::Allowed => {
-                    // Register new files.
-                    if matches!(change, FileChange::New(_)) && !manifest.is_tracked(&path) {
-                        let agent_name = actor.agent_name().unwrap_or("");
-                        let _ = manifest.register(&path, DocType::Scratch, agent_name);
-                        newly_registered.push(path.clone());
-                    }
-                    // Update renamed paths.
+                    // Poll-detected files are committed to git and recorded as
+                    // activity, but NOT auto-registered in the manifest: shell
+                    // edits to source files (e.g. worker.py) must not appear in
+                    // the curated document tree. New files are committed with an
+                    // ephemeral Scratch doc_type used only for the permission
+                    // check above.
+                    //
+                    // Keep manifest path metadata consistent across renames of
+                    // already-tracked documents.
                     if let FileChange::Renamed { from, to } = change {
-                        let _ = manifest.update_path(from, to);
+                        if manifest.is_tracked(from) {
+                            let _ = manifest.update_path(from, to);
+                        }
                     }
                     allowed.push((path, action, doc_type));
                 }
@@ -291,15 +293,9 @@ impl ChangeProcessor {
                     }
                 }
                 Err(e) => {
-                    // Roll back in-memory registrations so manifest stays consistent.
-                    for path in &newly_registered {
-                        let _ = manifest.untrack(path);
-                    }
-                    tracing::warn!(
-                        "Commit failed, rolled back {} registration(s): {}",
-                        newly_registered.len(),
-                        e
-                    );
+                    // No poll-time manifest registrations to roll back; just
+                    // skip persisting and fall through to HEAD polling.
+                    tracing::warn!("Poll batch commit failed: {}", e);
                     drop(manifest);
                     return self.poll_external_commits();
                 }
@@ -394,19 +390,36 @@ mod tests {
     }
 
     #[test]
-    fn test_poll_new_file_registered() {
+    fn test_poll_new_file_committed_not_registered() {
         let tmp = TempDir::new().unwrap();
         let (git, manifest, config) = setup(&tmp);
 
-        // Create a new .md file.
-        std::fs::write(tmp.path().join("notes.md"), "# notes").unwrap();
+        // Create a new source file (the kind of file a shell edit would touch).
+        std::fs::write(tmp.path().join("task.py"), "print('work')\n").unwrap();
 
         let agent = AgentState::new(None);
         let mut proc = ChangeProcessor::new(git, manifest.clone(), config, agent, None);
         proc.run_poll_cycle().unwrap();
 
-        let m = manifest.lock().unwrap();
-        assert!(m.is_tracked(&PathBuf::from("notes.md")));
+        // WS-C: the file is NOT auto-registered in the manifest.
+        {
+            let m = manifest.lock().unwrap();
+            assert!(
+                !m.is_tracked(&PathBuf::from("task.py")),
+                "poll must not auto-register source files in the manifest"
+            );
+        }
+
+        // ...but it IS committed to git.
+        let store = GitStore::open(tmp.path()).unwrap();
+        let log = store.log(10).unwrap();
+        assert!(
+            log.iter().any(|e| e
+                .files
+                .iter()
+                .any(|(p, _, _)| p == &PathBuf::from("task.py"))),
+            "poll should still commit the new file to git"
+        );
     }
 
     #[test]
