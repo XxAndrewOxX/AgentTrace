@@ -63,6 +63,88 @@ impl MockSynthesisServer {
     }
 }
 
+/// Mock Ollama server that starts listening only after a launcher script touches
+/// an enable file (simulates `ollama serve` auto-start for strict E2E tests).
+pub struct DeferredMockServer {
+    pub base_url: String,
+    pub native_base_url: String,
+    enable_path: PathBuf,
+    _handle: JoinHandle<()>,
+}
+
+impl DeferredMockServer {
+    pub fn new() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind deferred mock port");
+        let port = listener.local_addr().expect("deferred mock addr").port();
+        drop(listener);
+
+        let enable_path = std::env::temp_dir().join(format!("agent-trace-mock-enable-{port}"));
+        let _ = std::fs::remove_file(&enable_path);
+
+        let models = Arc::new(Mutex::new(vec!["qwen2.5:1.5b".to_string()]));
+        let enable_path_clone = enable_path.clone();
+        let handle = thread::spawn(move || {
+            while !enable_path_clone.exists() {
+                thread::sleep(Duration::from_millis(25));
+            }
+            let listener =
+                TcpListener::bind(format!("127.0.0.1:{port}")).expect("bind deferred mock server");
+            for stream in listener.incoming() {
+                if let Ok(stream) = stream {
+                    let models = models.clone();
+                    handle_mock_connection(stream, models);
+                }
+            }
+        });
+
+        Self {
+            base_url: format!("http://127.0.0.1:{port}/v1"),
+            native_base_url: format!("http://127.0.0.1:{port}"),
+            enable_path,
+            _handle: handle,
+        }
+    }
+
+    /// Write a shell script suitable for `OLLAMA_BIN` that enables the mock on `serve`.
+    pub fn write_launcher_script(&self, path: &Path) {
+        let content = format!(
+            "#!/bin/sh\nif [ \"$1\" = \"serve\" ]; then touch \"{}\"; fi\nexec sleep 3600\n",
+            self.enable_path.display()
+        );
+        std::fs::write(path, content).expect("write mock ollama launcher");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+}
+
+/// Write a global agent-trace config with synthesis pointing at `mock`.
+pub fn write_isolated_global_config(home: &Path, mock: &DeferredMockServer, model: &str) {
+    #[cfg(target_os = "macos")]
+    let config_dir = home.join("Library/Application Support/agent-trace");
+    #[cfg(not(target_os = "macos"))]
+    let config_dir = home.join(".config/agent-trace");
+
+    std::fs::create_dir_all(&config_dir).expect("create isolated global config dir");
+    let config_path = config_dir.join("config.toml");
+    let contents = format!(
+        "[synthesis]\nmode = \"ollama\"\nprovider = \"ollama\"\nmodel = \"{model}\"\nbase_url = \"{}\"\n",
+        mock.base_url
+    );
+    std::fs::write(config_path, contents).expect("write isolated global config");
+}
+
+/// Apply isolated HOME (and XDG_CONFIG_HOME on Linux) for subprocess tests.
+pub fn apply_isolated_home(cmd: &mut Command, home: &Path) {
+    cmd.env("HOME", home);
+    #[cfg(not(target_os = "macos"))]
+    {
+        cmd.env("XDG_CONFIG_HOME", home.join(".config"));
+    }
+}
+
 fn handle_mock_connection(stream: TcpStream, models: Arc<Mutex<Vec<String>>>) {
     thread::spawn(move || {
         let mut stream = stream;
@@ -230,6 +312,20 @@ impl TestStore {
             .output()
             .expect("run agent-trace (strict)");
         CmdOutput { output }
+    }
+
+    /// Run agent-trace strictly with extra environment variables.
+    pub fn run_strict_env(&self, env: &[(&str, &str)], args: &[&str]) -> CmdOutput {
+        let mut cmd = Command::new(&self.bin);
+        cmd.args(args)
+            .current_dir(self.dir.path())
+            .env_remove("AGENT_TRACE_ALLOW_DEGRADED");
+        for (key, value) in env {
+            cmd.env(key, value);
+        }
+        CmdOutput {
+            output: cmd.output().expect("run agent-trace (strict, env)"),
+        }
     }
 
     /// Run agent-trace strictly with AGENT_TRACE_NO_OLLAMA_START=1 (won't spawn ollama).

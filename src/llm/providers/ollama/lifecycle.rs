@@ -10,20 +10,34 @@
 //!    `AGENT_TRACE_NO_OLLAMA_START=1` skips spawn.
 
 use super::{is_model_pulled, is_reachable, pull_model};
-use crate::config::SynthesisConfig;
+use crate::config::{CredentialsStore, SynthesisConfig, SynthesisMode, SynthesisProvider};
 use anyhow::{bail, Result};
 use std::time::{Duration, Instant};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(300);
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Whether this config requires Ollama (mode=ollama or auto with no remote credentials).
-fn needs_ollama(cfg: &SynthesisConfig) -> bool {
-    use crate::config::{SynthesisMode, SynthesisProvider};
-    matches!(
-        cfg.provider,
-        SynthesisProvider::Ollama | SynthesisProvider::Custom
-    ) || matches!(cfg.mode, SynthesisMode::Ollama | SynthesisMode::Auto)
+/// Whether resolution may use Ollama (mirrors `resolver` auto/ollama paths).
+pub(crate) fn needs_ollama_for_resolve(
+    cfg: &SynthesisConfig,
+    creds: &CredentialsStore,
+) -> bool {
+    match cfg.mode {
+        SynthesisMode::Ollama => true,
+        SynthesisMode::Remote => {
+            matches!(cfg.provider, SynthesisProvider::Ollama | SynthesisProvider::Custom)
+        }
+        SynthesisMode::Auto | SynthesisMode::Embedded => {
+            if matches!(
+                cfg.provider,
+                SynthesisProvider::Ollama | SynthesisProvider::Embedded | SynthesisProvider::Custom
+            ) {
+                return true;
+            }
+            let needs_key = SynthesisConfig::provider_needs_credentials(cfg.provider);
+            !needs_key || creds.api_key_for(cfg.provider).is_none()
+        }
+    }
 }
 
 /// State of the Ollama daemon after `ensure_daemon` completes.
@@ -74,7 +88,15 @@ impl EnsureReport {
 
 /// Top-level entry point: ensure Ollama daemon is running and the configured model is pulled.
 pub fn ensure_ready(cfg: &SynthesisConfig) -> Result<EnsureReport> {
-    if !needs_ollama(cfg) {
+    let creds = CredentialsStore::load().unwrap_or_default();
+    ensure_ready_with_creds(cfg, &creds)
+}
+
+pub fn ensure_ready_with_creds(
+    cfg: &SynthesisConfig,
+    creds: &CredentialsStore,
+) -> Result<EnsureReport> {
+    if !needs_ollama_for_resolve(cfg, creds) {
         return Ok(EnsureReport::skipped());
     }
     let daemon = ensure_daemon(cfg)?;
@@ -217,15 +239,28 @@ mod tests {
     #[test]
     fn needs_ollama_for_ollama_provider() {
         let cfg = SynthesisConfig::default(); // default provider is Ollama
-        assert!(needs_ollama(&cfg));
+        let creds = CredentialsStore::default();
+        assert!(needs_ollama_for_resolve(&cfg, &creds));
     }
 
     #[test]
-    fn skipped_when_not_needed() {
-        use crate::config::{SynthesisMode, SynthesisProvider};
+    fn skipped_when_remote_only() {
         let mut cfg = SynthesisConfig::default();
         cfg.provider = SynthesisProvider::Openai;
         cfg.mode = SynthesisMode::Remote;
-        assert!(!needs_ollama(&cfg));
+        let mut creds = CredentialsStore::default();
+        creds.openai = Some(crate::config::ProviderCredentials {
+            api_key: Some("sk-test".into()),
+        });
+        assert!(!needs_ollama_for_resolve(&cfg, &creds));
+    }
+
+    #[test]
+    fn needs_ollama_when_auto_without_remote_creds() {
+        let mut cfg = SynthesisConfig::default();
+        cfg.provider = SynthesisProvider::Openai;
+        cfg.mode = SynthesisMode::Auto;
+        let creds = CredentialsStore::default();
+        assert!(needs_ollama_for_resolve(&cfg, &creds));
     }
 }

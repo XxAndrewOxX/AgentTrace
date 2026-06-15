@@ -186,6 +186,11 @@ impl Llm {
             }
         };
         let creds = CredentialsStore::load().unwrap_or_default();
+        if super::providers::ollama::lifecycle::needs_ollama_for_resolve(&merged.synthesis, &creds)
+            && !allow_degraded_mode()
+        {
+            Self::ensure_ready(&merged)?;
+        }
         let info = resolve(&merged, &creds).info();
         if info.degraded && !allow_degraded_mode() {
             anyhow::bail!(

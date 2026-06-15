@@ -928,9 +928,14 @@ fn mc15_strict_status_fails_without_backend() {
     store.configure_unreachable_synthesis();
 
     let out = store
-        .run_strict(&["status"])
+        .run_strict_no_spawn(&["status"])
         .expect_failure("strict status without backend");
-    out.assert_stderr_contains("Synthesis backend unavailable");
+    let stderr = out.stderr();
+    assert!(
+        stderr.contains("Synthesis backend unavailable")
+            || stderr.contains("Ollama daemon is not reachable"),
+        "expected synthesis gate failure, got:\n{stderr}"
+    );
 }
 
 // ── MC-16: shell .py edit refreshes context.md via LLM, not the manifest ──────
@@ -1211,6 +1216,41 @@ fn mc22_model_ensure_pulls_missing_model_via_mock() {
             "expected success message:\n{stdout}"
         );
     }
+}
+
+// ── MC-24: strict init after mock daemon auto-start ──────────────────────────
+
+/// MC-24: When Ollama is down, `init` in strict mode spawns `OLLAMA_BIN serve`,
+/// the mock daemon becomes reachable, and init succeeds.
+#[test]
+fn mc24_strict_init_after_mock_daemon_auto_start() {
+    let deferred = helpers::DeferredMockServer::new();
+    let launcher_dir = tempfile::TempDir::new().expect("launcher tempdir");
+    let launcher_path = launcher_dir.path().join("mock-ollama");
+    deferred.write_launcher_script(&launcher_path);
+
+    let home = tempfile::TempDir::new().expect("home tempdir");
+    helpers::write_isolated_global_config(home.path(), &deferred, "qwen2.5:1.5b");
+
+    let init_dir = tempfile::TempDir::new().expect("init tempdir");
+    let bin = std::path::PathBuf::from(env!("CARGO_BIN_EXE_agent-trace"));
+    let mut cmd = std::process::Command::new(&bin);
+    cmd.args(["init", init_dir.path().to_str().unwrap()])
+        .env_remove("AGENT_TRACE_ALLOW_DEGRADED")
+        .env("OLLAMA_BIN", &launcher_path);
+    helpers::apply_isolated_home(&mut cmd, home.path());
+
+    let output = cmd.output().expect("strict init with mock auto-start");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "expected strict init to succeed after mock daemon auto-start:\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        init_dir.path().join(".agent-trace/config.toml").exists(),
+        "expected store to be initialised"
+    );
 }
 
 // ── MC-23: model pull 1.5b resolves to qwen2.5:1.5b ─────────────────────────
