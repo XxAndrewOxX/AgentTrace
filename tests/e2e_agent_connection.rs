@@ -79,6 +79,58 @@ impl Drop for McpHarness {
     }
 }
 
+// ── Shared assertions for cross-session continuity tests ─────────────────────
+
+/// Read the current session id from the agent lock file.
+fn lock_session_id(store: &TestStore) -> String {
+    let lock = store.read_file(".agent-trace/locks/agent-lock.toml");
+    lock.lines()
+        .find(|l| l.starts_with("session_id"))
+        .and_then(|l| l.split('=').nth(1))
+        .map(|s| s.trim().trim_matches('"').to_string())
+        .expect("session_id in lock")
+}
+
+/// Assert that a single ingress path produced the full set of trace artifacts:
+/// a correctly-attributed summary event, synthesized context, the discovery
+/// index, an agent session log, and a clean git commit.
+fn assert_ingress_artifacts(store: &TestStore, path: &str, detected_by: &str, agent: &str) {
+    store.wait_for_file_contains(".agent-trace/summary_events.jsonl", path);
+    let events = store.read_file(".agent-trace/summary_events.jsonl");
+    assert!(
+        events.lines().any(|l| {
+            l.contains(path)
+                && (l.contains(&format!("\"detected_by\":\"{detected_by}\""))
+                    || l.contains(&format!("\"detected_by\": \"{detected_by}\"")))
+        }),
+        "{path} should have a {detected_by}-attributed event:\n{events}"
+    );
+
+    store.wait_for_file("context.md");
+    assert!(
+        store.file_exists("AGENT-TRACE.md"),
+        "{path}: AGENT-TRACE.md index should exist"
+    );
+
+    let logs_dir = store.root().join("logs");
+    let log_files: Vec<String> = std::fs::read_dir(&logs_dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        log_files
+            .iter()
+            .any(|n| n.starts_with(&format!("{agent}-"))),
+        "{path}: expected a session log for {agent}, got: {log_files:?}"
+    );
+
+    let log = store.run(&["log", "--limit", "40"]).expect_success("log");
+    log.assert_stdout_contains(path);
+}
+
 // ── AC-1: connect creates lock, disconnect removes it ────────────────────────
 
 #[test]
@@ -813,7 +865,9 @@ fn mc13_venv_changes_excluded_from_ops() {
     let _mcp = McpHarness::new(&store, "test-agent");
 
     store.write_file("seed.md", "# seed\n");
-    store.run(&["add", "scratch", "seed.md"]).expect_success("add");
+    store
+        .run(&["add", "scratch", "seed.md"])
+        .expect_success("add");
     store
         .run(&["write", "seed.md", "--content", "# seed v2\n"])
         .expect_success("write seed");
@@ -844,10 +898,7 @@ fn mc14_ten_ops_trigger_llm_synthesis_with_mock_ollama() {
     let _mcp = McpHarness::new(&store, "llm-agent");
 
     for i in 0..10 {
-        store.write_file(
-            &format!("task{i}.py"),
-            &format!("# task step {i}\n"),
-        );
+        store.write_file(&format!("task{i}.py"), &format!("# task step {i}\n"));
         std::thread::sleep(Duration::from_millis(150));
     }
 
@@ -897,10 +948,7 @@ fn mc16_shell_py_edit_updates_context_via_mock_llm() {
     let _mcp = McpHarness::new(&store, "shell-agent");
 
     // Edit a source file via the shell (not via MCP) — it is not in the manifest.
-    store.write_file(
-        "worker.py",
-        "def handler():\n    return 'worker payload'\n",
-    );
+    store.write_file("worker.py", "def handler():\n    return 'worker payload'\n");
 
     store.wait_for_file_contains(".agent-trace/summary_events.jsonl", "worker.py");
     // The LLM (mock) context synthesis ran and rewrote context.md.
@@ -972,6 +1020,125 @@ fn mc18_new_source_file_committed_not_in_manifest() {
     );
     let ls = store.run(&["ls"]).expect_success("ls");
     ls.assert_stdout_not_contains("task.py");
+}
+
+// ── MC-19: crash mid-MCP, restart, reconnect, continue writes → single timeline ─
+
+#[test]
+fn mc19_crash_reconnect_continues_single_timeline() {
+    let store = TestStore::new();
+    store.write_file("plan.md", "# Plan\n- [ ] Phase 1\n");
+    store
+        .run(&["add", "plan", "plan.md"])
+        .expect_success("add plan");
+
+    // Session A: an MCP process writes, then "crashes" — the harness Drop kills
+    // the child without a graceful disconnect, leaving an orphaned lock.
+    let session_a = {
+        let mut h = McpHarness::new(&store, "recover-agent");
+        let resp = h.call_tool(
+            "write_file",
+            json!({"path": "plan.md", "content": "# Plan\n- [x] Phase 1\n"}),
+        );
+        assert_eq!(
+            resp["result"]["isError"], false,
+            "session A write: {resp:?}"
+        );
+        // The summary event is appended synchronously inside write_file, so the
+        // lock + event log reflect session A by the time the response returns.
+        lock_session_id(&store)
+    }; // <- child killed here: simulates a crash mid-session.
+
+    // The orphaned lock is now stale, so reconnect must perform a takeover.
+    let lock = store.read_file(".agent-trace/locks/agent-lock.toml");
+    store.write_file(
+        ".agent-trace/locks/agent-lock.toml",
+        &stale_lock_content(&lock),
+    );
+
+    // Session B: restart + reconnect. Startup takeover recaps the crashed session.
+    let mut h = McpHarness::new(&store, "recover-agent");
+    let resume = h.call_tool("get_resume_context", json!({}));
+    assert_eq!(resume["result"]["isError"], false, "resume: {resume:?}");
+    let resume_text = resume["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        resume_text.contains("Prior Session Recap"),
+        "reconnect should surface the crashed session's recap: {resume_text}"
+    );
+
+    // Continue writing in the new session.
+    let resp = h.call_tool(
+        "write_file",
+        json!({"path": "plan.md", "content": "# Plan\n- [x] Phase 1\n- [x] Phase 2\n"}),
+    );
+    assert_eq!(
+        resp["result"]["isError"], false,
+        "session B write: {resp:?}"
+    );
+    let session_b = lock_session_id(&store);
+
+    // Attribution: takeover mints a fresh session id distinct from the crash.
+    assert_ne!(
+        session_a, session_b,
+        "reconnect must start a new session id"
+    );
+
+    // A recap for the crashed session exists.
+    let recap_path = format!(".agent-trace/session_recaps/{session_a}.md");
+    assert!(
+        store.file_exists(&recap_path),
+        "recap for crashed session A should exist at {recap_path}"
+    );
+
+    // Single coherent timeline: both sessions' events live in one event log,
+    // each attributed to its own session id.
+    let events = store.read_file(".agent-trace/summary_events.jsonl");
+    assert!(
+        events.contains(&session_a),
+        "event log should retain crashed session A events:\n{events}"
+    );
+    assert!(
+        events.contains(&session_b),
+        "event log should include resumed session B events:\n{events}"
+    );
+
+    // Single coherent git history: both writes are committed in one timeline.
+    let log = store.run(&["log", "--limit", "30"]).expect_success("log");
+    log.assert_stdout_contains("plan.md");
+}
+
+// ── MC-20: ingress parity — CLI / MCP / poll produce equivalent trace artifacts ─
+
+#[test]
+fn mc20_ingress_parity_cli_mcp_poll() {
+    // CLI ingress.
+    let cli = TestStore::new();
+    cli.run(&["connect", "parity-cli"])
+        .expect_success("connect cli");
+    cli.run(&["write", "cli_doc.md", "--content", "# CLI ingress\n"])
+        .expect_success("cli write");
+    assert_ingress_artifacts(&cli, "cli_doc.md", "cli", "parity-cli");
+
+    // MCP ingress.
+    let mcp = TestStore::new();
+    {
+        let mut h = McpHarness::new(&mcp, "parity-mcp");
+        let resp = h.call_tool(
+            "write_file",
+            json!({"path": "mcp_doc.md", "content": "# MCP ingress\n"}),
+        );
+        assert_eq!(resp["result"]["isError"], false, "mcp write: {resp:?}");
+    }
+    assert_ingress_artifacts(&mcp, "mcp_doc.md", "mcp", "parity-mcp");
+
+    // Poll ingress: a shell edit detected by the running MCP poll leader.
+    let poll = TestStore::new();
+    poll.set_fast_polling();
+    poll.run(&["connect", "parity-poll"])
+        .expect_success("connect poll");
+    let _leader = McpHarness::new(&poll, "parity-poll");
+    poll.write_file("poll_worker.py", "print('poll ingress')\n");
+    assert_ingress_artifacts(&poll, "poll_worker.py", "poll", "parity-poll");
 }
 
 // ── Helpers extension needed for stderr assertions ────────────────────────────
