@@ -18,10 +18,10 @@ skipped in CI/local runs).
 
 | ID | Intent | Setup | Expected behavior |
 |----|--------|-------|-------------------|
-| RC-1 | Rapid file creation storm | Create 50 `.md` files, single poll cycle | All 50 tracked in manifest; git log covers all files |
+| RC-1 | Rapid file creation storm | Create 50 `.md` files, single poll cycle | All 50 committed to git (batched); manifest stays curated (no poll auto-register) |
 | RC-2 | Modify during poll | Track file, overwrite 20 times, poll | Latest complete content captured; no crash |
 | RC-3 | Create then delete | Create file, delete before poll completes | No ghost manifest entry |
-| RC-3b | Commit failure rollback | Simulate commit failure after manifest registration | Manifest registration rolled back |
+| RC-3b | Commit failure handling | Simulate commit failure during poll | Manifest unchanged (poll never auto-registers); no crash |
 | RC-4 | Lock + file mod simultaneously | Write lock file and modify doc concurrently | No crash; consistent state |
 | RC-5 | Lock removed during processing | Remove lock mid poll cycle | Consistent attribution per cycle |
 | RC-6 | Manifest read/write contention | Concurrent manifest readers/writers | Readers always see complete manifest |
@@ -34,7 +34,7 @@ skipped in CI/local runs).
 | PE-1 | Rapid protected writes | Agent writes 10× to each of 3 protected docs | All writes reverted |
 | PE-2 | Race the revert | Continuous protected writes | System settles after writer stops |
 | PE-3 | Override expiry | Time-limited permission override | Allowed before expiry; denied after |
-| PE-4 | Faster-than-classification | Agent creates files rapidly | All default to Scratch immediately |
+| PE-4 | Faster-than-classification | Agent creates files rapidly | All committed to git as activity; not auto-registered in manifest |
 
 ## 3. Git store integrity (GS)
 

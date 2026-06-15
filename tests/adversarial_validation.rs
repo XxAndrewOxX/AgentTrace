@@ -111,14 +111,16 @@ fn rc1_rapid_file_creation_storm() {
     // Single poll cycle should detect and commit all files (batched).
     proc.run_poll_cycle().unwrap();
 
+    // WS-C: poll commits files to git but does NOT auto-register them in the
+    // curated manifest.
     let m = manifest.lock().unwrap();
-    let tracked = m.list(None);
     assert_eq!(
-        tracked.len(),
-        50,
-        "All 50 files must be tracked; got {}",
-        tracked.len()
+        m.list(None).len(),
+        0,
+        "poll must not auto-register files; manifest stays curated, got {}",
+        m.list(None).len()
     );
+    drop(m);
 
     // Verify git history has at least one commit covering the files.
     let git2 = GitStore::open(root).unwrap();
@@ -221,11 +223,19 @@ fn rc3b_commit_failure_rolls_back_manifest_registration() {
     // The key test: file present → poll runs → file committed → manifest consistent.
     proc.run_poll_cycle().unwrap();
 
-    // File was committed successfully; manifest should have it.
+    // WS-C: file is committed to git but not auto-registered in the manifest.
+    let git_check = GitStore::open(root).unwrap();
+    assert!(
+        !git_check
+            .log_file(&PathBuf::from("doomed.md"), 5)
+            .unwrap()
+            .is_empty(),
+        "File should be committed to git after successful poll"
+    );
     let m = manifest.lock().unwrap();
     assert!(
-        m.is_tracked(&PathBuf::from("doomed.md")),
-        "File should be tracked after successful poll"
+        !m.is_tracked(&PathBuf::from("doomed.md")),
+        "poll must not auto-register the file in the manifest"
     );
     drop(m);
 
@@ -645,22 +655,26 @@ fn pe4_agent_files_faster_than_classification() {
     }
     proc.run_poll_cycle().unwrap();
 
-    // ALL agent-created files must be Scratch — never Context, Log, or Reference.
+    // WS-C: agent-created files are committed to git as activity but not
+    // auto-registered, so the curated manifest stays empty. The permission check
+    // still treats untracked files as ephemeral Scratch (none are reverted).
     let m = manifest.lock().unwrap();
-    for f in &files {
-        let entry = m.find_by_path(&PathBuf::from(*f));
-        if let Some(e) = entry {
-            assert_eq!(
-                e.doc_type,
-                DocType::Scratch,
-                "Agent-created file {} must be Scratch, got {:?}",
-                f,
-                e.doc_type
-            );
-        }
-    }
-    // Must have tracked at least some files.
-    assert!(m.list(None).len() >= 15, "Most files should be tracked");
+    assert_eq!(
+        m.list(None).len(),
+        0,
+        "poll must not auto-register agent files in the manifest"
+    );
+    drop(m);
+
+    // All files were committed to git. Use a generous log window because agent
+    // activity also produces agent-log / index / context commits.
+    let git2 = GitStore::open(root).unwrap();
+    let log = git2.log(50).unwrap();
+    let total_files: usize = log.iter().map(|e| e.files.len()).sum();
+    assert!(
+        total_files >= 15,
+        "git should cover the agent-created files; got {total_files}"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -776,10 +790,12 @@ fn gs3_very_long_file_paths() {
     // Poll should detect and track the deeply nested file without crash.
     proc.run_poll_cycle().unwrap();
 
+    // WS-C: not auto-registered in the manifest; the git checks below verify the
+    // deep path is committed and fully operable.
     let m = manifest.lock().unwrap();
     assert!(
-        m.is_tracked(&PathBuf::from(&deep_path)),
-        "Deeply nested file must be tracked"
+        !m.is_tracked(&PathBuf::from(&deep_path)),
+        "poll must not auto-register the deep file in the manifest"
     );
     drop(m);
 
@@ -808,11 +824,11 @@ fn gs4_binary_content_in_md_file() {
     // Poll must not panic on binary content.
     proc.run_poll_cycle().unwrap();
 
-    // File should be tracked (it has .md extension).
+    // WS-C: committed to git but not auto-registered in the manifest.
     let m = manifest.lock().unwrap();
     assert!(
-        m.is_tracked(&PathBuf::from("binary.md")),
-        "Binary .md must be tracked"
+        !m.is_tracked(&PathBuf::from("binary.md")),
+        "poll must not auto-register binary.md in the manifest"
     );
     drop(m);
 
@@ -847,10 +863,11 @@ fn gs5_empty_md_file() {
     std::fs::write(root.join("empty.md"), "").unwrap();
     proc.run_poll_cycle().unwrap();
 
+    // WS-C: committed to git but not auto-registered in the manifest.
     let m = manifest.lock().unwrap();
     assert!(
-        m.is_tracked(&PathBuf::from("empty.md")),
-        "Empty .md must be tracked"
+        !m.is_tracked(&PathBuf::from("empty.md")),
+        "poll must not auto-register empty.md in the manifest"
     );
     drop(m);
 
@@ -894,23 +911,26 @@ fn gs6_symlinks_in_store_directory() {
     proc.run_poll_cycle().unwrap();
 
     // System must be consistent — no panic is the primary requirement.
-    let m = manifest.lock().unwrap();
-    // real.md should be tracked; link.md and external.md behavior is implementation-defined.
+    // WS-C: real.md is committed to git but not auto-registered in the manifest.
+    let git2 = GitStore::open(root).unwrap();
     assert!(
-        m.is_tracked(&PathBuf::from("real.md")),
-        "real.md must be tracked"
+        !git2
+            .log_file(&PathBuf::from("real.md"), 5)
+            .unwrap()
+            .is_empty(),
+        "real.md must be committed to git"
     );
+    let m = manifest.lock().unwrap();
+    assert!(
+        !m.is_tracked(&PathBuf::from("real.md")),
+        "poll must not auto-register real.md in the manifest"
+    );
+    drop(m);
 
     // External symlink must not have leaked /etc/hosts content into the repo.
-    // If external.md is tracked, its committed content must not be /etc/hosts content.
-    if m.is_tracked(&PathBuf::from("external.md")) {
-        drop(m);
-        let git2 = GitStore::open(root).unwrap();
-        if let Ok(content) = git2.show_file_at_version(&PathBuf::from("external.md"), 1) {
-            // The symlink target content would be whatever /etc/hosts says.
-            // We just verify no crash; content leakage via symlink is a known git behavior.
-            let _ = content;
-        }
+    // No crash is the requirement; symlink handling is implementation-defined.
+    if let Ok(content) = git2.show_file_at_version(&PathBuf::from("external.md"), 1) {
+        let _ = content;
     }
 }
 
@@ -1540,15 +1560,18 @@ fn di3_rename_preserves_full_history() {
         new_log.len()
     );
 
-    // The manifest must track new-name.md.
-    // NOTE: git2 rename detection is similarity-based. If not detected as Renamed,
-    // it appears as Delete(old) + New(new). Deleted files are intentionally not
-    // auto-untracked (user must run `agent-trace untrack` or `repair`). So old-name.md
-    // may still appear in the manifest — that is expected behaviour.
-    let m = manifest.lock().unwrap();
-    assert!(
-        m.is_tracked(&PathBuf::from("new-name.md")),
-        "new-name.md must be in manifest"
+    // The core DI-3 contract is git history preservation under the new name; the
+    // latest content must be independently retrievable. (WS-C: the curated
+    // manifest is not auto-populated by poll, so manifest registration of a
+    // poll-detected rename depends on git's similarity heuristics and is not
+    // asserted here.)
+    let count = git2.version_count(&PathBuf::from("new-name.md")).unwrap();
+    let latest = git2
+        .show_file_at_version(&PathBuf::from("new-name.md"), count)
+        .unwrap();
+    assert_eq!(
+        latest, "# v8",
+        "latest content under the new name must be retrievable; got {latest:?}"
     );
 }
 
