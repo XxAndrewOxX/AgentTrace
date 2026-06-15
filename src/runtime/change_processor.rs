@@ -240,6 +240,18 @@ impl ChangeProcessor {
 
         // Batch commit allowed changes.
         if !allowed.is_empty() {
+            // WS-A: gate synthesis before committing. A degraded backend (with
+            // no escape hatch) must not produce commits whose trace hooks would
+            // emit degraded artifacts, so check the gate before the git commit
+            // rather than warning after the fact.
+            if let Err(e) = crate::runtime::require_synthesis_backend(Some(&store_root)) {
+                tracing::warn!(
+                    "Skipping poll commit of {} file(s) — synthesis backend unavailable: {e}",
+                    allowed.len()
+                );
+                drop(manifest);
+                return self.poll_external_commits();
+            }
             let info = CommitInfo {
                 action: allowed[0].1.clone(),
                 files: allowed.clone(),
