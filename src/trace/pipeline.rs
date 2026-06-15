@@ -131,11 +131,9 @@ pub fn apply_trace_hooks(
         return Ok(());
     }
 
-    // Pipeline synthesis gate: never emit degraded artifacts from the post-write
-    // pipeline. When no reachable backend is configured (and the test/escape
-    // hatch is not set) this fails fast instead of silently degrading.
-    crate::runtime::require_synthesis_backend(Some(store_root))?;
-
+    // Pipeline synthesis gate: `from_store_root` fails (ModelUnavailable) when no
+    // reachable backend is configured and the escape hatch is unset, so the
+    // post-write pipeline never emits degraded artifacts — it bails here instead.
     let trace_insights = TraceInsightsFacade::from_store_root(store_root)?;
 
     if actor.is_agent() {
