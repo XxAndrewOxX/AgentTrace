@@ -122,6 +122,24 @@ pub fn synthesize_no_llm(store_root: &Path, manifest: &Manifest) -> Result<Strin
         out.push('\n');
     }
 
+    // WS-B: surface recent file activity (including unmanaged source files such
+    // as `.py` edits) so template mode still reflects real work, mirroring what
+    // the LLM context synthesis sees.
+    if let Ok(events) = crate::running_summary::load_recent_events(store_root, 15) {
+        if !events.is_empty() {
+            out.push_str("## Recent File Activity\n\n");
+            for e in events.iter().rev() {
+                let summary = e.summary.trim().replace('\n', " ");
+                if summary.is_empty() {
+                    out.push_str(&format!("- {}\n", e.path));
+                } else {
+                    out.push_str(&format!("- {} — {}\n", e.path, summary));
+                }
+            }
+            out.push('\n');
+        }
+    }
+
     Ok(out)
 }
 
@@ -206,6 +224,36 @@ mod tests {
         assert!(ctx.contains("## Scratch / Working Documents"));
         assert!(ctx.contains("[scratch] notes.md:"));
         assert!(ctx.contains("implement idempotency"));
+    }
+
+    #[test]
+    fn test_no_llm_synthesis_includes_recent_activity() {
+        let tmp = TempDir::new().unwrap();
+        let (root, manifest) = setup(&tmp);
+        crate::running_summary::append_event(
+            &root,
+            crate::running_summary::SummaryEvent {
+                timestamp: Utc::now().to_rfc3339(),
+                session_id: Some("s1".into()),
+                agent_name: Some("claude".into()),
+                actor: "agent:claude".into(),
+                action: "modify".into(),
+                change_kind: "modify".into(),
+                path: "worker.py".into(),
+                doc_type: "scratch".into(),
+                summary: "implement retry backoff".into(),
+                source: "poll".into(),
+                detected_by: "poll".into(),
+                lines_added: 4,
+                lines_removed: 1,
+            },
+        )
+        .unwrap();
+
+        let ctx = synthesize_no_llm(&root, &manifest).unwrap();
+        assert!(ctx.contains("## Recent File Activity"));
+        assert!(ctx.contains("worker.py"));
+        assert!(ctx.contains("implement retry backoff"));
     }
 
     #[test]
