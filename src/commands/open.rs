@@ -3,7 +3,7 @@ use crate::git_store::GitStore;
 use crate::llm::{spawn_llm_task, LlmRequest, LlmResponse, NoLlm};
 use crate::manifest::Manifest;
 use crate::observability::CliOutput;
-use crate::runtime::{ActivityMonitor, UiEvent};
+use crate::runtime::{ActivityMonitor, InstanceLock, UiEvent};
 use crate::session::AgentState;
 use crate::tui::app::App;
 use crate::tui::banner;
@@ -86,22 +86,30 @@ pub fn run(
     // Load command history.
     let history = load_command_history(&store_root);
 
-    // Create UI channel and start the shared activity monitor.
+    // The TUI is the single interactive owner of the store. A second TUI must
+    // open read-only; the poll loop itself is elected separately (PollLock) so
+    // an MCP server can keep monitoring while a read-only TUI observes.
+    let _instance_lock = match InstanceLock::acquire(&store_root) {
+        Ok(lock) => lock,
+        Err(e) => {
+            tracing::warn!("TUI instance lock unavailable: {e}");
+            output.warn("Warning: Another agent-trace TUI is running.")?;
+            output.warn("Opening in read-only mode.")?;
+            return run_readonly(&store_root, manifest, agent_name, ascii);
+        }
+    };
+
+    // Create UI channel and start the shared activity monitor. When another
+    // process already leads the poll loop this monitor observes HEAD-only.
     let (ui_tx, ui_rx) = tokio::sync::mpsc::channel::<UiEvent>(64);
     let agent_state = AgentState::new(agent_name.clone());
-    let monitor = ActivityMonitor::try_start(
+    let _monitor = ActivityMonitor::try_start(
         &store_root,
         config.clone(),
         manifest.clone(),
         agent_state,
         Some(ui_tx),
     )?;
-    if monitor.is_none() {
-        output.warn("Warning: Another agent-trace instance is running (poll loop disabled).")?;
-        output.warn("Opening in read-only mode.")?;
-        return run_readonly(&store_root, manifest, agent_name, ascii);
-    }
-    let _monitor = monitor.unwrap();
 
     // Enter TUI.
     enable_raw_mode()?;
