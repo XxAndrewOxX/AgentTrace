@@ -1,4 +1,4 @@
-use crate::llm::trace_insights::TraceInsightsFacade;
+use crate::llm::Llm;
 use crate::running_summary::{load_all_events, SummaryEvent};
 use crate::session::AgentSession;
 use anyhow::Result;
@@ -67,7 +67,7 @@ pub fn generate_session_recap(store_root: &Path, prior: &AgentSession) -> Result
         .map(|e| format!("[{}] {} {} — {}", e.timestamp, e.action, e.path, e.summary))
         .collect();
 
-    if let Ok(api) = TraceInsightsFacade::from_store_root(store_root) {
+    if let Ok(api) = Llm::from_store_root(store_root) {
         if !api.is_degraded() {
             match api.summarize_session(&prior.session_id, &event_strings) {
                 Ok(summary) => {

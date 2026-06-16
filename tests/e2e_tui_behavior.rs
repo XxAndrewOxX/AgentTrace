@@ -12,7 +12,6 @@ mod helpers;
 use helpers::TestStore;
 
 use agent_trace::config::StoreInfo;
-use agent_trace::llm::LlmEngine;
 use agent_trace::manifest::Manifest;
 use agent_trace::tui::app::App;
 use agent_trace::tui::panels::{ChatState, Focus};
@@ -183,16 +182,31 @@ fn tb7_chat_state_history_and_input() {
     assert_eq!(chat.input, "ls");
 }
 
-// ── TB-8: No LLM Fallback ────────────────────────────────────────────────────
+// ── TB-8: Degraded synthesis fallback ────────────────────────────────────────
 
 #[test]
-fn tb8_no_llm_engine_is_not_loaded() {
-    use agent_trace::llm::NoLlm;
-    let no_llm = NoLlm;
-    assert!(
-        !no_llm.is_loaded(),
-        "NoLlm should report is_loaded() = false"
+fn tb8_degraded_backend_when_ollama_unreachable() {
+    use agent_trace::config::{GlobalConfig, MergedConfig, PollingConfig, StoreConfig, StoreInfo};
+    use agent_trace::llm::Llm;
+
+    let merged = MergedConfig::merge(
+        GlobalConfig::default(),
+        StoreConfig {
+            store: StoreInfo::new("test".into()),
+            llm: None,
+            synthesis: None,
+            polling: PollingConfig::default(),
+        },
     );
+    let info = Llm::backend_info_from_config(&merged);
+    std::env::set_var("AGENT_TRACE_ALLOW_DEGRADED", "1");
+    let api = Llm::from_merged_config(&merged).expect("degraded escape hatch");
+    std::env::remove_var("AGENT_TRACE_ALLOW_DEGRADED");
+    if info.degraded {
+        assert!(api.is_degraded());
+    } else {
+        assert!(!api.is_degraded());
+    }
 }
 
 // ── TB-9: Startup Banner ──────────────────────────────────────────────────────

@@ -1,8 +1,14 @@
 use crate::llm::trace_insights::TraceDocument;
-use crate::llm::DocSummary;
 use crate::types::DocType;
 
 const MAX_SNIPPET_CHARS: usize = 2000;
+
+#[derive(Debug, Clone)]
+pub struct DocSummary {
+    pub path: String,
+    pub doc_type: DocType,
+    pub content_snippet: String,
+}
 
 fn truncate(s: &str, max: usize) -> &str {
     if s.len() <= max {

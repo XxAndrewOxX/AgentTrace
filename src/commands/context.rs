@@ -1,5 +1,5 @@
 use crate::context::{load_pending_updates, synthesize_no_llm, write_context};
-use crate::llm::trace_insights::{TraceDocument, TraceInsightsFacade};
+use crate::llm::{Llm, TraceDocument};
 use crate::observability::CliOutput;
 use crate::store::Store;
 use anyhow::Result;
@@ -66,7 +66,7 @@ pub fn run(store_root: &Path, cmd: ContextCmd, output: &dyn CliOutput) -> Result
         }
         ContextCmd::Refresh => {
             let store = Store::open(store_root)?;
-            let content = if let Ok(api) = TraceInsightsFacade::from_store_root(store_root) {
+            let content = if let Ok(api) = Llm::from_store_root(store_root) {
                 let docs = store
                     .manifest
                     .documents()

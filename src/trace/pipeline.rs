@@ -1,5 +1,5 @@
 use crate::git_store::CommitInfo;
-use crate::llm::trace_insights::{TraceDocument, TraceInsightsFacade};
+use crate::llm::trace_insights::{Llm, TraceDocument};
 use crate::permissions::{check_permission, PermissionResult};
 use crate::store::Store;
 use crate::trace::context::load_pending_updates;
@@ -134,7 +134,7 @@ pub fn apply_trace_hooks(
     // Pipeline synthesis gate: `from_store_root` fails (ModelUnavailable) when no
     // reachable backend is configured and the escape hatch is unset, so the
     // post-write pipeline never emits degraded artifacts — it bails here instead.
-    let trace_insights = TraceInsightsFacade::from_store_root(store_root)?;
+    let trace_insights = Llm::from_store_root(store_root)?;
 
     if actor.is_agent() {
         if let (Some(agent_name), Some(sid)) = (actor.agent_name(), session_id) {
@@ -279,7 +279,7 @@ fn sync_context_md(
     store_root: &Path,
     git: &crate::git_store::GitStore,
     manifest: &crate::manifest::Manifest,
-    trace_insights: &TraceInsightsFacade,
+    trace_insights: &Llm,
     changed_paths: &[PathBuf],
 ) -> anyhow::Result<()> {
     // `is_degraded()` is only reachable under the test/escape-hatch path (the

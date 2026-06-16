@@ -2,9 +2,6 @@ use crate::config::{
     CredentialsStore, GlobalConfig, MergedConfig, SynthesisConfig, SynthesisMode, SynthesisProvider,
 };
 use crate::llm::Llm;
-use crate::llm::providers::{
-    is_model_pulled, is_reachable, normalize_model_alias, pull_model,
-};
 use crate::observability::CliOutput;
 use anyhow::{bail, Context, Result};
 use clap::Subcommand;
@@ -93,7 +90,9 @@ fn parse_provider(s: &str) -> Result<SynthesisProvider> {
             tracing::warn!("'embedded' provider is deprecated and will use Ollama instead");
             Ok(SynthesisProvider::Ollama)
         }
-        other => bail!("Unknown provider '{other}'. Use: openai, anthropic, openrouter, ollama, custom"),
+        other => {
+            bail!("Unknown provider '{other}'. Use: openai, anthropic, openrouter, ollama, custom")
+        }
     }
 }
 
@@ -188,7 +187,7 @@ fn cmd_setup(store_root: Option<&std::path::Path>, output: &dyn CliOutput) -> Re
     config.synthesis.model = if line.trim().is_empty() {
         provider.default_model().into()
     } else {
-        normalize_model_alias(line.trim())
+        Llm::normalize_model_alias(line.trim())
     };
 
     if provider == SynthesisProvider::Custom || provider == SynthesisProvider::Ollama {
@@ -322,11 +321,21 @@ fn cmd_test(store_root: Option<&std::path::Path>, output: &dyn CliOutput) -> Res
 
 fn cmd_list(output: &dyn CliOutput) -> Result<()> {
     output.line("Ollama (local):")?;
-    for m in ["qwen2.5:0.5b", "qwen2.5:1.5b", "qwen2.5:3b", "llama3.2:3b", "phi4:latest"] {
+    for m in [
+        "qwen2.5:0.5b",
+        "qwen2.5:1.5b",
+        "qwen2.5:3b",
+        "llama3.2:3b",
+        "phi4:latest",
+    ] {
         output.line(&format!("  {m}"))?;
     }
     output.line("Aliases (short form for ollama pull):")?;
-    for (alias, full) in [("0.5b", "qwen2.5:0.5b"), ("1.5b", "qwen2.5:1.5b"), ("3b", "qwen2.5:3b")] {
+    for (alias, full) in [
+        ("0.5b", "qwen2.5:0.5b"),
+        ("1.5b", "qwen2.5:1.5b"),
+        ("3b", "qwen2.5:3b"),
+    ] {
         output.line(&format!("  {alias} → {full}"))?;
     }
     output.line("Remote examples:")?;
@@ -336,10 +345,10 @@ fn cmd_list(output: &dyn CliOutput) -> Result<()> {
 }
 
 fn cmd_pull(size: &str, output: &dyn CliOutput) -> Result<()> {
-    let normalized = normalize_model_alias(size);
+    let normalized = Llm::normalize_model_alias(size);
     output.line(&format!("Pulling Ollama model {normalized}…"))?;
     let config = GlobalConfig::load()?;
-    pull_model(&config.synthesis, &normalized)
+    Llm::pull_model(&config.synthesis, &normalized)
         .with_context(|| format!("ollama pull {normalized}"))?;
     let mut config = GlobalConfig::load()?;
     config.synthesis.provider = SynthesisProvider::Ollama;
@@ -350,9 +359,11 @@ fn cmd_pull(size: &str, output: &dyn CliOutput) -> Result<()> {
 }
 
 fn cmd_serve_check(output: &dyn CliOutput) -> Result<()> {
+    // Diagnostic only — reports reachability and model presence without starting
+    // the daemon or pulling. Use `model ensure` for side-effectful readiness.
     let config = GlobalConfig::load()?;
     let syn = &config.synthesis;
-    let reachable = is_reachable(syn);
+    let reachable = Llm::is_reachable(syn);
     output.line(&format!(
         "Ollama at {}: {}",
         syn.effective_base_url(),
@@ -363,15 +374,11 @@ fn cmd_serve_check(output: &dyn CliOutput) -> Result<()> {
         }
     ))?;
     if reachable {
-        let pulled = is_model_pulled(syn).unwrap_or(false);
+        let pulled = Llm::is_model_pulled(syn).unwrap_or(false);
         output.line(&format!(
             "Model '{}': {}",
             syn.effective_model(),
-            if pulled {
-                "pulled"
-            } else {
-                "not pulled"
-            }
+            if pulled { "pulled" } else { "not pulled" }
         ))?;
         if !pulled {
             output.line("  → Run `agent-trace model ensure` to pull the model automatically")?;
@@ -381,7 +388,6 @@ fn cmd_serve_check(output: &dyn CliOutput) -> Result<()> {
     }
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -396,7 +402,10 @@ mod tests {
 
     #[test]
     fn parse_provider_embedded_deprecated_migrates_to_ollama() {
-        assert_eq!(parse_provider("embedded").unwrap(), SynthesisProvider::Ollama);
+        assert_eq!(
+            parse_provider("embedded").unwrap(),
+            SynthesisProvider::Ollama
+        );
     }
 
     #[test]
@@ -407,7 +416,7 @@ mod tests {
     #[test]
     fn pull_normalizes_short_alias() {
         // Verify normalization logic works
-        assert_eq!(normalize_model_alias("1.5b"), "qwen2.5:1.5b");
-        assert_eq!(normalize_model_alias("0.5b"), "qwen2.5:0.5b");
+        assert_eq!(Llm::normalize_model_alias("1.5b"), "qwen2.5:1.5b");
+        assert_eq!(Llm::normalize_model_alias("0.5b"), "qwen2.5:0.5b");
     }
 }

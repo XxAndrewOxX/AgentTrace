@@ -1,5 +1,5 @@
 use crate::git_store::{CommitInfo, GitStore};
-use crate::llm::trace_insights::TraceInsightsFacade;
+use crate::llm::Llm;
 use crate::manifest::Manifest;
 use crate::types::{Action, Actor, DocType};
 use anyhow::Result;
@@ -393,7 +393,7 @@ pub fn refresh(store_root: &Path, git: &GitStore, manifest: &Manifest) -> Result
     let plan_snippet = read_plan_snippet(store_root, manifest);
     let events_str = format_events_for_prompt(&events);
 
-    let api = TraceInsightsFacade::from_store_root(store_root).map_err(|e| anyhow::anyhow!(e))?;
+    let api = Llm::from_store_root(store_root).map_err(|e| anyhow::anyhow!(e))?;
     let start = std::time::Instant::now();
     let used_llm = !api.is_degraded();
     let (content, commit_label) = if used_llm {

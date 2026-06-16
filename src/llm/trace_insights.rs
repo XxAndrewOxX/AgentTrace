@@ -2,9 +2,10 @@ use super::backend::TraceInsightsBackend;
 use super::providers::ollama::EnsureReport;
 use super::providers::{resolve, ResolvedBackendInfo};
 use super::synthesis_engine::SynthesisEngine;
-use crate::config::{CredentialsStore, MergedConfig};
+use crate::config::{CredentialsStore, MergedConfig, SynthesisConfig};
 use crate::runtime::allow_degraded_mode;
 use crate::types::DocType;
+use anyhow::Result as AnyhowResult;
 use std::path::Path;
 use thiserror::Error;
 
@@ -128,9 +129,8 @@ impl Llm {
     }
 
     pub fn from_store_root(store_root: &Path) -> Result<Self, LlmError> {
-        let merged = MergedConfig::load(store_root).map_err(|e| {
-            LlmError::ModelUnavailable(format!("config load failed: {e}"))
-        })?;
+        let merged = MergedConfig::load(store_root)
+            .map_err(|e| LlmError::ModelUnavailable(format!("config load failed: {e}")))?;
         Self::from_merged_config(&merged)
     }
 
@@ -157,6 +157,26 @@ impl Llm {
     pub fn backend_info_from_config(merged: &MergedConfig) -> ResolvedBackendInfo {
         let creds = CredentialsStore::load().unwrap_or_default();
         resolve(merged, &creds).info()
+    }
+
+    /// Normalize short Ollama model aliases (e.g. `1.5b` → `qwen2.5:1.5b`).
+    pub fn normalize_model_alias(alias: &str) -> String {
+        super::providers::ollama::normalize_model_alias(alias)
+    }
+
+    /// Whether the configured Ollama endpoint responds to a health check.
+    pub fn is_reachable(syn: &SynthesisConfig) -> bool {
+        super::providers::ollama::is_reachable(syn)
+    }
+
+    /// Whether the configured model tag is listed on the Ollama daemon.
+    pub fn is_model_pulled(syn: &SynthesisConfig) -> AnyhowResult<bool> {
+        super::providers::ollama::is_model_pulled(syn)
+    }
+
+    /// Pull a model tag via the configured Ollama native API.
+    pub fn pull_model(syn: &SynthesisConfig, model: &str) -> AnyhowResult<()> {
+        super::providers::ollama::pull_model(syn, model)
     }
 
     /// Ensure Ollama daemon is running and the configured model is pulled.
@@ -193,9 +213,7 @@ impl Llm {
         }
         let info = resolve(&merged, &creds).info();
         if info.degraded && !allow_degraded_mode() {
-            anyhow::bail!(
-                "Synthesis backend unavailable. Run: agent-trace model ensure"
-            );
+            anyhow::bail!("Synthesis backend unavailable. Run: agent-trace model ensure");
         }
         Ok(info)
     }
