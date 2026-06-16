@@ -204,12 +204,14 @@ fn handle_tools_list() -> Value {
                 },
                 {
                     "name": "get_resume_context",
-                    "description": "Get the full resume briefing for reconnecting agents. Call this FIRST after initialize before reading other files.",
+                    "description": "Get the four-section resume briefing (objective, current state, recent events, earlier work). Call FIRST after initialize.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "include_git_log": {"type": "boolean", "default": true},
-                            "git_log_limit": {"type": "integer", "default": 10}
+                            "include_git_log": {"type": "boolean", "default": false},
+                            "git_log_limit": {"type": "integer", "default": 10},
+                            "include_prior_recap": {"type": "boolean", "default": true},
+                            "include_session_log": {"type": "boolean", "default": false}
                         }
                     }
                 }
@@ -222,11 +224,19 @@ fn handle_get_resume_context(root: &Path, actor: &Actor, args: &Value) -> Value 
     let include_git_log = args
         .get("include_git_log")
         .and_then(|v| v.as_bool())
-        .unwrap_or(true);
+        .unwrap_or(false);
     let git_log_limit = args
         .get("git_log_limit")
         .and_then(|v| v.as_u64())
         .unwrap_or(10) as usize;
+    let include_prior_recap = args
+        .get("include_prior_recap")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let include_session_log = args
+        .get("include_session_log")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     if let Err(e) = crate::session_recap::ensure_prior_session_recap(root) {
         tracing::warn!("prior session recap failed: {e}");
@@ -236,7 +246,15 @@ fn handle_get_resume_context(root: &Path, actor: &Actor, args: &Value) -> Value 
         tracing::warn!("running summary refresh before resume context failed: {e}");
     }
 
-    match running_summary::assemble_resume_context(root, actor, include_git_log, git_log_limit) {
+    let opts = crate::briefing::BriefingOptions {
+        include_git_log,
+        include_prior_recap,
+        include_session_log,
+        git_log_limit,
+        ..Default::default()
+    };
+
+    match crate::briefing::assemble_resume_briefing(root, actor, &opts) {
         Ok(text) => tool_result(&text),
         Err(e) => error_response(-32603, &format!("Cannot assemble resume context: {e}")),
     }

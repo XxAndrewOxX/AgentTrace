@@ -1,6 +1,5 @@
 use crate::observability::CliOutput;
 use crate::running_summary;
-use crate::session;
 use crate::session_recap;
 use anyhow::Result;
 use clap::Subcommand;
@@ -8,7 +7,7 @@ use std::path::Path;
 
 #[derive(Subcommand, Debug)]
 pub enum ResumeCmd {
-    /// Print running_summary.md and session info.
+    /// Print the four-section resume briefing (same as MCP get_resume_context).
     Show,
     /// Force rebuild of running_summary.md from the event log.
     Refresh,
@@ -26,22 +25,15 @@ pub fn run(store_root: &Path, cmd: ResumeCmd, output: &dyn CliOutput) -> Result<
             if let Err(e) = session_recap::ensure_prior_session_recap(store_root) {
                 tracing::warn!("prior session recap failed: {e}");
             }
-            if let Some(sess) = session::load_session(store_root) {
-                let stale = if sess.is_stale() { " (stale)" } else { "" };
-                output.line(&format!(
-                    "Session: {} / {}{} (transport: {})",
-                    sess.name, sess.session_id, stale, sess.transport
-                ))?;
-            } else {
-                output.line("No active agent session.")?;
+            if let Err(e) = running_summary::refresh_if_stale(store_root) {
+                tracing::warn!("running summary refresh before resume show failed: {e}");
             }
-            let summary_path = store_root.join("running_summary.md");
-            if summary_path.exists() {
-                let content = std::fs::read_to_string(&summary_path)?;
-                output.raw_stdout(&content)?;
-            } else {
-                output.line("No running_summary.md yet. Write a document to generate one.")?;
-            }
+            let briefing = crate::briefing::assemble_resume_briefing(
+                store_root,
+                &crate::types::Actor::User,
+                &crate::briefing::BriefingOptions::default(),
+            )?;
+            output.raw_stdout(&briefing)?;
         }
         ResumeCmd::Refresh => {
             if let Err(e) = session_recap::ensure_prior_session_recap(store_root) {
@@ -71,13 +63,12 @@ pub fn run(store_root: &Path, cmd: ResumeCmd, output: &dyn CliOutput) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::briefing::{assemble_resume_briefing, BriefingOptions};
     use crate::config::StoreInfo;
     use crate::git_store::GitStore;
     use crate::manifest::Manifest;
     use crate::observability::NoopOutput;
-    use crate::running_summary::{
-        append_event, assemble_resume_context, write_running_summary, SummaryEvent,
-    };
+    use crate::running_summary::{append_event, write_running_summary, SummaryEvent};
     use crate::types::Actor;
     use chrono::Utc;
     use tempfile::TempDir;
@@ -130,13 +121,25 @@ mod tests {
     }
 
     #[test]
-    fn assemble_resume_context_includes_summary() {
+    fn assemble_resume_briefing_includes_sections() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
         let git = GitStore::init(root).unwrap();
         let info = StoreInfo::new("test".into());
         let mut manifest = Manifest::create_empty(info, root).unwrap();
+        std::fs::write(
+            root.join("plan.md"),
+            "# Plan\n\n## Goal\n\nShip it.\n\n- [ ] Phase 1\n",
+        )
+        .unwrap();
+        manifest
+            .register(
+                &std::path::PathBuf::from("plan.md"),
+                crate::types::DocType::Plan,
+                "",
+            )
+            .unwrap();
         write_running_summary(
             root,
             "# Running Summary\n\n## Resume Here\n\nDo the thing\n",
@@ -145,8 +148,11 @@ mod tests {
             "template",
         )
         .unwrap();
-        let text = assemble_resume_context(root, &Actor::User, false, 5).unwrap();
-        assert!(text.contains("Running Summary"));
-        assert!(text.contains("Resume Here"));
+        let text =
+            assemble_resume_briefing(root, &Actor::User, &BriefingOptions::default()).unwrap();
+        assert!(text.contains("## 1. Overall Objective"));
+        assert!(text.contains("Ship it"));
+        assert!(text.contains("INSTRUCTIONS"));
+        assert!(!text.contains("--- Context (context.md) ---"));
     }
 }
