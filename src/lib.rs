@@ -21,6 +21,7 @@ pub use state::manifest;
 pub use state::permissions;
 pub use state::store;
 pub use trace::agent_trace_md;
+pub use trace::briefing;
 pub use trace::context;
 pub use trace::logs as log_synth;
 pub use trace::pipeline as data_plane;
