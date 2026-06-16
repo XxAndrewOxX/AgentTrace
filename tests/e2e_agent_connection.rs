@@ -454,12 +454,15 @@ fn mc6_mcp_get_permissions_correct_for_agent() {
     assert!(text.contains("allowed"), "plan should be allowed for agent");
 }
 
-// ── MC-7: get_resume_context returns session + running summary ───────────────
+// ── MC-7: get_resume_context returns four-section briefing ───────────────────
 
 #[test]
 fn mc7_get_resume_context_returns_briefing() {
     let store = TestStore::new();
-    store.write_file("plan.md", "# Plan\n- [ ] Phase 1\n");
+    store.write_file(
+        "plan.md",
+        "# Plan\n\n## Goal\n\nComplete phase rollout.\n\n- [ ] Phase 1\n",
+    );
     store
         .run(&["add", "plan", "plan.md"])
         .expect_success("add plan");
@@ -467,7 +470,7 @@ fn mc7_get_resume_context_returns_briefing() {
     let mut h = McpHarness::new(&store, "test-agent");
     let write_resp = h.call_tool(
         "write_file",
-        json!({"path": "plan.md", "content": "# Plan\n- [x] Phase 1\n- [ ] Phase 2\n"}),
+        json!({"path": "plan.md", "content": "# Plan\n\n## Goal\n\nComplete phase rollout.\n\n- [x] Phase 1\n- [ ] Phase 2\n"}),
     );
     assert_eq!(write_resp["result"]["isError"], false);
 
@@ -479,13 +482,19 @@ fn mc7_get_resume_context_returns_briefing() {
         "get_resume_context: {resp:?}"
     );
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(
-        text.contains("Running Summary"),
-        "should include running summary"
-    );
-    assert!(text.contains("session_id") || text.contains("Session ID"));
-    assert!(text.contains("Phase"), "should include plan excerpt");
+    assert!(text.contains("## 1. Overall Objective"));
+    assert!(text.contains("Complete phase rollout"));
+    assert!(text.contains("## 3. Recent Activity"));
+    assert!(text.contains("SESSION:"));
     assert!(text.contains("INSTRUCTIONS"));
+    assert!(
+        !text.contains("--- Context (context.md) ---"),
+        "default briefing must not inline context.md"
+    );
+    assert!(
+        !text.contains("--- Running Summary ---"),
+        "default briefing must not inline running_summary.md"
+    );
 }
 
 // ── MC-8: MCP write updates running_summary and JSONL ───────────────────────
@@ -616,8 +625,8 @@ fn mc9_stale_mcp_reconnect_includes_prior_recap() {
     );
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
-        text.contains("Prior Session Recap"),
-        "resume context should include prior session recap: {text}"
+        text.contains("Previous session:") || text.contains("## 4. Earlier Work"),
+        "resume context should include prior session recap line: {text}"
     );
     assert!(
         text.contains("Work item") || text.contains("plan.md"),
@@ -668,7 +677,7 @@ fn mc10_stale_recap_without_mcp_restart() {
     );
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
-        text.contains("Prior Session Recap"),
+        text.contains("Previous session:") || text.contains("## 4. Earlier Work"),
         "resume context should include prior session recap without MCP restart: {text}"
     );
     assert!(
@@ -725,9 +734,116 @@ fn mc11_mid_session_checkpoint_in_resume_context() {
     );
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
-        text.contains("Current Session Checkpoint"),
-        "resume context should include current session checkpoint: {text}"
+        text.contains("## 3. Recent Activity"),
+        "resume context should include recent activity section: {text}"
     );
+    assert!(
+        text.contains("plan.md") || text.contains("Work item"),
+        "recent activity should reference session writes: {text}"
+    );
+}
+
+// ── MC-27: 25+ events produces §4 history summary cache ─────────────────────
+
+#[test]
+fn mc27_history_summary_cache_after_many_events() {
+    let store = TestStore::new();
+    store.write_file(
+        "plan.md",
+        "# Plan\n\n## Goal\n\nShip many events.\n\n- [ ] Phase 1\n",
+    );
+    store
+        .run(&["add", "plan", "plan.md"])
+        .expect_success("add plan");
+
+    let config = format!(
+        "{}\n[synthesis]\nrefresh_every_ops = 1\n",
+        store.read_file(".agent-trace/config.toml")
+    );
+    store.write_file(".agent-trace/config.toml", &config);
+
+    let mut h = McpHarness::new(&store, "test-agent");
+    for i in 0..26 {
+        let resp = h.call_tool(
+            "write_file",
+            json!({"path": "plan.md", "content": format!("# Plan\n\n## Goal\n\nShip many events.\n\n- [ ] Phase 1 item {i}\n")}),
+        );
+        assert_eq!(resp["result"]["isError"], false, "write {i}: {resp:?}");
+    }
+
+    store.wait_for_summary_refresh();
+
+    let resp = h.call_tool("get_resume_context", json!({}));
+    assert_eq!(
+        resp["result"]["isError"], false,
+        "get_resume_context: {resp:?}"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("## 4. Earlier Work"),
+        "briefing should include earlier work section: {text}"
+    );
+    assert!(
+        store.file_exists(".agent-trace/briefing/history_summary.md"),
+        "history summary cache should exist after 25+ events"
+    );
+}
+
+// ── MC-28: §3 prefers current session events over older sessions ─────────────
+
+#[test]
+fn mc28_briefing_prefers_current_session_in_recent_activity() {
+    let store = TestStore::new();
+    store.write_file(
+        "plan.md",
+        "# Plan\n\n## Goal\n\nSession ordering.\n\n- [ ] Phase 1\n",
+    );
+    store
+        .run(&["add", "plan", "plan.md"])
+        .expect_success("add plan");
+
+    {
+        let mut h = McpHarness::new(&store, "test-agent");
+        for i in 0..5 {
+            let resp = h.call_tool(
+                "write_file",
+                json!({"path": "plan.md", "content": format!("# Plan\n\n## Goal\n\nSession ordering.\n\n- [ ] Old session write {i}\n")}),
+            );
+            assert_eq!(resp["result"]["isError"], false);
+        }
+        store.wait_for_summary_refresh();
+    }
+
+    let lock = store.read_file(".agent-trace/locks/agent-lock.toml");
+    store.write_file(
+        ".agent-trace/locks/agent-lock.toml",
+        &stale_lock_content(&lock),
+    );
+
+    let mut h = McpHarness::new(&store, "test-agent");
+    let marker = "CURRENT_SESSION_MARKER_EVENT";
+    let write_resp = h.call_tool(
+        "write_file",
+        json!({"path": "plan.md", "content": format!("# Plan\n\n## Goal\n\nSession ordering.\n\n- [ ] {marker}\n")}),
+    );
+    assert_eq!(write_resp["result"]["isError"], false);
+    store.wait_for_summary_refresh();
+
+    let resp = h.call_tool("get_resume_context", json!({}));
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let section3 = text
+        .split("## 3. Recent Activity")
+        .nth(1)
+        .and_then(|s| s.split("## 4.").next())
+        .unwrap_or(text);
+    let marker_pos = section3.find(marker).expect("marker in recent activity");
+    let old_pos = section3.find("Old session write");
+    if let Some(old) = old_pos {
+        assert!(
+            marker_pos < old,
+            "current session event should appear before older session events:\n{section3}"
+        );
+    }
 }
 
 // ── AC-8: resume show stale recap without reconnect ───────────────────────────
@@ -772,8 +888,8 @@ fn ac8_resume_show_stale_recap_without_reconnect() {
     );
 
     let out = store.run(&["resume", "show"]).expect_success("resume show");
-    out.assert_stdout_contains("Session:");
-    out.assert_stdout_contains("# Running Summary");
+    out.assert_stdout_contains("## 1. Overall Objective");
+    out.assert_stdout_contains("SESSION:");
 
     assert!(
         store.file_exists(&recap_path),
@@ -829,8 +945,7 @@ fn ac9_resume_show_mid_session_checkpoint() {
     store.wait_for_file_contains("running_summary.md", "plan.md");
 
     let out = store.run(&["resume", "show"]).expect_success("resume show");
-    out.assert_stdout_contains("Session:");
-    out.assert_stdout_contains("# Running Summary");
+    out.assert_stdout_contains("## 3. Recent Activity");
     out.assert_stdout_contains("plan.md");
 }
 
@@ -1067,7 +1182,7 @@ fn mc19_crash_reconnect_continues_single_timeline() {
     assert_eq!(resume["result"]["isError"], false, "resume: {resume:?}");
     let resume_text = resume["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
-        resume_text.contains("Prior Session Recap"),
+        resume_text.contains("Previous session:") || resume_text.contains("## 4. Earlier Work"),
         "reconnect should surface the crashed session's recap: {resume_text}"
     );
 
