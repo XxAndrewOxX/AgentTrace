@@ -2,7 +2,9 @@
 #[path = "helpers.rs"]
 mod helpers;
 
-use agent_trace::config::{GlobalConfig, MergedConfig, PollingConfig, StoreConfig, StoreInfo};
+use agent_trace::config::{
+    GlobalConfig, MergedConfig, PollingConfig, StoreConfig, StoreInfo, SynthesisConfig,
+};
 use agent_trace::git_store::{CommitInfo, GitStore};
 use agent_trace::manifest::Manifest;
 use agent_trace::poll::{AgentState, ChangeProcessor};
@@ -36,7 +38,10 @@ fn setup_large_store(n_files: usize, n_dirs: usize) -> (TempDir, Arc<Mutex<Manif
     StoreConfig {
         store: info.clone(),
         llm: None,
-        synthesis: None,
+        synthesis: Some(SynthesisConfig {
+            base_url: Some("http://127.0.0.1:1".into()),
+            ..Default::default()
+        }),
         polling: PollingConfig::default(),
     }
     .save(root)
@@ -85,7 +90,10 @@ fn ps1_poll_performance_500_docs() {
     let store_cfg = StoreConfig {
         store: info,
         llm: None,
-        synthesis: None,
+        synthesis: Some(SynthesisConfig {
+            base_url: Some("http://127.0.0.1:1".into()),
+            ..Default::default()
+        }),
         polling: PollingConfig::default(),
     };
     let config = MergedConfig::merge(global, store_cfg);
@@ -232,7 +240,10 @@ fn ps5_memory_usage_within_bounds() {
     let store_cfg = StoreConfig {
         store: info,
         llm: None,
-        synthesis: None,
+        synthesis: Some(SynthesisConfig {
+            base_url: Some("http://127.0.0.1:1".into()),
+            ..Default::default()
+        }),
         polling: PollingConfig::default(),
     };
     let config = MergedConfig::merge(global, store_cfg);
