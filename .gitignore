@@ -9,3 +9,9 @@
 
 # Planning & internal docs (not for public repo)
 agent-trace-docs/
+
+# Agent Trace runtime store (created by `agent-trace init`)
+.agent-trace/
+
+# Cursor IDE session artifacts
+.cursor/
