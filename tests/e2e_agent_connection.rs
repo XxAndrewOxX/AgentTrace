@@ -696,11 +696,7 @@ fn mc11_mid_session_checkpoint_in_resume_context() {
         .run(&["add", "plan", "plan.md"])
         .expect_success("add plan");
 
-    let config = format!(
-        "{}\n[synthesis]\nrefresh_every_ops = 1\n",
-        store.read_file(".agent-trace/config.toml")
-    );
-    store.write_file(".agent-trace/config.toml", &config);
+    store.set_refresh_every_ops(1);
 
     let mut h = McpHarness::new(&store, "test-agent");
     for i in 0..10 {
@@ -756,11 +752,7 @@ fn mc27_history_summary_cache_after_many_events() {
         .run(&["add", "plan", "plan.md"])
         .expect_success("add plan");
 
-    let config = format!(
-        "{}\n[synthesis]\nrefresh_every_ops = 1\n",
-        store.read_file(".agent-trace/config.toml")
-    );
-    store.write_file(".agent-trace/config.toml", &config);
+    store.set_refresh_every_ops(1);
 
     let mut h = McpHarness::new(&store, "test-agent");
     for i in 0..26 {
@@ -807,7 +799,7 @@ fn mc28_briefing_prefers_current_session_in_recent_activity() {
         for i in 0..5 {
             let resp = h.call_tool(
                 "write_file",
-                json!({"path": "plan.md", "content": format!("# Plan\n\n## Goal\n\nSession ordering.\n\n- [ ] Old session write {i}\n")}),
+                json!({"path": format!("scratch/old-{i}.md"), "content": format!("# Old session write {i}\n")}),
             );
             assert_eq!(resp["result"]["isError"], false);
         }
@@ -821,10 +813,10 @@ fn mc28_briefing_prefers_current_session_in_recent_activity() {
     );
 
     let mut h = McpHarness::new(&store, "test-agent");
-    let marker = "CURRENT_SESSION_MARKER_EVENT";
+    let marker_path = "CURRENT_SESSION_MARKER_EVENT.md";
     let write_resp = h.call_tool(
         "write_file",
-        json!({"path": "plan.md", "content": format!("# Plan\n\n## Goal\n\nSession ordering.\n\n- [ ] {marker}\n")}),
+        json!({"path": marker_path, "content": "# Current session marker\n"}),
     );
     assert_eq!(write_resp["result"]["isError"], false);
     store.wait_for_summary_refresh();
@@ -836,8 +828,10 @@ fn mc28_briefing_prefers_current_session_in_recent_activity() {
         .nth(1)
         .and_then(|s| s.split("## 4.").next())
         .unwrap_or(text);
-    let marker_pos = section3.find(marker).expect("marker in recent activity");
-    let old_pos = section3.find("Old session write");
+    let marker_pos = section3
+        .find(marker_path)
+        .expect("marker path in recent activity");
+    let old_pos = section3.find("scratch/old-");
     if let Some(old) = old_pos {
         assert!(
             marker_pos < old,
@@ -916,11 +910,7 @@ fn ac9_resume_show_mid_session_checkpoint() {
         .run(&["add", "plan", "plan.md"])
         .expect_success("add plan");
 
-    let config = format!(
-        "{}\n[synthesis]\nrefresh_every_ops = 1\n",
-        store.read_file(".agent-trace/config.toml")
-    );
-    store.write_file(".agent-trace/config.toml", &config);
+    store.set_refresh_every_ops(1);
 
     store
         .run(&["connect", "test-agent"])

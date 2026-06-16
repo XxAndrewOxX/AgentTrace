@@ -138,6 +138,38 @@ pub fn write_isolated_global_config(home: &Path, mock: &DeferredMockServer, mode
     std::fs::write(config_path, contents).expect("write isolated global config");
 }
 
+/// Replace or insert a root-level TOML table, removing any prior `[table]` block.
+fn upsert_toml_table(cfg: &str, table: &str, body: &str) -> String {
+    let header = format!("[{table}]");
+    let mut out = Vec::new();
+    let mut skip = false;
+    for line in cfg.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            if trimmed == header {
+                skip = true;
+                continue;
+            }
+            skip = false;
+        }
+        if !skip {
+            out.push(line);
+        }
+    }
+    let mut result = out.join("\n");
+    if !result.is_empty() && !result.ends_with('\n') {
+        result.push('\n');
+    }
+    if !result.is_empty() {
+        result.push('\n');
+    }
+    result.push_str(&format!("{header}\n{body}"));
+    if !body.ends_with('\n') {
+        result.push('\n');
+    }
+    result
+}
+
 /// Apply isolated HOME (and XDG_CONFIG_HOME on Linux) for subprocess tests.
 pub fn apply_isolated_home(cmd: &mut Command, home: &Path) {
     cmd.env("HOME", home);
@@ -401,44 +433,54 @@ impl TestStore {
         }
     }
     pub fn configure_mock_synthesis(&self, mock: &MockSynthesisServer, refresh_every_ops: usize) {
-        let mut cfg = self.read_file(".agent-trace/config.toml");
-        if !cfg.ends_with('\n') {
-            cfg.push('\n');
-        }
-        cfg.push_str(&format!(
-            "\n[synthesis]\nmode = \"ollama\"\nprovider = \"ollama\"\nmodel = \"qwen2.5:1.5b\"\nbase_url = \"{}\"\nrefresh_every_ops = {refresh_every_ops}\n",
+        let cfg = self.read_file(".agent-trace/config.toml");
+        let body = format!(
+            "mode = \"ollama\"\nprovider = \"ollama\"\nmodel = \"qwen2.5:1.5b\"\nbase_url = \"{}\"\nrefresh_every_ops = {refresh_every_ops}\n",
             mock.base_url
-        ));
-        self.write_file(".agent-trace/config.toml", &cfg);
+        );
+        self.write_file(
+            ".agent-trace/config.toml",
+            &upsert_toml_table(&cfg, "synthesis", &body),
+        );
     }
 
     /// Configure mock synthesis pointing at the Ollama-native base URL.
     /// Used for lifecycle tests (MC-17..19) where /api/tags and /api/pull are tested.
     pub fn configure_mock_ollama(&self, mock: &MockSynthesisServer, model: &str) {
-        let mut cfg = self.read_file(".agent-trace/config.toml");
-        if !cfg.ends_with('\n') {
-            cfg.push('\n');
-        }
-        // base_url points to /v1 for health check; lifecycle derives native base by stripping /v1
-        cfg.push_str(&format!(
-            "\n[synthesis]\nmode = \"ollama\"\nprovider = \"ollama\"\nmodel = \"{model}\"\nbase_url = \"{}\"\n",
+        let cfg = self.read_file(".agent-trace/config.toml");
+        let body = format!(
+            "mode = \"ollama\"\nprovider = \"ollama\"\nmodel = \"{model}\"\nbase_url = \"{}\"\n",
             mock.base_url
-        ));
-        self.write_file(".agent-trace/config.toml", &cfg);
+        );
+        self.write_file(
+            ".agent-trace/config.toml",
+            &upsert_toml_table(&cfg, "synthesis", &body),
+        );
     }
 
     /// Point synthesis at an unreachable Ollama endpoint so the backend resolves
     /// as degraded regardless of any real local backend. Used by strict gate
     /// tests (MC-15) to make the "no backend" condition deterministic.
     pub fn configure_unreachable_synthesis(&self) {
-        let mut cfg = self.read_file(".agent-trace/config.toml");
-        if !cfg.ends_with('\n') {
-            cfg.push('\n');
-        }
-        cfg.push_str(
-            "\n[synthesis]\nmode = \"ollama\"\nprovider = \"ollama\"\nmodel = \"none\"\nbase_url = \"http://127.0.0.1:1\"\n",
+        let cfg = self.read_file(".agent-trace/config.toml");
+        let body =
+            "mode = \"ollama\"\nprovider = \"ollama\"\nmodel = \"none\"\nbase_url = \"http://127.0.0.1:1\"\n";
+        self.write_file(
+            ".agent-trace/config.toml",
+            &upsert_toml_table(&cfg, "synthesis", body),
         );
-        self.write_file(".agent-trace/config.toml", &cfg);
+    }
+
+    /// Set synthesis refresh threshold (replaces any existing `[synthesis]` table).
+    pub fn set_refresh_every_ops(&self, refresh_every_ops: usize) {
+        let cfg = self.read_file(".agent-trace/config.toml");
+        let body = format!(
+            "mode = \"ollama\"\nprovider = \"ollama\"\nmodel = \"none\"\nbase_url = \"http://127.0.0.1:1\"\nrefresh_every_ops = {refresh_every_ops}\n"
+        );
+        self.write_file(
+            ".agent-trace/config.toml",
+            &upsert_toml_table(&cfg, "synthesis", &body),
+        );
     }
 
     pub fn ops_since_synthesis(&self) -> usize {
