@@ -135,22 +135,43 @@ stale-lock recap also works via `resume show` without reconnecting MCP (AC-8).
 Mid-session checkpoint file is created after N writes and verified via
 `resume show` (AC-9).
 
-## Synthesis gate + activity ops (MC-15..18)
+## Synthesis gate + activity ops (MC-15..24)
 
 Added to the `connection` suite (`e2e_agent_connection`) to cover the pipeline
-synthesis gate, cross-process poll leadership, and the manifest-bloat policy.
-Gate tests use `TestStore::run_strict()` (no `AGENT_TRACE_ALLOW_DEGRADED`).
+synthesis gate, cross-process poll leadership, the manifest-bloat policy, and
+Ollama lifecycle / strict-gate behavior. Gate tests use `TestStore::run_strict()`
+or `run_strict_no_spawn()` (no `AGENT_TRACE_ALLOW_DEGRADED`).
 
 | ID | Type | Pass criteria |
 |----|------|---------------|
-| MC-15 | E2E | `run_strict(["status"])` on a fresh store with no backend → exit ≠ 0, stderr contains `Synthesis backend unavailable` |
+| MC-15 | E2E | `run_strict_no_spawn(["status"])` on a store with unreachable synthesis → exit ≠ 0, stderr mentions synthesis/Ollama unavailable |
 | MC-16 | E2E | Shell-edit `worker.py` (not in manifest) with a mock LLM backend → `context.md` mentions the file; manifest has no `worker.py` entry |
-| MC-17 | E2E | Two poll acquirers (MCP + held `poll.lock`) → one shell edit yields exactly one `summary_events.jsonl` line |
+| MC-17 | E2E | Two MCP processes for one store → one shell edit yields exactly one `summary_events.jsonl` line |
 | MC-18 | E2E | New `task.py` created via shell → committed to git + recorded in JSONL, but absent from `manifest.toml` |
+| MC-21 | E2E | Mock Ollama reachable with model listed → `run_strict(["status"])` reports non-degraded backend |
+| MC-22 | E2E | Mock Ollama reachable, model missing → `run_strict_no_spawn(["model", "ensure"])` attempts pull via mock |
+| MC-23 | E2E | `model pull 1.5b` normalizes to `qwen2.5:1.5b` and hits mock pull endpoint |
+| MC-24 | E2E | Strict `init` with `OLLAMA_BIN` mock launcher auto-starts daemon → store initialised |
+
+### Synthesis gate + `model ensure` (strict mode)
+
+Commands that synthesize trace artifacts (including `init`, `write`, `add`, and
+poll commits) call `Llm::require_backend` before proceeding when
+`AGENT_TRACE_ALLOW_DEGRADED` is unset:
+
+1. When the resolved config may use Ollama, `Llm::ensure_ready` runs first
+   (spawn `ollama serve` via `OLLAMA_BIN` if needed, pull missing model).
+2. Backend is resolved; if still degraded, the command fails with
+   `Synthesis backend unavailable. Run: agent-trace model ensure`.
+
+`model serve-check` is **diagnostic only** (reachability + model presence, no
+spawn/pull). Use `model ensure` for side-effectful readiness.
+
+Opt out of auto-start in CI/E2E: `AGENT_TRACE_NO_OLLAMA_START=1`.
 
 ### Manual validation
 
-1. `model setup` + `model serve-check` → `init` → `mcp` (no `ALLOW_DEGRADED`).
+1. `model setup` or `model ensure` → `init` → `mcp` (no `ALLOW_DEGRADED`).
 2. Terminal 1: agent client with MCP; Terminal 2: `agent-trace open` (read-only TUI,
    poll leadership stays with the MCP process).
 3. Agent edits a `.py` via shell (not MCP) → Terminal 2 changelog + `resume events`

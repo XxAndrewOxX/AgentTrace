@@ -52,4 +52,4 @@ See [`docs/VALIDATION-PLAN.md`](docs/VALIDATION-PLAN.md) for E2E suites
 - All git operations go through `GitStore` in `src/state/git.rs` — never use
   `git2` directly elsewhere
 - All permission checks go through `src/state/permissions.rs`
-- LLM is accessed via the `LlmEngine` trait — always support `NoLlm` fallback
+- LLM is accessed via the `Llm` facade in `src/llm/` — never import `providers::` outside that module
