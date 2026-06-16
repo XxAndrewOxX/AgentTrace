@@ -12,7 +12,9 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 const FILE_POLL_INTERVAL: Duration = Duration::from_millis(50);
-const DEFAULT_FILE_TIMEOUT: Duration = Duration::from_secs(10);
+// Poll + synthesis E2E tests can exceed 10s under parallel load when health
+// checks contend on a local Ollama instance.
+const DEFAULT_FILE_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// Minimal OpenAI-compatible HTTP server for synthesis E2E tests.
 pub struct MockSynthesisServer {
