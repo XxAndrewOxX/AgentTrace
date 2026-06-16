@@ -15,6 +15,7 @@ pub trait SynthesisEngine: Send + Sync {
         plan: &str,
     ) -> Result<String, String>;
     fn summarize_session(&self, session_id: &str, events: &[String]) -> Result<String, String>;
+    fn summarize_event_history(&self, events: &str) -> Result<String, String>;
     fn backend_label(&self) -> &str;
 }
 
@@ -66,6 +67,13 @@ impl SynthesisEngine for DegradedBackend {
         Ok(format!(
             "Session {session_id}: {} event(s) recorded (degraded summary).",
             events.len()
+        ))
+    }
+
+    fn summarize_event_history(&self, events: &str) -> Result<String, String> {
+        let n = events.lines().filter(|l| !l.trim().is_empty()).count();
+        Ok(format!(
+            "{n} earlier events recorded (degraded summary); see plan.md for phase checklist."
         ))
     }
 

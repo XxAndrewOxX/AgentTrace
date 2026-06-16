@@ -79,6 +79,14 @@ pub fn summarize_session_prompt(session_id: &str, events: &[String]) -> String {
     )
 }
 
+pub fn summarize_event_history_prompt(events: &str) -> String {
+    format!(
+        "Summarize this agent work history in one paragraph (4-6 sentences).\n\
+         Focus on themes and progress, not per-file enumeration.\n\n{}",
+        truncate(events, MAX_SNIPPET_CHARS)
+    )
+}
+
 pub fn update_running_summary_prompt(previous: &str, events: &str, plan: &str) -> String {
     format!(
         "Update the running project summary given the previous version and new events.\n\

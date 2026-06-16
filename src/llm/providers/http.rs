@@ -1,7 +1,8 @@
 use crate::config::{SynthesisConfig, SynthesisProvider};
 use crate::llm::prompts::{
-    classify_prompt, parse_command_prompt, summarize_change_prompt, summarize_session_prompt,
-    synthesize_context_prompt, trace_to_doc_summaries, update_running_summary_prompt,
+    classify_prompt, parse_command_prompt, summarize_change_prompt, summarize_event_history_prompt,
+    summarize_session_prompt, synthesize_context_prompt, trace_to_doc_summaries,
+    update_running_summary_prompt,
 };
 use crate::llm::synthesis_engine::SynthesisEngine;
 use crate::llm::trace_insights::TraceDocument;
@@ -244,6 +245,12 @@ impl SynthesisEngine for HttpBackend {
 
     fn summarize_session(&self, session_id: &str, events: &[String]) -> Result<String, String> {
         let user = summarize_session_prompt(session_id, events);
+        self.complete(SYNTHESIS_SYSTEM, &user)
+            .map_err(|e| e.to_string())
+    }
+
+    fn summarize_event_history(&self, events: &str) -> Result<String, String> {
+        let user = summarize_event_history_prompt(events);
         self.complete(SYNTHESIS_SYSTEM, &user)
             .map_err(|e| e.to_string())
     }

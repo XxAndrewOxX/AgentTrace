@@ -39,6 +39,9 @@ pub enum TraceInsightsRequest {
         new_events: String,
         plan_snippet: String,
     },
+    SummarizeEventHistory {
+        events: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +50,7 @@ pub enum TraceInsightsResponse {
     ContextDocument(String),
     SessionSummary(String),
     RunningSummary(String),
+    EventHistorySummary(String),
 }
 
 #[derive(Debug, Error)]
@@ -83,6 +87,10 @@ impl TraceInsightsBackend for EngineAdapter {
 
     fn summarize_session(&self, session_id: &str, events: &[String]) -> Result<String, String> {
         self.inner.summarize_session(session_id, events)
+    }
+
+    fn summarize_event_history(&self, events: &str) -> Result<String, String> {
+        self.inner.summarize_event_history(events)
     }
 
     fn update_running_summary(
@@ -263,6 +271,14 @@ impl Llm {
                 validate_non_empty(&text)?;
                 Ok(TraceInsightsResponse::RunningSummary(text))
             }
+            TraceInsightsRequest::SummarizeEventHistory { events } => {
+                let text = self
+                    .backend
+                    .summarize_event_history(&events)
+                    .map_err(LlmError::BackendFailure)?;
+                validate_non_empty(&text)?;
+                Ok(TraceInsightsResponse::EventHistorySummary(text))
+            }
         }
     }
 
@@ -334,6 +350,18 @@ impl Llm {
             TraceInsightsResponse::RunningSummary(v) => Ok(v),
             _ => Err(LlmError::InvalidOutput(
                 "expected RunningSummary response".into(),
+            )),
+        }
+    }
+
+    pub fn summarize_event_history(&self, events: &str) -> Result<String, LlmError> {
+        let request = TraceInsightsRequest::SummarizeEventHistory {
+            events: events.to_string(),
+        };
+        match self.execute(request)? {
+            TraceInsightsResponse::EventHistorySummary(v) => Ok(v),
+            _ => Err(LlmError::InvalidOutput(
+                "expected EventHistorySummary response".into(),
             )),
         }
     }

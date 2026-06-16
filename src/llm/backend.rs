@@ -12,6 +12,8 @@ pub trait TraceInsightsBackend: Send + Sync {
 
     fn summarize_session(&self, session_id: &str, events: &[String]) -> Result<String, String>;
 
+    fn summarize_event_history(&self, events: &str) -> Result<String, String>;
+
     fn update_running_summary(
         &self,
         previous_summary: &str,
@@ -42,6 +44,10 @@ impl TraceInsightsBackend for NoTraceBackend {
     }
 
     fn summarize_session(&self, _session_id: &str, _events: &[String]) -> Result<String, String> {
+        Err("no trace insights backend available".into())
+    }
+
+    fn summarize_event_history(&self, _events: &str) -> Result<String, String> {
         Err("no trace insights backend available".into())
     }
 
