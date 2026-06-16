@@ -407,7 +407,7 @@ mod tests {
         let store_cfg = crate::config::StoreConfig {
             store: info,
             llm: None,
-            synthesis: None,
+            synthesis: Some(crate::config::SynthesisConfig::for_unit_tests_degraded()),
             polling: crate::config::PollingConfig::default(),
         };
         store_cfg.save(&root).unwrap();

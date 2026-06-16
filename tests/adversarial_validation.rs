@@ -5,7 +5,9 @@
 mod helpers;
 use helpers::TestStore;
 
-use agent_trace::config::{GlobalConfig, MergedConfig, PollingConfig, StoreConfig, StoreInfo};
+use agent_trace::config::{
+    GlobalConfig, MergedConfig, PollingConfig, StoreConfig, StoreInfo, SynthesisConfig,
+};
 use agent_trace::git_store::{CommitInfo, GitStore};
 use agent_trace::manifest::Manifest;
 use agent_trace::permissions::{OverrideEntry, Overrides};
@@ -28,6 +30,13 @@ fn perf_budget_ms(local_ms: u128) -> u128 {
 
 // ── Shared setup helpers ──────────────────────────────────────────────────────
 
+fn degraded_synthesis_config() -> SynthesisConfig {
+    SynthesisConfig {
+        base_url: Some("http://127.0.0.1:1".into()),
+        ..Default::default()
+    }
+}
+
 fn setup_store(tmp: &TempDir) -> (GitStore, Arc<Mutex<Manifest>>) {
     std::env::set_var("AGENT_TRACE_ALLOW_DEGRADED", "1");
     let root = tmp.path();
@@ -38,7 +47,7 @@ fn setup_store(tmp: &TempDir) -> (GitStore, Arc<Mutex<Manifest>>) {
     let store_cfg = StoreConfig {
         store: info,
         llm: None,
-        synthesis: None,
+        synthesis: Some(degraded_synthesis_config()),
         polling: PollingConfig::default(),
     };
     store_cfg.save(root).unwrap();
@@ -54,7 +63,7 @@ fn make_processor(
     let store_cfg = StoreConfig {
         store: info,
         llm: None,
-        synthesis: None,
+        synthesis: Some(degraded_synthesis_config()),
         polling: PollingConfig::default(),
     };
     let config = MergedConfig::merge(GlobalConfig::default(), store_cfg);

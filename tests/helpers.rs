@@ -280,6 +280,7 @@ impl TestStore {
         let s = Self { dir, bin };
         s.run(&["init", s.dir.path().to_str().unwrap()])
             .expect_success("init");
+        s.configure_unreachable_synthesis();
         s
     }
 
@@ -297,6 +298,7 @@ impl TestStore {
         }
         s.run(&["init", s.dir.path().to_str().unwrap(), "--scan"])
             .expect_success("init --scan");
+        s.configure_unreachable_synthesis();
         s
     }
 

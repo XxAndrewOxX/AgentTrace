@@ -144,6 +144,15 @@ impl SynthesisConfig {
         )
     }
 
+    /// Synthesis config that cannot reach any backend (unit tests only).
+    #[cfg(test)]
+    pub fn for_unit_tests_degraded() -> Self {
+        Self {
+            base_url: Some("http://127.0.0.1:1/v1".into()),
+            ..Default::default()
+        }
+    }
+
     pub fn merge(base: Self, override_cfg: Option<&Self>) -> Self {
         let Some(ov) = override_cfg else {
             return base;

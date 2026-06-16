@@ -112,7 +112,10 @@ mod tests {
     #[test]
     fn auto_mode_falls_back_to_degraded_without_backends() {
         let merged = MergedConfig::merge(
-            GlobalConfig::default(),
+            GlobalConfig {
+                synthesis: SynthesisConfig::for_unit_tests_degraded(),
+                ..Default::default()
+            },
             StoreConfig {
                 store: StoreInfo::new("t".into()),
                 llm: None,
