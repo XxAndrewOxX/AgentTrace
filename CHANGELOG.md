@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Breaking changes
 
+- **MCP `get_resume_context` briefing format.** Response is now a four-section
+  briefing (objective, current state, recent 20 events, earlier-work summary)
+  instead of inlining `running_summary.md`, `context.md`, and plan excerpts.
+  `include_git_log` defaults to `false` (was `true`).
+- **`agent-trace resume show`** prints the same four-section briefing as MCP,
+  not raw `running_summary.md`.
+
+### Added
+
+- **`src/trace/briefing.rs`** — `assemble_resume_briefing`, session-first event
+  selection, cached `.agent-trace/briefing/history_summary.md` for §4.
+- **`Llm::summarize_event_history`** — LLM paragraph for older events (batch refresh).
+- E2E cases **MC-27** (history summary cache) and **MC-28** (session-first §3).
+
+### Changed
+
+- `RECENT_ACTIVITY_LIMIT` in `running_summary.md` template increased from 15 to 20.
+- `assemble_resume_context` delegates to `assemble_resume_briefing` (compat shim).
 - **Embedded/Candle provider removed.** The `embedded` provider and `mode =
   "embedded"` are no longer functional. Existing configs using these values are
   automatically migrated to `provider = "ollama"` / `mode = "auto"` at load time.

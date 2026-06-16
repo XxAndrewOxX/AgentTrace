@@ -64,8 +64,10 @@ Agents should maintain continuity via scratch documents:
 
 - Write phase notes to scratch files (`progress.md`, `notes.md`, etc.)
 - On reconnect, call `get_resume_context` before `list_documents` or `read_file`
-- The briefing includes `running_summary.md`, **Prior Session Recap** (after a
-  stale lock handoff), plan excerpts, and resume instructions
+- The briefing has four sections: **Overall Objective** (from `plan.md` Goal),
+  **Current State**, **Recent Activity** (last 20 events, session-first), and
+  **Earlier Work** (cached LLM summary). Prior session recaps appear as a one-line
+  **Previous session:** prefix in §4 when applicable.
 
 Plugin setup instructions should mention both `model setup` and scratch docs for
 phase tracking.

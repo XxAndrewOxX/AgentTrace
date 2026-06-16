@@ -119,21 +119,26 @@ Manual validation after agent disconnect/reconnect (IDE restart, crash, or stale
 
 1. **Phase A:** Start work on a project (e.g. ledger API), write `plan.md` via MCP `write_file`, interrupt mid-task.
 2. **Phase B:** Reconnect MCP client. First tool call **must** be `get_resume_context` (not `list_documents`).
-3. Verify response includes: session metadata, `running_summary.md` body, plan excerpt, and `INSTRUCTIONS`.
+3. Verify response includes four sections: **Overall Objective**, **Current State**, **Recent Activity** (last 20 events), and **Earlier Work** (cached summary when 20+ events exist), plus `SESSION:` and `INSTRUCTIONS` footer.
 4. Verify `running_summary.md` updates after each MCP plan write (MC-8 in `e2e_agent_connection`).
-5. Agent should continue from "Resume Here" without reading every source file.
+5. Agent should continue from current phase without reading every source file.
 6. **Stale lock without MCP restart:** after writes, manually backdate
    `last_heartbeat` in `.agent-trace/locks/agent-lock.toml`, call
-   `get_resume_context` on the same MCP process — response must include
-   **Prior Session Recap** (MC-10).
+   `get_resume_context` on the same MCP process — response must include a
+   **Previous session:** line in §4 (MC-10).
 7. **Interrupt within 30 minutes:** write ≥ N documents (default 10), reconnect
    MCP within the session window, call `get_resume_context` — response must include
-   **Current Session Checkpoint** (MC-11).
+   **Recent Activity** with session writes (MC-11).
+8. **25+ events:** §4 **Earlier Work** is non-empty and
+   `.agent-trace/briefing/history_summary.md` exists (MC-27).
+9. **Session ordering:** after stale reconnect, §3 lists current-session events
+   before older-session backfill (MC-28).
 
-CLI equivalent: `agent-trace resume show` after `agent-trace connect <name>`;
+CLI equivalent: `agent-trace resume show` prints the same four-section briefing
+as MCP `get_resume_context` (breaking change from raw `running_summary.md`);
 stale-lock recap also works via `resume show` without reconnecting MCP (AC-8).
-Mid-session checkpoint file is created after N writes and verified via
-`resume show` (AC-9).
+Mid-session checkpoint file is still created after N writes (AC-9); checkpoints
+are no longer inlined in the default briefing.
 
 ## Synthesis gate + activity ops (MC-15..24)
 
