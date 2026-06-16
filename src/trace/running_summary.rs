@@ -16,7 +16,7 @@ const EVENTS_FILE: &str = ".agent-trace/summary_events.jsonl";
 const SUMMARY_STATE_FILE: &str = ".agent-trace/summary_state.toml";
 const RUNNING_SUMMARY_FILE: &str = "running_summary.md";
 const MAX_EVENTS_RETAINED: usize = 500;
-const RECENT_ACTIVITY_LIMIT: usize = 15;
+const RECENT_ACTIVITY_LIMIT: usize = 20;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct SummaryState {
@@ -26,6 +26,8 @@ pub struct SummaryState {
     pub events_count_at_synthesis_refresh: usize,
     #[serde(default)]
     pub ops_since_synthesis: usize,
+    #[serde(default)]
+    pub events_count_at_history_summary: usize,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -40,6 +42,8 @@ struct SummaryStateRaw {
     events_count_at_refresh: usize,
     #[serde(default)]
     ops_since_refresh: usize,
+    #[serde(default)]
+    events_count_at_history_summary: usize,
 }
 
 fn migrate_summary_state(raw: SummaryStateRaw) -> SummaryState {
@@ -47,6 +51,7 @@ fn migrate_summary_state(raw: SummaryStateRaw) -> SummaryState {
         events_count_at_template_refresh: raw.events_count_at_template_refresh,
         events_count_at_synthesis_refresh: raw.events_count_at_synthesis_refresh,
         ops_since_synthesis: raw.ops_since_synthesis,
+        events_count_at_history_summary: raw.events_count_at_history_summary,
     };
     if state.events_count_at_template_refresh == 0
         && state.events_count_at_synthesis_refresh == 0
@@ -213,6 +218,10 @@ pub fn increment_synthesis_ops(store_root: &Path) -> Result<usize> {
     let n = state.ops_since_synthesis;
     save_summary_state(store_root, &state)?;
     Ok(n)
+}
+
+pub fn synthesis_refresh_threshold(store_root: &Path) -> usize {
+    refresh_threshold(store_root)
 }
 
 fn refresh_threshold(store_root: &Path) -> usize {
@@ -486,8 +495,14 @@ fn schedule_synthesis_refresh_inner(store_root: PathBuf, force: bool) {
         let events_before = event_count(&store_root).unwrap_or(0);
         if let Err(e) = refresh_from_path(&store_root) {
             tracing::warn!("running summary background refresh failed: {e}");
-        } else if let Some(sid) = crate::session::session_id_for_store(&store_root) {
-            let _ = crate::session_checkpoint::maybe_write_session_checkpoint(&store_root, &sid);
+        } else {
+            if let Err(e) = crate::briefing::maybe_refresh_history_summary(&store_root, true) {
+                tracing::warn!("history summary refresh failed: {e}");
+            }
+            if let Some(sid) = crate::session::session_id_for_store(&store_root) {
+                let _ =
+                    crate::session_checkpoint::maybe_write_session_checkpoint(&store_root, &sid);
+            }
         }
         let events_after = event_count(&store_root).unwrap_or(events_before);
         let watermark = load_summary_state(&store_root)
@@ -533,139 +548,15 @@ pub fn assemble_resume_context(
     include_git_log: bool,
     git_log_limit: usize,
 ) -> Result<String> {
-    use crate::session;
-
-    let mut out = String::from("=== Agent Trace Resume Context ===\n\n");
-
-    out.push_str("SESSION\n");
-    if let Some(sess) = session::load_session(store_root) {
-        if sess.is_stale() {
-            out.push_str("  (stale session — reconnect to start fresh)\n");
-        }
-        out.push_str(&format!("  Agent: {}\n", sess.name));
-        out.push_str(&format!("  Session ID: {}\n", sess.session_id));
-        out.push_str(&format!("  Transport: {}\n", sess.transport));
-        out.push_str(&format!("  Started: {}\n", sess.started_at));
-    } else if let Some(name) = actor.agent_name() {
-        out.push_str(&format!("  Agent: {name}\n"));
-        out.push_str("  Session ID: (none — call connect or use MCP with --actor)\n");
-    } else {
-        out.push_str("  Actor: user (no agent session)\n");
-    }
-    out.push('\n');
-
-    if let Some(recap) = crate::session_recap::load_prior_session_recap(store_root) {
-        out.push_str("## Prior Session Recap\n\n");
-        let body = recap
-            .strip_prefix("# Prior Session Recap\n\n")
-            .unwrap_or(&recap);
-        out.push_str(body);
-        if !body.ends_with('\n') {
-            out.push('\n');
-        }
-        out.push('\n');
-    }
-
-    if let Some(sess) = session::load_session(store_root).filter(|s| !s.is_stale()) {
-        if let Some(cp) = crate::session_checkpoint::load_checkpoint(store_root, &sess.session_id) {
-            out.push_str("## Current Session Checkpoint\n\n");
-            let body = cp
-                .strip_prefix("# Current Session Checkpoint\n\n")
-                .unwrap_or(&cp);
-            out.push_str(body);
-            if !body.ends_with('\n') {
-                out.push('\n');
-            }
-            out.push('\n');
-        }
-    }
-
-    out.push_str("--- Running Summary ---\n");
-    let summary_path = store_root.join(RUNNING_SUMMARY_FILE);
-    let summary_body = if summary_path.exists() {
-        std::fs::read_to_string(&summary_path)?
-    } else {
-        let git = GitStore::open(store_root)?;
-        let manifest = Manifest::load(store_root)?;
-        refresh_template(store_root, &git, &manifest)?;
-        std::fs::read_to_string(&summary_path).unwrap_or_default()
-    };
-    out.push_str(&summary_body);
-    out.push_str("\n\n");
-
-    let context_path = store_root.join("context.md");
-    if context_path.exists() {
-        out.push_str("--- Context (context.md) ---\n");
-        let ctx = std::fs::read_to_string(&context_path)?;
-        let truncated: String = ctx.chars().take(4000).collect();
-        out.push_str(&truncated);
-        if ctx.len() > 4000 {
-            out.push_str("\n...(truncated)");
-        }
-        out.push_str("\n\n");
-    }
-
-    let manifest = Manifest::load(store_root)?;
-    let plans = manifest.list(Some(&DocType::Plan));
-    if let Some(plan) = plans.first() {
-        out.push_str(&format!("--- Plan excerpt ({}) ---\n", plan.path.display()));
-        let plan_content = std::fs::read_to_string(store_root.join(&plan.path)).unwrap_or_default();
-        let excerpt: String = plan_content.chars().take(2000).collect();
-        out.push_str(&excerpt);
-        if plan_content.len() > 2000 {
-            out.push_str("\n...(truncated)");
-        }
-        out.push_str("\n\n");
-    }
-
-    if include_git_log {
-        if let Ok(git) = GitStore::open(store_root) {
-            let entries = git.log(git_log_limit)?;
-            if !entries.is_empty() {
-                out.push_str(&format!(
-                    "--- Recent git activity ({git_log_limit} entries) ---\n"
-                ));
-                for entry in entries {
-                    out.push_str(&format!(
-                        "{} {} {} — {}\n",
-                        entry.timestamp.format("%Y-%m-%d %H:%M:%S"),
-                        entry.action,
-                        entry.actor,
-                        entry.summary
-                    ));
-                }
-                out.push('\n');
-            }
-        }
-    }
-
-    if let Some(sess) = session::load_session(store_root) {
-        let log_path = store_root
-            .join("logs")
-            .join(format!("{}-{}.md", sess.name, sess.session_id));
-        if log_path.exists() {
-            out.push_str(&format!(
-                "--- Session log tail (logs/{}-{}.md) ---\n",
-                sess.name, sess.session_id
-            ));
-            let log_content = std::fs::read_to_string(&log_path)?;
-            let lines: Vec<&str> = log_content.lines().collect();
-            let tail_start = lines.len().saturating_sub(20);
-            for line in &lines[tail_start..] {
-                out.push_str(line);
-                out.push('\n');
-            }
-            out.push('\n');
-        }
-    }
-
-    out.push_str("INSTRUCTIONS\n");
-    out.push_str(
-        "Do not re-read files above unless editing them. \
-         Continue from \"Resume Here\". Read source files only for the current phase.\n",
-    );
-
-    Ok(out)
+    crate::briefing::assemble_resume_briefing(
+        store_root,
+        actor,
+        &crate::briefing::BriefingOptions {
+            include_git_log,
+            git_log_limit,
+            ..Default::default()
+        },
+    )
 }
 
 pub fn resume_here_lines(store_root: &Path) -> Vec<String> {
@@ -713,7 +604,7 @@ mod tests {
         let store_cfg = crate::config::StoreConfig {
             store: info,
             llm: None,
-            synthesis: None,
+            synthesis: Some(crate::config::SynthesisConfig::for_unit_tests_degraded()),
             polling: crate::config::PollingConfig::default(),
         };
         store_cfg.save(&root).unwrap();
@@ -949,7 +840,7 @@ mod tests {
             llm: None,
             synthesis: Some(crate::config::SynthesisConfig {
                 refresh_every_ops: 1,
-                ..Default::default()
+                ..crate::config::SynthesisConfig::for_unit_tests_degraded()
             }),
             polling: crate::config::PollingConfig::default(),
         };
@@ -988,6 +879,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let (root, manifest, git) = setup(&tmp);
         let mut m = manifest;
+        std::fs::write(root.join("plan.md"), "# Plan\n\n## Goal\n\nTest goal.\n").unwrap();
+        m.register(&PathBuf::from("plan.md"), DocType::Plan, "")
+            .unwrap();
         write_running_summary(
             &root,
             "# Running Summary\n\n## Resume Here\n\nContinue\n",
@@ -1006,8 +900,8 @@ mod tests {
 
         let text =
             assemble_resume_context(&root, &Actor::Agent { name: "bot".into() }, false, 5).unwrap();
-        assert!(text.contains("## Current Session Checkpoint"));
-        assert!(text.contains("Mid-session work"));
+        assert!(text.contains("## 2. Current State"));
+        assert!(text.contains("INSTRUCTIONS"));
     }
 
     #[test]
@@ -1015,6 +909,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let (root, manifest, git) = setup(&tmp);
         let mut m = manifest;
+        std::fs::write(root.join("plan.md"), "# Plan\n\n## Goal\n\nTest goal.\n").unwrap();
+        m.register(&PathBuf::from("plan.md"), DocType::Plan, "")
+            .unwrap();
         write_running_summary(
             &root,
             "# Running Summary\n\n## Resume Here\n\nContinue\n",
@@ -1033,9 +930,9 @@ mod tests {
 
         let text =
             assemble_resume_context(&root, &Actor::Agent { name: "bot".into() }, false, 5).unwrap();
-        assert!(text.contains("## Prior Session Recap"));
+        assert!(text.contains("Previous session:"));
         assert!(text.contains("Finished phase 1"));
-        assert!(text.contains("Running Summary"));
+        assert!(!text.contains("--- Running Summary ---"));
     }
 
     #[test]

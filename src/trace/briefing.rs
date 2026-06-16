@@ -1,10 +1,16 @@
+use crate::git_store::GitStore;
+use crate::llm::Llm;
 use crate::manifest::Manifest;
-use crate::running_summary::{load_all_events, SummaryEvent};
-use crate::types::DocType;
+use crate::running_summary::{
+    format_events_for_prompt, load_all_events, load_summary_state, save_summary_state,
+    synthesis_refresh_threshold, SummaryEvent,
+};
+use crate::types::{Actor, DocType};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_RECENT_EVENTS_LIMIT: usize = 20;
+const HISTORY_SUMMARY_FILE: &str = ".agent-trace/briefing/history_summary.md";
 
 /// Options for assembling the resume briefing (MCP and CLI).
 #[derive(Debug, Clone)]
@@ -256,11 +262,7 @@ pub fn events_excluding_briefing(
     all_events
         .iter()
         .filter(|e| {
-            !selected.contains(&(
-                e.timestamp.as_str(),
-                e.path.as_str(),
-                e.summary.as_str(),
-            ))
+            !selected.contains(&(e.timestamp.as_str(), e.path.as_str(), e.summary.as_str()))
         })
         .cloned()
         .collect()
@@ -287,6 +289,262 @@ pub fn load_briefing_events(
 ) -> anyhow::Result<Vec<SummaryEvent>> {
     let all = load_all_events(store_root)?;
     Ok(select_briefing_events(&all, session_id, limit))
+}
+
+pub fn history_summary_path(store_root: &Path) -> PathBuf {
+    store_root.join(HISTORY_SUMMARY_FILE)
+}
+
+pub fn load_history_summary(store_root: &Path) -> Option<String> {
+    let path = history_summary_path(store_root);
+    std::fs::read_to_string(path).ok()
+}
+
+pub fn save_history_summary(store_root: &Path, content: &str) -> anyhow::Result<()> {
+    let path = history_summary_path(store_root);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    crate::util::atomic_write(&path, content)?;
+    Ok(())
+}
+
+/// Template fallback when LLM history summary is unavailable.
+pub fn template_history_summary(events: &[SummaryEvent]) -> String {
+    let n = events.len();
+    let files: HashSet<&str> = events.iter().map(|e| e.path.as_str()).collect();
+    format!(
+        "{n} earlier events across {} files; see plan.md for phase checklist.",
+        files.len()
+    )
+}
+
+fn save_history_watermark(store_root: &Path, count: usize) -> anyhow::Result<()> {
+    let mut state = load_summary_state(store_root)?;
+    state.events_count_at_history_summary = count;
+    save_summary_state(store_root, &state)?;
+    Ok(())
+}
+
+/// Refresh cached §4 history summary when event count advances past the watermark.
+pub fn maybe_refresh_history_summary(store_root: &Path, force: bool) -> anyhow::Result<()> {
+    let all_events = load_all_events(store_root)?;
+    let total = all_events.len();
+    if total == 0 {
+        return Ok(());
+    }
+
+    let session_id = crate::session::session_id_for_store(store_root);
+    let briefing = select_briefing_events(
+        &all_events,
+        session_id.as_deref(),
+        DEFAULT_RECENT_EVENTS_LIMIT,
+    );
+    let older = events_excluding_briefing(&all_events, &briefing);
+    if older.is_empty() {
+        return Ok(());
+    }
+
+    let state = load_summary_state(store_root)?;
+    if total <= state.events_count_at_history_summary {
+        return Ok(());
+    }
+
+    let threshold = synthesis_refresh_threshold(store_root);
+    if !force && state.ops_since_synthesis < threshold {
+        return Ok(());
+    }
+
+    let events_str = format_events_for_prompt(&older);
+    let summary = match Llm::from_store_root(store_root) {
+        Ok(llm) if !llm.is_degraded() => match llm.summarize_event_history(&events_str) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("history summary LLM failed: {e}");
+                template_history_summary(&older)
+            }
+        },
+        _ => template_history_summary(&older),
+    };
+
+    save_history_summary(store_root, &summary)?;
+    save_history_watermark(store_root, total)?;
+    Ok(())
+}
+
+/// Read §4 body, generating synchronously if cache is missing but older events exist.
+pub fn load_or_generate_history_summary(
+    store_root: &Path,
+    session_id: Option<&str>,
+    recent_limit: usize,
+) -> anyhow::Result<Option<String>> {
+    let all_events = load_all_events(store_root)?;
+    let briefing = select_briefing_events(&all_events, session_id, recent_limit);
+    let older = events_excluding_briefing(&all_events, &briefing);
+    if older.is_empty() {
+        return Ok(None);
+    }
+
+    if let Some(cached) = load_history_summary(store_root) {
+        if !cached.trim().is_empty() {
+            return Ok(Some(cached));
+        }
+    }
+
+    tracing::warn!("history summary cache missing; generating synchronously");
+    let events_str = format_events_for_prompt(&older);
+    let summary = match Llm::from_store_root(store_root) {
+        Ok(llm) if !llm.is_degraded() => {
+            llm.summarize_event_history(&events_str)
+                .unwrap_or_else(|e| {
+                    tracing::warn!("sync history summary LLM failed: {e}");
+                    template_history_summary(&older)
+                })
+        }
+        _ => template_history_summary(&older),
+    };
+    save_history_summary(store_root, &summary)?;
+    let total = all_events.len();
+    let _ = save_history_watermark(store_root, total);
+    Ok(Some(summary))
+}
+
+/// Assemble the four-section resume briefing for MCP and CLI.
+pub fn assemble_resume_briefing(
+    store_root: &Path,
+    actor: &Actor,
+    opts: &BriefingOptions,
+) -> anyhow::Result<String> {
+    let manifest = Manifest::load(store_root)?;
+    let plan_content = read_plan_content(store_root, &manifest);
+
+    let mut out = String::from("=== Agent Trace Resume Briefing ===\n\n");
+
+    out.push_str("## 1. Overall Objective\n");
+    out.push_str(&extract_objective(&plan_content));
+    out.push_str("\n\n");
+
+    let session_id = crate::session::load_session(store_root)
+        .filter(|s| !s.is_stale())
+        .map(|s| s.session_id)
+        .or_else(|| crate::session::session_id_for_store(store_root));
+
+    let briefing_events =
+        load_briefing_events(store_root, session_id.as_deref(), opts.recent_limit)?;
+
+    out.push_str("## 2. Current State\n");
+    out.push_str(&build_current_state(
+        store_root,
+        &manifest,
+        &plan_content,
+        &briefing_events,
+    ));
+
+    out.push_str(&format!(
+        "\n## 3. Recent Activity (last {} events)\n",
+        opts.recent_limit
+    ));
+    out.push_str(&format_recent_activity(&briefing_events));
+
+    let mut prior_recap_line = String::new();
+    if opts.include_prior_recap {
+        if let Some(recap) = crate::session_recap::load_prior_session_recap(store_root) {
+            let body = recap
+                .strip_prefix("# Prior Session Recap\n\n")
+                .unwrap_or(&recap);
+            let one_liner: String = body
+                .lines()
+                .filter(|l| {
+                    let t = l.trim();
+                    !t.is_empty() && !t.starts_with('*') && !t.starts_with('#')
+                })
+                .take(2)
+                .collect::<Vec<_>>()
+                .join(" ");
+            if !one_liner.is_empty() {
+                prior_recap_line =
+                    format!("Previous session: {}\n\n", truncate_chars(&one_liner, 200));
+            }
+        }
+    }
+
+    if let Some(history) =
+        load_or_generate_history_summary(store_root, session_id.as_deref(), opts.recent_limit)?
+    {
+        out.push_str("## 4. Earlier Work (summary)\n");
+        out.push_str(&prior_recap_line);
+        out.push_str(&history);
+        out.push('\n');
+    } else if !prior_recap_line.is_empty() {
+        out.push_str("## 4. Earlier Work (summary)\n");
+        out.push_str(&prior_recap_line);
+    }
+
+    if opts.include_git_log {
+        if let Ok(git) = GitStore::open(store_root) {
+            let entries = git.log(opts.git_log_limit)?;
+            if !entries.is_empty() {
+                out.push_str(&format!(
+                    "\n--- Recent git activity ({} entries) ---\n",
+                    opts.git_log_limit
+                ));
+                for entry in entries {
+                    out.push_str(&format!(
+                        "{} {} {} — {}\n",
+                        entry.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                        entry.action,
+                        entry.actor,
+                        entry.summary
+                    ));
+                }
+            }
+        }
+    }
+
+    if opts.include_session_log {
+        if let Some(sess) = crate::session::load_session(store_root) {
+            let log_path = store_root
+                .join("logs")
+                .join(format!("{}-{}.md", sess.name, sess.session_id));
+            if log_path.exists() {
+                out.push_str(&format!(
+                    "\n--- Session log tail (logs/{}-{}.md) ---\n",
+                    sess.name, sess.session_id
+                ));
+                let log_content = std::fs::read_to_string(&log_path)?;
+                let lines: Vec<&str> = log_content.lines().collect();
+                let tail_start = lines.len().saturating_sub(20);
+                for line in &lines[tail_start..] {
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+        }
+    }
+
+    out.push_str("\n---\n");
+    if let Some(sess) = crate::session::load_session(store_root) {
+        let stale = if sess.is_stale() { " (stale)" } else { "" };
+        out.push_str(&format!(
+            "SESSION: {} / {}{} ({})\n",
+            sess.name, sess.session_id, stale, sess.transport
+        ));
+    } else if let Some(name) = actor.agent_name() {
+        out.push_str(&format!("SESSION: {name} / (none)\n"));
+    } else {
+        out.push_str("SESSION: user (no agent session)\n");
+    }
+    out.push_str("INSTRUCTIONS: Continue current phase. Do not re-scaffold completed phases.\n");
+
+    Ok(out)
+}
+
+fn read_plan_content(store_root: &Path, manifest: &Manifest) -> String {
+    let plans = manifest.list(Some(&DocType::Plan));
+    plans
+        .first()
+        .map(|p| std::fs::read_to_string(store_root.join(&p.path)).unwrap_or_default())
+        .unwrap_or_else(|| std::fs::read_to_string(store_root.join("plan.md")).unwrap_or_default())
 }
 
 #[cfg(test)]
@@ -406,5 +664,17 @@ mod tests {
         let briefing = select_briefing_events(&events, None, 2);
         let older = events_excluding_briefing(&events, &briefing);
         assert_eq!(older.len(), 3);
+    }
+
+    #[test]
+    fn template_history_summary_counts_files() {
+        let events = vec![
+            sample_event("a.md", "one", None),
+            sample_event("b.md", "two", None),
+            sample_event("a.md", "three", None),
+        ];
+        let text = template_history_summary(&events);
+        assert!(text.contains("3 earlier events"));
+        assert!(text.contains("2 files"));
     }
 }
