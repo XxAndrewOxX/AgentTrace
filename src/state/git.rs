@@ -657,8 +657,14 @@ pub fn should_track_activity(path: &Path) -> bool {
         let name = component.as_os_str().to_string_lossy();
         if matches!(
             name.as_ref(),
-            ".agent-trace" | ".git" | ".venv" | "venv" | "node_modules" | "__pycache__"
-                | "target" | "dist"
+            ".agent-trace"
+                | ".git"
+                | ".venv"
+                | "venv"
+                | "node_modules"
+                | "__pycache__"
+                | "target"
+                | "dist"
         ) {
             return false;
         }
@@ -768,8 +774,12 @@ mod tests {
         assert!(should_track_activity(&PathBuf::from("src/main.rs")));
         assert!(should_track_activity(&PathBuf::from("notes.md")));
         assert!(!should_track_activity(&PathBuf::from(".venv/lib/x.py")));
-        assert!(!should_track_activity(&PathBuf::from("node_modules/pkg/index.js")));
-        assert!(!should_track_activity(&PathBuf::from(".agent-trace/config.toml")));
+        assert!(!should_track_activity(&PathBuf::from(
+            "node_modules/pkg/index.js"
+        )));
+        assert!(!should_track_activity(&PathBuf::from(
+            ".agent-trace/config.toml"
+        )));
     }
 
     #[test]

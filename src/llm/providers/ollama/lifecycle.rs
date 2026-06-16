@@ -18,14 +18,14 @@ const POLL_INTERVAL: Duration = Duration::from_millis(300);
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Whether resolution may use Ollama (mirrors `resolver` auto/ollama paths).
-pub(crate) fn needs_ollama_for_resolve(
-    cfg: &SynthesisConfig,
-    creds: &CredentialsStore,
-) -> bool {
+pub(crate) fn needs_ollama_for_resolve(cfg: &SynthesisConfig, creds: &CredentialsStore) -> bool {
     match cfg.mode {
         SynthesisMode::Ollama => true,
         SynthesisMode::Remote => {
-            matches!(cfg.provider, SynthesisProvider::Ollama | SynthesisProvider::Custom)
+            matches!(
+                cfg.provider,
+                SynthesisProvider::Ollama | SynthesisProvider::Custom
+            )
         }
         SynthesisMode::Auto | SynthesisMode::Embedded => {
             if matches!(

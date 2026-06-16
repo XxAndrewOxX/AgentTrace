@@ -166,10 +166,15 @@ fn handle_mock_connection(stream: TcpStream, models: Arc<Mutex<Vec<String>>>) {
         }
         let req = String::from_utf8_lossy(&buf).to_string();
 
-        let response_body: String = if req.contains("GET /v1/models") || req.starts_with("GET /models") {
+        let response_body: String = if req.contains("GET /v1/models")
+            || req.starts_with("GET /models")
+        {
             // OpenAI-compat health check
             let locked = models.lock().unwrap();
-            let data: Vec<String> = locked.iter().map(|m| format!(r#"{{"id":"{}"}}"#, m)).collect();
+            let data: Vec<String> = locked
+                .iter()
+                .map(|m| format!(r#"{{"id":"{}"}}"#, m))
+                .collect();
             format!(r#"{{"object":"list","data":[{}]}}"#, data.join(","))
         } else if req.starts_with("GET /api/tags") {
             // Native Ollama tags endpoint
@@ -197,7 +202,9 @@ fn handle_mock_connection(stream: TcpStream, models: Arc<Mutex<Vec<String>>>) {
                 }
             }
             r#"{"status":"success"}"#.to_string()
-        } else if req.contains("POST /v1/chat/completions") || req.contains("POST /chat/completions") {
+        } else if req.contains("POST /v1/chat/completions")
+            || req.contains("POST /chat/completions")
+        {
             r##"{"choices":[{"message":{"content":"# Running Summary\n\nMock LLM synthesis output for E2E.\n\n## Recent Activity\n\n- mock event\n"}}]}"##.to_string()
         } else {
             r#"{"status":"ok"}"#.to_string()

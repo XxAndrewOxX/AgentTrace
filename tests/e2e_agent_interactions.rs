@@ -261,7 +261,8 @@ fn ai6_agent_new_file_committed_not_registered() {
     // populate it). The permission check treats them as ephemeral Scratch.
     let m = manifest.lock().unwrap();
     assert!(
-        m.find_by_path(&PathBuf::from("project-status.md")).is_none(),
+        m.find_by_path(&PathBuf::from("project-status.md"))
+            .is_none(),
         "poll must not auto-register agent-created files in the manifest"
     );
     drop(m);

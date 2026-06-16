@@ -46,7 +46,7 @@ pub fn is_model_pulled(cfg: &SynthesisConfig) -> Result<bool> {
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
     let base = native_base(cfg);
-    let url = format!("{}/api/tags", base);
+    let url = format!("{base}/api/tags");
     let resp = client.get(&url).send();
     let resp = match resp {
         Ok(r) => r,
@@ -65,7 +65,7 @@ pub fn is_model_pulled(cfg: &SynthesisConfig) -> Result<bool> {
     }
 
     let text = resp.text().unwrap_or_default();
-    let target = normalize_model_alias(cfg.model.trim_end_matches(|c: char| c == ':'));
+    let target = normalize_model_alias(cfg.model.trim_end_matches(':'));
     let target_base = target.split(':').next().unwrap_or(&target);
 
     // Parse Ollama native format: {"models": [{"name": "qwen2.5:1.5b", ...}]}
@@ -80,7 +80,7 @@ pub fn is_model_pulled(cfg: &SynthesisConfig) -> Result<bool> {
         if let Some(data) = v.get("data").and_then(|d| d.as_array()) {
             return Ok(data.iter().any(|m| {
                 let id = m.get("id").and_then(|i| i.as_str()).unwrap_or("");
-                id == target || id.contains(target_base) || id == &cfg.model
+                id == target || id.contains(target_base) || id == cfg.model
             }));
         }
     }
@@ -92,7 +92,7 @@ pub fn pull_model(cfg: &SynthesisConfig, model: &str) -> Result<()> {
         .timeout(std::time::Duration::from_secs(600))
         .build()?;
     let base = native_base(cfg);
-    let url = format!("{}/api/pull", base);
+    let url = format!("{base}/api/pull");
     let normalized = normalize_model_alias(model);
     let body = serde_json::json!({ "name": normalized, "stream": false });
     let resp = client.post(&url).json(&body).send()?;
@@ -115,14 +115,8 @@ mod tests {
 
     #[test]
     fn normalize_fully_qualified_passthrough() {
-        assert_eq!(
-            normalize_model_alias("qwen2.5:1.5b"),
-            "qwen2.5:1.5b"
-        );
-        assert_eq!(
-            normalize_model_alias("llama3:8b"),
-            "llama3:8b"
-        );
+        assert_eq!(normalize_model_alias("qwen2.5:1.5b"), "qwen2.5:1.5b");
+        assert_eq!(normalize_model_alias("llama3:8b"), "llama3:8b");
     }
 
     #[test]

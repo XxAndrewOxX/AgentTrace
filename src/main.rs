@@ -255,7 +255,9 @@ fn requires_synthesis_gate(cmd: &Commands) -> bool {
     // Mcp starts a server.
     !matches!(
         cmd,
-        Commands::Model { .. } | Commands::Connect { .. } | Commands::Disconnect
+        Commands::Model { .. }
+            | Commands::Connect { .. }
+            | Commands::Disconnect
             | Commands::Mcp { .. }
     )
 }

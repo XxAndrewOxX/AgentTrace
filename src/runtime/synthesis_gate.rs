@@ -20,9 +20,7 @@ pub fn require_synthesis_backend(store_root: Option<&Path>) -> Result<ResolvedBa
 /// Used by trace pipeline paths that must not silently emit degraded artifacts.
 pub fn ensure_synthesis_available(info: &ResolvedBackendInfo) -> Result<()> {
     if info.degraded && !allow_degraded_mode() {
-        anyhow::bail!(
-            "Synthesis backend unavailable. Run: agent-trace model ensure"
-        );
+        anyhow::bail!("Synthesis backend unavailable. Run: agent-trace model ensure");
     }
     Ok(())
 }

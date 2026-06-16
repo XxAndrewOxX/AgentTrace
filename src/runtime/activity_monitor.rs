@@ -108,7 +108,8 @@ mod tests {
         let config = MergedConfig::merge(global, store_cfg);
         let manifest = Arc::new(Mutex::new(manifest));
         let monitor =
-            ActivityMonitor::try_start(root, config, manifest, AgentState::new(None), None).unwrap();
+            ActivityMonitor::try_start(root, config, manifest, AgentState::new(None), None)
+                .unwrap();
         assert!(monitor.is_poll_leader());
     }
 
@@ -146,7 +147,8 @@ mod tests {
         assert!(first.is_poll_leader(), "first monitor should lead the poll");
 
         let second =
-            ActivityMonitor::try_start(root, config, manifest, AgentState::new(None), None).unwrap();
+            ActivityMonitor::try_start(root, config, manifest, AgentState::new(None), None)
+                .unwrap();
         assert!(
             !second.is_poll_leader(),
             "second monitor must not run a duplicate poll loop"
