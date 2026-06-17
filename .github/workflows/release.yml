@@ -49,6 +49,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Run non-live E2E suites
+        env:
+          AGENT_TRACE_ALLOW_DEGRADED: "1"
         run: ./scripts/run_e2e.sh all
 
   package:
@@ -141,7 +143,14 @@ jobs:
             binary="${smoke_dir}/agent-trace.exe"
           else
             archive="dist/${package_name}.tar.gz"
-            sha256sum -c "dist/${package_name}.tar.gz.sha256"
+            (
+              cd dist
+              if command -v sha256sum >/dev/null 2>&1; then
+                sha256sum -c "${package_name}.tar.gz.sha256"
+              else
+                shasum -a 256 -c "${package_name}.tar.gz.sha256"
+              fi
+            )
             tar xzf "${archive}" -C "${smoke_dir}"
             binary="${smoke_dir}/agent-trace"
           fi
