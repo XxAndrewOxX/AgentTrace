@@ -45,17 +45,13 @@ cargo publish --dry-run
 | `unit` | Library unit tests | `--lib` |
 | `all` | All of the above (default) | — |
 
-Optional live-agent validation (not required for release):
+Optional live-agent validation (manual, opt-in; not required for release):
 
 ```bash
+export AGENT_TRACE_LIVE_TESTS=1
 export GROQ_API_KEY=...   # or AGENT_TRACE_MODEL_BACKEND=ollama
 ./scripts/run_e2e.sh live
-```
-
-Optional live LLM eval harness (manual, opt-in):
-
-```bash
-AGENT_TRACE_LIVE_LLM_EVALS=1 cargo test --test e2e_live_llm_evals -- --ignored
+# equivalent: AGENT_TRACE_LIVE_TESTS=1 cargo test --test e2e_live_agent -- --ignored
 ```
 
 Local packaging smoke:
