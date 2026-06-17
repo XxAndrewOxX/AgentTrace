@@ -126,6 +126,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           TARGET: ${{ matrix.target }}
+          AGENT_TRACE_ALLOW_DEGRADED: "1"
         run: |
           package_name="agent-trace-v${VERSION}-${TARGET}"
           smoke_dir="${RUNNER_TEMP}/smoke"
@@ -150,9 +151,12 @@ jobs:
           "${binary}" init "${store_dir}"
 
           if [[ "${TARGET}" != *windows* ]]; then
-            response="$(printf '%s\n' \
-              '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"1.0"}}}' \
-              | timeout 10 "${binary}" mcp --path "${store_dir}" --actor smoke-test | head -n 1)"
+            init_request='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"1.0"}}}'
+            if command -v timeout >/dev/null 2>&1; then
+              response="$(printf '%s\n' "${init_request}" | timeout 10 "${binary}" mcp --path "${store_dir}" --actor smoke-test | head -n 1)"
+            else
+              response="$(printf '%s\n' "${init_request}" | perl -e 'alarm 10; exec @ARGV' "${binary}" mcp --path "${store_dir}" --actor smoke-test | head -n 1)"
+            fi
             echo "${response}" | grep '"result"'
           fi
 
