@@ -1,8 +1,10 @@
+use crate::llm::{Llm, TraceDocument};
 use crate::manifest::Manifest;
 use crate::types::DocType;
 use anyhow::Result;
 use chrono::Utc;
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 /// A pending user update to be incorporated into context.md.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -122,9 +124,8 @@ pub fn synthesize_no_llm(store_root: &Path, manifest: &Manifest) -> Result<Strin
         out.push('\n');
     }
 
-    // WS-B: surface recent file activity (including unmanaged source files such
-    // as `.py` edits) so template mode still reflects real work, mirroring what
-    // the LLM context synthesis sees.
+    // Include recent file activity (including unmanaged source files such as
+    // `.py` edits) so template mode still reflects real work.
     if let Ok(events) = crate::running_summary::load_recent_events(store_root, 15) {
         if !events.is_empty() {
             out.push_str("## Recent File Activity\n\n");
@@ -141,6 +142,96 @@ pub fn synthesize_no_llm(store_root: &Path, manifest: &Manifest) -> Result<Strin
     }
 
     Ok(out)
+}
+
+/// Build trace documents for LLM context synthesis from manifest entries and
+/// recently changed paths (including unmanifested source files).
+pub fn build_trace_documents(
+    store_root: &Path,
+    manifest: &Manifest,
+    changed_paths: &[PathBuf],
+) -> Vec<TraceDocument> {
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    let mut docs: Vec<TraceDocument> = manifest
+        .documents()
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.doc_type,
+                DocType::Plan | DocType::Reference | DocType::Scratch
+            )
+        })
+        .map(|d| {
+            seen.insert(d.path.clone());
+            let content = std::fs::read_to_string(store_root.join(&d.path)).unwrap_or_default();
+            let snippet: String = content.chars().take(2000).collect();
+            TraceDocument {
+                path: d.path.display().to_string(),
+                doc_type: d.doc_type.clone(),
+                content_snippet: snippet,
+            }
+        })
+        .collect();
+
+    for path in changed_paths {
+        if seen.contains(path) || !crate::git_store::should_track_activity(path) {
+            continue;
+        }
+        let full = store_root.join(path);
+        if !full.is_file() {
+            continue;
+        }
+        seen.insert(path.clone());
+        let content = std::fs::read_to_string(&full).unwrap_or_default();
+        let snippet: String = content.chars().take(2000).collect();
+        docs.push(TraceDocument {
+            path: path.display().to_string(),
+            doc_type: DocType::Scratch,
+            content_snippet: snippet,
+        });
+    }
+
+    docs
+}
+
+/// Synthesize context.md body using the same policy as the post-write pipeline.
+/// Returns `(content, commit_label)` where `commit_label` is `template` or `llm: <backend>`.
+pub fn synthesize_context_content(
+    store_root: &Path,
+    manifest: &Manifest,
+    trace_insights: &Llm,
+    changed_paths: &[PathBuf],
+) -> Result<(String, String)> {
+    if trace_insights.is_degraded() {
+        return Ok((
+            synthesize_no_llm(store_root, manifest)?,
+            "template".to_string(),
+        ));
+    }
+
+    let docs = build_trace_documents(store_root, manifest, changed_paths);
+    let updates = load_pending_updates(store_root)?
+        .into_iter()
+        .map(|u| u.update)
+        .collect::<Vec<_>>();
+    let start = std::time::Instant::now();
+    match trace_insights.synthesize_context(&docs, &updates) {
+        Ok(s) => {
+            tracing::info!(
+                "LLM context synthesis succeeded (backend={}, latency_ms={})",
+                trace_insights.backend_label,
+                start.elapsed().as_millis()
+            );
+            Ok((s, format!("llm: {}", trace_insights.backend_label)))
+        }
+        Err(e) => {
+            tracing::warn!("LLM synthesize_context failed, using template: {e}");
+            Ok((
+                synthesize_no_llm(store_root, manifest)?,
+                "template".to_string(),
+            ))
+        }
+    }
 }
 
 /// Write context.md to the store root and mark updates as incorporated.

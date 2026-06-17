@@ -1,12 +1,10 @@
 use crate::config::{SynthesisConfig, SynthesisProvider};
 use crate::llm::prompts::{
-    classify_prompt, parse_command_prompt, summarize_change_prompt, summarize_event_history_prompt,
-    summarize_session_prompt, synthesize_context_prompt, trace_to_doc_summaries,
-    update_running_summary_prompt,
+    summarize_change_prompt, summarize_event_history_prompt, summarize_session_prompt,
+    synthesize_context_prompt, trace_to_doc_summaries, update_running_summary_prompt,
 };
 use crate::llm::synthesis_engine::SynthesisEngine;
 use crate::llm::trace_insights::TraceDocument;
-use crate::llm::{Classification, ParsedCommand};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -257,46 +255,6 @@ impl SynthesisEngine for HttpBackend {
 
     fn backend_label(&self) -> &str {
         &self.label
-    }
-}
-
-impl HttpBackend {
-    #[allow(dead_code)]
-    pub fn classify(&self, content: &str) -> Result<Classification> {
-        let user = classify_prompt(content);
-        let output = self.complete("Reply with exactly one document type word.", &user)?;
-        let doc_type = crate::llm::prompts::parse_doc_type(&output);
-        Ok(Classification {
-            doc_type,
-            confidence: 0.85,
-        })
-    }
-
-    #[allow(dead_code)]
-    pub fn parse_command(&self, input: &str, manifest_summary: &str) -> Result<ParsedCommand> {
-        let user = parse_command_prompt(input, manifest_summary);
-        let output = self.complete("Reply with valid JSON only.", &user)?;
-        let json: serde_json::Value = serde_json::from_str(output.trim())
-            .or_else(|_| {
-                let start = output.find('{').unwrap_or(0);
-                let end = output.rfind('}').map(|i| i + 1).unwrap_or(output.len());
-                serde_json::from_str(&output[start..end])
-            })
-            .unwrap_or_else(|_| serde_json::json!({"cmd": "unknown", "args": {}}));
-        let command = json["cmd"]
-            .as_str()
-            .or_else(|| json["command"].as_str())
-            .unwrap_or("unknown")
-            .to_string();
-        let args = json["args"]
-            .as_object()
-            .map(|m| {
-                m.iter()
-                    .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok(ParsedCommand { command, args })
     }
 }
 

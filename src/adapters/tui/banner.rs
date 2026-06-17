@@ -14,6 +14,9 @@ pub fn print_banner(
     ascii: bool,
     output: &dyn CliOutput,
 ) -> Result<()> {
+    if !config.ui.show_banner {
+        return Ok(());
+    }
     let version = env!("CARGO_PKG_VERSION");
     let border = if ascii { "+" } else { "╔" };
     let side = if ascii { "|" } else { "║" };

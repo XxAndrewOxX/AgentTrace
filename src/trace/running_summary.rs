@@ -542,23 +542,6 @@ pub fn refresh_if_stale(store_root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn assemble_resume_context(
-    store_root: &Path,
-    actor: &Actor,
-    include_git_log: bool,
-    git_log_limit: usize,
-) -> Result<String> {
-    crate::briefing::assemble_resume_briefing(
-        store_root,
-        actor,
-        &crate::briefing::BriefingOptions {
-            include_git_log,
-            git_log_limit,
-            ..Default::default()
-        },
-    )
-}
-
 pub fn resume_here_lines(store_root: &Path) -> Vec<String> {
     let path = store_root.join(RUNNING_SUMMARY_FILE);
     if !path.exists() {
@@ -590,6 +573,7 @@ pub fn resume_here_lines(store_root: &Path) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::briefing::{assemble_resume_briefing, BriefingOptions};
     use crate::config::StoreInfo;
     use crate::session;
     use crate::types::Actor;
@@ -875,7 +859,7 @@ mod tests {
     }
 
     #[test]
-    fn assemble_resume_context_includes_current_checkpoint() {
+    fn assemble_resume_briefing_includes_current_checkpoint() {
         let tmp = TempDir::new().unwrap();
         let (root, manifest, git) = setup(&tmp);
         let mut m = manifest;
@@ -898,14 +882,22 @@ mod tests {
         )
         .unwrap();
 
-        let text =
-            assemble_resume_context(&root, &Actor::Agent { name: "bot".into() }, false, 5).unwrap();
+        let text = assemble_resume_briefing(
+            &root,
+            &Actor::Agent { name: "bot".into() },
+            &BriefingOptions {
+                include_git_log: false,
+                git_log_limit: 5,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert!(text.contains("## 2. Current State"));
         assert!(text.contains("INSTRUCTIONS"));
     }
 
     #[test]
-    fn assemble_resume_context_includes_prior_session_recap() {
+    fn assemble_resume_briefing_includes_prior_session_recap() {
         let tmp = TempDir::new().unwrap();
         let (root, manifest, git) = setup(&tmp);
         let mut m = manifest;
@@ -928,8 +920,16 @@ mod tests {
         .unwrap();
         session::start_session(&root, "bot", "cli").unwrap();
 
-        let text =
-            assemble_resume_context(&root, &Actor::Agent { name: "bot".into() }, false, 5).unwrap();
+        let text = assemble_resume_briefing(
+            &root,
+            &Actor::Agent { name: "bot".into() },
+            &BriefingOptions {
+                include_git_log: false,
+                git_log_limit: 5,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert!(text.contains("Previous session:"));
         assert!(text.contains("Finished phase 1"));
         assert!(!text.contains("--- Running Summary ---"));

@@ -296,15 +296,6 @@ pub fn credentials_path() -> PathBuf {
         .join("credentials.toml")
 }
 
-/// Legacy config path helpers retained for reading old data directories.
-/// These paths are no longer written by agent-trace.
-pub fn models_dir() -> PathBuf {
-    dirs_next::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("agent-trace")
-        .join("models")
-}
-
 /// Legacy LLM config — kept for serde deserialization of old config files.
 /// No longer written or used; the embedded/Candle path was removed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -435,7 +426,7 @@ impl StoreInfo {
 pub struct PollingConfig {
     /// Poll interval in milliseconds.
     pub interval_ms: u64,
-    /// Whether polling is enabled (false = manual refresh only).
+    /// When false, the background poll loop is not started (manual refresh only).
     pub enabled: bool,
 }
 
@@ -488,9 +479,7 @@ pub struct MergedConfig {
     #[allow(dead_code)]
     pub store: StoreInfo,
     pub synthesis: SynthesisConfig,
-    #[allow(dead_code)]
     pub ui: UiConfig,
-    #[allow(dead_code)]
     pub defaults: DefaultsConfig,
     pub polling: PollingConfig,
 }

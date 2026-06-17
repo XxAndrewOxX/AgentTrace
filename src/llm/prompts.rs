@@ -18,38 +18,10 @@ fn truncate(s: &str, max: usize) -> &str {
     }
 }
 
-pub fn parse_doc_type(output: &str) -> DocType {
-    output
-        .trim()
-        .trim_matches('"')
-        .to_lowercase()
-        .parse::<DocType>()
-        .unwrap_or(DocType::Scratch)
-}
-
-pub fn classify_prompt(content: &str) -> String {
-    format!(
-        "Classify this document into exactly one of: plan, context, log, reference, scratch.\n\
-         Reply with only the type word.\n\n{}",
-        truncate(content, MAX_SNIPPET_CHARS)
-    )
-}
-
 pub fn summarize_change_prompt(path: &str, doc_type: &str, diff: &str) -> String {
     format!(
         "Summarize this diff of a {doc_type} document '{path}' in one sentence (max 20 words).\n\n{}",
         truncate(diff, MAX_SNIPPET_CHARS)
-    )
-}
-
-pub fn parse_command_prompt(input: &str, manifest_summary: &str) -> String {
-    format!(
-        "Parse this natural language agent-trace command into JSON: \
-         {{\"cmd\": \"<command>\", \"args\": {{...}}}}.\n\
-         Commands: ls, add, rm, info, diff, log, show, restore, replace, status.\n\
-         Store contents:\n{}\n\nUser input: {}",
-        truncate(manifest_summary, MAX_SNIPPET_CHARS),
-        input
     )
 }
 
@@ -116,14 +88,8 @@ mod tests {
 
     #[test]
     fn prompts_are_non_empty() {
-        assert!(!classify_prompt("hello").is_empty());
         assert!(!summarize_change_prompt("a.md", "plan", "+1").is_empty());
         assert!(!update_running_summary_prompt("prev", "ev", "plan").is_empty());
-    }
-
-    #[test]
-    fn parse_doc_type_defaults_scratch() {
-        assert_eq!(parse_doc_type("unknown"), DocType::Scratch);
-        assert_eq!(parse_doc_type("plan"), DocType::Plan);
+        assert!(!summarize_session_prompt("s1", &["event".into()]).is_empty());
     }
 }

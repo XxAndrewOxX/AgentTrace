@@ -22,8 +22,7 @@ const MIN_HEIGHT: u16 = 24;
 // ── Application ───────────────────────────────────────────────────────────────
 
 pub struct App {
-    #[allow(dead_code)]
-    pub store_root: PathBuf,
+    _store_root: PathBuf,
     pub manifest: Arc<Mutex<Manifest>>,
     pub tree: TreeState,
     pub changelog: ChangelogState,
@@ -46,7 +45,7 @@ impl App {
             TreeState::new(&m)
         };
         Self {
-            store_root,
+            _store_root: store_root,
             manifest,
             tree,
             changelog: ChangelogState::new(initial_log),
@@ -129,7 +128,7 @@ impl App {
                     self.tree.update(&m);
                 }
             }
-            UiEvent::Violation(msg) | UiEvent::StatusMessage(msg) => {
+            UiEvent::Violation(msg) => {
                 self.chat.output = Some(msg);
             }
         }

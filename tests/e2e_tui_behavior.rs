@@ -99,6 +99,7 @@ fn tb5_proxy_new_file_detected_and_committed() {
 
     // In-process poll tests have no synthesis backend; opt into degraded mode so
     // the poll gate commits documents (mirrors AGENT_TRACE_ALLOW_DEGRADED=1).
+    let prev_allow = std::env::var("AGENT_TRACE_ALLOW_DEGRADED").ok();
     std::env::set_var("AGENT_TRACE_ALLOW_DEGRADED", "1");
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
@@ -142,6 +143,12 @@ fn tb5_proxy_new_file_detected_and_committed() {
             .is_empty(),
         "new file should still be committed to git"
     );
+
+    if let Some(v) = prev_allow {
+        std::env::set_var("AGENT_TRACE_ALLOW_DEGRADED", v);
+    } else {
+        std::env::remove_var("AGENT_TRACE_ALLOW_DEGRADED");
+    }
 }
 
 // ── TB-6: Real-Time Violation Display ────────────────────────────────────────
@@ -199,13 +206,18 @@ fn tb8_degraded_backend_when_ollama_unreachable() {
         },
     );
     let info = Llm::backend_info_from_config(&merged);
+    let prev_allow = std::env::var("AGENT_TRACE_ALLOW_DEGRADED").ok();
     std::env::set_var("AGENT_TRACE_ALLOW_DEGRADED", "1");
     let api = Llm::from_merged_config(&merged).expect("degraded escape hatch");
-    std::env::remove_var("AGENT_TRACE_ALLOW_DEGRADED");
     if info.degraded {
         assert!(api.is_degraded());
     } else {
         assert!(!api.is_degraded());
+    }
+    if let Some(v) = prev_allow {
+        std::env::set_var("AGENT_TRACE_ALLOW_DEGRADED", v);
+    } else {
+        std::env::remove_var("AGENT_TRACE_ALLOW_DEGRADED");
     }
 }
 

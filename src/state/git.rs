@@ -303,7 +303,6 @@ impl GitStore {
         Ok(entries)
     }
 
-    #[allow(dead_code)]
     pub fn version_count(&self, path: &Path) -> Result<u32> {
         Ok(self.count_file_commits(path)? as u32)
     }

@@ -17,8 +17,7 @@ use tokio::sync::mpsc::Sender;
 /// commits / activity events are never duplicated.
 pub struct ActivityMonitor {
     poll_leader: bool,
-    #[allow(dead_code)]
-    processor: Option<Arc<Mutex<ChangeProcessor>>>,
+    _processor: Option<Arc<Mutex<ChangeProcessor>>>,
     /// Held for the lifetime of the monitor to keep poll leadership.
     _poll_lock: Option<PollLock>,
 }
@@ -36,6 +35,15 @@ impl ActivityMonitor {
         agent_state: AgentState,
         ui_tx: Option<Sender<UiEvent>>,
     ) -> Result<Self> {
+        if !config.polling.enabled {
+            tracing::info!("Polling disabled in store config; activity monitor not started.");
+            return Ok(Self {
+                poll_leader: false,
+                _processor: None,
+                _poll_lock: None,
+            });
+        }
+
         let poll_lock = match PollLock::try_acquire(store_root)? {
             Some(lock) => lock,
             None => {
@@ -45,7 +53,7 @@ impl ActivityMonitor {
                 );
                 return Ok(Self {
                     poll_leader: false,
-                    processor: None,
+                    _processor: None,
                     _poll_lock: None,
                 });
             }
@@ -68,7 +76,7 @@ impl ActivityMonitor {
 
         Ok(Self {
             poll_leader: true,
-            processor: Some(processor),
+            _processor: Some(processor),
             _poll_lock: Some(poll_lock),
         })
     }

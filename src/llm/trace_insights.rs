@@ -9,9 +9,6 @@ use anyhow::Result as AnyhowResult;
 use std::path::Path;
 use thiserror::Error;
 
-#[cfg(test)]
-use super::backend::NoTraceBackend;
-
 #[derive(Debug, Clone)]
 pub struct TraceDocument {
     pub path: String,
@@ -55,8 +52,6 @@ pub enum TraceInsightsResponse {
 
 #[derive(Debug, Error)]
 pub enum LlmError {
-    #[error("timeout while running llm request")]
-    Timeout,
     #[error("model unavailable: {0}")]
     ModelUnavailable(String),
     #[error("invalid output: {0}")]
@@ -142,23 +137,8 @@ impl Llm {
         Self::from_merged_config(&merged)
     }
 
-    #[cfg(test)]
-    pub fn with_no_backend() -> Self {
-        Self {
-            backend: Box::new(NoTraceBackend),
-            backend_label: "none".into(),
-        }
-    }
-
     pub fn is_degraded(&self) -> bool {
         self.backend_label == "degraded"
-    }
-
-    /// Return backend info for status/TUI display (from store root path).
-    pub fn backend_info(store_root: &Path) -> ResolvedBackendInfo {
-        let merged = MergedConfig::load(store_root).unwrap_or_default();
-        let creds = CredentialsStore::load().unwrap_or_default();
-        resolve(&merged, &creds).info()
     }
 
     /// Return backend info for status/TUI display (from already-loaded config).

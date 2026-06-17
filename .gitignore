@@ -15,3 +15,6 @@ agent-trace-docs/
 
 # Cursor IDE session artifacts
 .cursor/
+
+# Release packaging output (scripts/package_release.py)
+dist/
