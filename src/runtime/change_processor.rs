@@ -16,11 +16,9 @@ pub use crate::runtime::session::AgentState;
 // ── UI Event channel ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum UiEvent {
     NewCommit(LogEntry),
     Violation(String),
-    StatusMessage(String),
 }
 
 fn is_pid_alive(pid: u32) -> bool {

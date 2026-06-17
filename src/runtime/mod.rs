@@ -8,6 +8,4 @@ pub use activity_monitor::ActivityMonitor;
 pub use change_processor::{ChangeProcessor, InstanceLock, UiEvent};
 pub use poll_lock::PollLock;
 pub use session::AgentState;
-pub use synthesis_gate::{
-    allow_degraded_mode, ensure_synthesis_available, require_synthesis_backend,
-};
+pub use synthesis_gate::{allow_degraded_mode, require_synthesis_backend};

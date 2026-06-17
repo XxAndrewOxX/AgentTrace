@@ -19,7 +19,7 @@ pub trait SynthesisEngine: Send + Sync {
     fn backend_label(&self) -> &str;
 }
 
-/// Mechanical fallback when no remote, Ollama, or embedded backend is available.
+/// Mechanical fallback when no remote or Ollama backend is available.
 pub struct DegradedBackend;
 
 impl DegradedBackend {

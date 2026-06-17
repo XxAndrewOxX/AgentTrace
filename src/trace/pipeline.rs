@@ -1,8 +1,8 @@
 use crate::git_store::CommitInfo;
-use crate::llm::trace_insights::{Llm, TraceDocument};
+use crate::llm::trace_insights::Llm;
 use crate::permissions::{check_permission, PermissionResult};
 use crate::store::Store;
-use crate::trace::context::load_pending_updates;
+use crate::trace::context::synthesize_context_content;
 use crate::trace::running_summary::{self, SummaryEvent};
 use crate::trace::{
     agent_trace_md,
@@ -228,9 +228,8 @@ pub fn apply_trace_hooks(
 
     sync_agent_trace_md(store_root, git, manifest)?;
 
-    // WS-B: refresh context on *any* tracked file activity — not just curated
-    // doc types — so shell edits to source files (e.g. worker.py) are reflected
-    // in context.md too.
+    // Refresh context on any tracked file activity — not just curated doc types —
+    // so shell edits to source files (e.g. worker.py) are reflected in context.md.
     let changed_paths: Vec<PathBuf> = changed_files
         .iter()
         .map(|(p, _, _)| p.clone())
@@ -248,31 +247,7 @@ fn sync_agent_trace_md(
     git: &crate::git_store::GitStore,
     manifest: &crate::manifest::Manifest,
 ) -> anyhow::Result<()> {
-    let new_content = agent_trace_md::generate(store_root, manifest);
-    let target = store_root.join("AGENT-TRACE.md");
-    let existing = std::fs::read_to_string(&target).unwrap_or_default();
-    if existing == new_content {
-        return Ok(());
-    }
-
-    let tmp = store_root.join(".agent-trace").join("AGENT-TRACE.md.tmp");
-    std::fs::write(&tmp, &new_content)?;
-    std::fs::rename(&tmp, &target)?;
-
-    let info = CommitInfo {
-        action: Action::Modify,
-        files: vec![(
-            PathBuf::from("AGENT-TRACE.md"),
-            Action::Modify,
-            DocType::Reference,
-        )],
-        actor: Actor::System,
-        summary: "update AGENT-TRACE.md index".into(),
-        agent_name: None,
-        session_id: None,
-    };
-    git.commit(&info)?;
-    Ok(())
+    agent_trace_md::sync(store_root, manifest, git)
 }
 
 fn sync_context_md(
@@ -282,39 +257,8 @@ fn sync_context_md(
     trace_insights: &Llm,
     changed_paths: &[PathBuf],
 ) -> anyhow::Result<()> {
-    // `is_degraded()` is only reachable under the test/escape-hatch path (the
-    // gate above already bailed otherwise). It must use the template — never the
-    // backend, which would emit a "*(Synthesis degraded …)*" artifact.
-    let (new_content, commit_label) = if trace_insights.is_degraded() {
-        (
-            crate::trace::context::synthesize_no_llm(store_root, manifest)?,
-            "template".to_string(),
-        )
-    } else {
-        let docs = build_trace_documents(store_root, manifest, changed_paths);
-        let updates = load_pending_updates(store_root)?
-            .into_iter()
-            .map(|u| u.update)
-            .collect::<Vec<_>>();
-        let start = std::time::Instant::now();
-        match trace_insights.synthesize_context(&docs, &updates) {
-            Ok(s) => {
-                tracing::info!(
-                    "LLM context synthesis succeeded (backend={}, latency_ms={})",
-                    trace_insights.backend_label,
-                    start.elapsed().as_millis()
-                );
-                (s, format!("llm: {}", trace_insights.backend_label))
-            }
-            Err(e) => {
-                tracing::warn!("LLM synthesize_context failed, using template: {e}");
-                (
-                    crate::trace::context::synthesize_no_llm(store_root, manifest)?,
-                    "template".to_string(),
-                )
-            }
-        }
-    };
+    let (new_content, commit_label) =
+        synthesize_context_content(store_root, manifest, trace_insights, changed_paths)?;
     let target = store_root.join("context.md");
     let existing = std::fs::read_to_string(&target).unwrap_or_default();
     if existing == new_content {
@@ -336,58 +280,6 @@ fn sync_context_md(
     };
     git.commit(&info)?;
     Ok(())
-}
-
-fn build_trace_documents(
-    store_root: &Path,
-    manifest: &crate::manifest::Manifest,
-    changed_paths: &[PathBuf],
-) -> Vec<TraceDocument> {
-    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-    let mut docs: Vec<TraceDocument> = manifest
-        .documents()
-        .iter()
-        .filter(|d| {
-            matches!(
-                d.doc_type,
-                DocType::Plan | DocType::Reference | DocType::Scratch
-            )
-        })
-        .map(|d| {
-            seen.insert(d.path.clone());
-            let content = std::fs::read_to_string(store_root.join(&d.path)).unwrap_or_default();
-            let snippet: String = content.chars().take(2000).collect();
-            TraceDocument {
-                path: d.path.display().to_string(),
-                doc_type: d.doc_type.clone(),
-                content_snippet: snippet,
-            }
-        })
-        .collect();
-
-    // WS-B: include unmanifested files that were just touched (e.g. source files
-    // edited via the shell) so the synthesized context reflects real activity,
-    // without registering them as managed documents. They are labelled Scratch
-    // for synthesis purposes only.
-    for path in changed_paths {
-        if seen.contains(path) || !crate::git_store::should_track_activity(path) {
-            continue;
-        }
-        let full = store_root.join(path);
-        if !full.is_file() {
-            continue;
-        }
-        seen.insert(path.clone());
-        let content = std::fs::read_to_string(&full).unwrap_or_default();
-        let snippet: String = content.chars().take(2000).collect();
-        docs.push(TraceDocument {
-            path: path.display().to_string(),
-            doc_type: DocType::Scratch,
-            content_snippet: snippet,
-        });
-    }
-
-    docs
 }
 
 #[cfg(test)]
@@ -460,7 +352,11 @@ mod tests {
         // An unmanaged source file touched by a shell edit.
         std::fs::write(root.join("worker.py"), "print('worker activity')\n").unwrap();
 
-        let docs = build_trace_documents(&root, &manifest, &[PathBuf::from("worker.py")]);
+        let docs = crate::trace::context::build_trace_documents(
+            &root,
+            &manifest,
+            &[PathBuf::from("worker.py")],
+        );
 
         assert!(
             docs.iter().any(|d| d.path == "plan.md"),
@@ -486,7 +382,11 @@ mod tests {
             .register(&PathBuf::from("notes.md"), DocType::Scratch, "")
             .unwrap();
 
-        let docs = build_trace_documents(&root, &manifest, &[PathBuf::from("notes.md")]);
+        let docs = crate::trace::context::build_trace_documents(
+            &root,
+            &manifest,
+            &[PathBuf::from("notes.md")],
+        );
         let count = docs.iter().filter(|d| d.path == "notes.md").count();
         assert_eq!(count, 1, "managed + changed path must not be duplicated");
     }

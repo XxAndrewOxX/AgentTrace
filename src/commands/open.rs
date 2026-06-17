@@ -31,6 +31,8 @@ pub fn run(
     let config = MergedConfig::load(&store_root)?;
     let manifest = Manifest::load(&store_root)?;
     let manifest = Arc::new(Mutex::new(manifest));
+    let ascii = ascii || config.ui.ascii_only;
+    let changelog_limit = config.ui.changelog_limit;
 
     // Print startup banner before entering raw mode.
     {
@@ -53,7 +55,7 @@ pub fn run(
 
     // Load initial git log for changelog panel.
     let git = GitStore::open(&store_root)?;
-    let initial_log = git.log(50).unwrap_or_default();
+    let initial_log = git.log(changelog_limit).unwrap_or_default();
 
     // Load command history.
     let history = load_command_history(&store_root);
@@ -67,7 +69,7 @@ pub fn run(
             tracing::warn!("TUI instance lock unavailable: {e}");
             output.warn("Warning: Another agent-trace TUI is running.")?;
             output.warn("Opening in read-only mode.")?;
-            return run_readonly(&store_root, manifest, agent_name, ascii);
+            return run_readonly(&store_root, manifest, agent_name, ascii, changelog_limit);
         }
     };
 
@@ -113,12 +115,20 @@ fn run_readonly(
     store_root: &Path,
     manifest: Arc<Mutex<Manifest>>,
     _agent_name: Option<String>,
-    _ascii: bool,
+    ascii: bool,
+    changelog_limit: usize,
 ) -> Result<()> {
+    let config = MergedConfig::load(store_root)?;
     let git = GitStore::open(store_root)?;
-    let initial_log = git.log(50).unwrap_or_default();
+    let initial_log = git.log(changelog_limit).unwrap_or_default();
     let history = load_command_history(store_root);
     let (_tx, rx) = tokio::sync::mpsc::channel::<UiEvent>(1);
+
+    {
+        let m = manifest.lock().unwrap();
+        let output = crate::observability::NoopOutput;
+        banner::print_banner(store_root, &config, &m, ascii, &output)?;
+    }
 
     // Install panic hook to restore terminal on panic.
     let original_hook = std::panic::take_hook();

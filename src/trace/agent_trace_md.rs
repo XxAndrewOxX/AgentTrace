@@ -4,29 +4,6 @@ use crate::types::{Action, Actor, DocType};
 use anyhow::Result;
 use std::path::Path;
 
-/// Generate and write AGENT-TRACE.md at the store root, then commit it.
-#[allow(dead_code)]
-pub fn generate_and_commit(store_root: &Path, manifest: &Manifest, git: &GitStore) -> Result<()> {
-    let content = generate(store_root, manifest);
-    std::fs::write(store_root.join("AGENT-TRACE.md"), &content)?;
-
-    let info = CommitInfo {
-        action: Action::Modify,
-        files: vec![(
-            std::path::PathBuf::from("AGENT-TRACE.md"),
-            Action::Modify,
-            DocType::Reference,
-        )],
-        actor: Actor::System,
-        summary: "update AGENT-TRACE.md index".into(),
-        agent_name: None,
-        session_id: None,
-    };
-    git.commit(&info)?;
-
-    Ok(())
-}
-
 /// Generate the AGENT-TRACE.md content without writing to disk.
 pub fn generate(_store_root: &Path, manifest: &Manifest) -> String {
     let plans = manifest.list(Some(&DocType::Plan));
@@ -134,6 +111,34 @@ pub fn generate(_store_root: &Path, manifest: &Manifest) -> String {
     out
 }
 
+/// Write AGENT-TRACE.md when content changed, using an atomic tmp rename.
+pub fn sync(store_root: &Path, manifest: &Manifest, git: &GitStore) -> Result<()> {
+    let new_content = generate(store_root, manifest);
+    let target = store_root.join("AGENT-TRACE.md");
+    if std::fs::read_to_string(&target).unwrap_or_default() == new_content {
+        return Ok(());
+    }
+
+    let tmp = store_root.join(".agent-trace").join("AGENT-TRACE.md.tmp");
+    std::fs::write(&tmp, &new_content)?;
+    std::fs::rename(&tmp, &target)?;
+
+    let info = CommitInfo {
+        action: Action::Modify,
+        files: vec![(
+            std::path::PathBuf::from("AGENT-TRACE.md"),
+            Action::Modify,
+            DocType::Reference,
+        )],
+        actor: Actor::System,
+        summary: "update AGENT-TRACE.md index".into(),
+        agent_name: None,
+        session_id: None,
+    };
+    git.commit(&info)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_and_commit() {
+    fn test_sync_writes_index() {
         let tmp = TempDir::new().unwrap();
         let (root, mut manifest, git) = setup(&tmp);
         manifest
@@ -191,7 +196,7 @@ mod tests {
             .unwrap();
 
         // Need prd.md to exist to stage it (already in AGENT-TRACE generation we only write AGENT-TRACE.md)
-        generate_and_commit(&root, &manifest, &git).unwrap();
+        sync(&root, &manifest, &git).unwrap();
         assert!(root.join("AGENT-TRACE.md").exists());
     }
 
