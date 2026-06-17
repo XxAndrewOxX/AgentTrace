@@ -13,7 +13,7 @@ for adversarial case specs.
 - Self-managed git repo inside `.agent-trace/repo/`
 - TOML manifest for document metadata (types, tags, descriptions)
 - Write permission enforcement (detect-and-revert)
-- Optional LLM via `candle` crate for NL commands, classification, summarization
+- Synthesis backend via HTTP/Ollama (`reqwest`) for summaries, context refresh, and briefings
 - TUI via `ratatui` + `crossterm`
 - System-synthesized `context.md` and agent logs
 - `AGENT-TRACE.md` agent discovery index at store root
@@ -26,9 +26,8 @@ for adversarial case specs.
 - `src/runtime/` — poll loop, change processor, session management
 - `src/adapters/` — MCP server and TUI
 - `src/commands/` — CLI command implementations
-- `src/trace/` — context synthesis, logs, agent trace markdown
-- `src/llm/` — LLM engine (optional `--features llm`)
-- `src/synthesis/` — synthesis helpers
+- `src/trace/` — context synthesis, logs, agent trace markdown, resume briefings
+- `src/llm/` — synthesis backend facade (`Llm`), HTTP/Ollama providers, prompts
 
 ## Build Order
 
@@ -36,7 +35,7 @@ for adversarial case specs.
 2. Commands (depends on state)
 3. Runtime + trace synthesis (poll, context, logs, AGENT-TRACE.md)
 4. Adapters (TUI, MCP — depend on runtime/events)
-5. LLM (plugs in via trait anywhere)
+5. LLM providers (plugs in via `Llm` facade and synthesis gate)
 
 ## Testing
 
