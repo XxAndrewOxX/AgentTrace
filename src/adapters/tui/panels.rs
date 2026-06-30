@@ -1,114 +1,4 @@
-use crate::manifest::{DocumentEntry, Manifest};
-use crate::types::LogEntry;
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
-
-// ── Tree Panel State ──────────────────────────────────────────────────────────
-
-pub struct TreeState {
-    pub documents: Vec<DocumentEntry>,
-    pub list_state: ListState,
-}
-
-impl TreeState {
-    pub fn new(manifest: &Manifest) -> Self {
-        Self {
-            documents: manifest.documents().to_vec(),
-            list_state: ListState::default(),
-        }
-    }
-
-    pub fn update(&mut self, manifest: &Manifest) {
-        self.documents = manifest.documents().to_vec();
-    }
-
-    pub fn scroll_up(&mut self) {
-        let i = match self.list_state.selected() {
-            Some(i) => {
-                if i == 0 {
-                    0
-                } else {
-                    i - 1
-                }
-            }
-            None => 0,
-        };
-        self.list_state.select(Some(i));
-    }
-
-    pub fn scroll_down(&mut self) {
-        let len = self.documents.len();
-        let i = match self.list_state.selected() {
-            Some(i) => {
-                if i >= len.saturating_sub(1) {
-                    i
-                } else {
-                    i + 1
-                }
-            }
-            None => 0,
-        };
-        self.list_state.select(Some(i));
-    }
-
-    pub fn render_widget(&mut self) -> (List<'_>, &mut ListState) {
-        let items: Vec<ListItem> = self
-            .documents
-            .iter()
-            .map(|doc| {
-                let indicator = doc.doc_type.indicator();
-                let line = Line::from(vec![
-                    Span::styled(format!("[{indicator}] "), Style::default().fg(Color::Cyan)),
-                    Span::raw(doc.path.display().to_string()),
-                ]);
-                ListItem::new(line)
-            })
-            .collect();
-
-        let list = List::new(items)
-            .block(Block::default().title("Documents").borders(Borders::ALL))
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-
-        (list, &mut self.list_state)
-    }
-}
-
-// ── Changelog Panel State ─────────────────────────────────────────────────────
-
-const MAX_CHANGELOG_ENTRIES: usize = 200;
-
-pub struct ChangelogState {
-    pub entries: Vec<LogEntry>,
-    pub scroll: usize,
-}
-
-impl ChangelogState {
-    pub fn new(initial: Vec<LogEntry>) -> Self {
-        Self {
-            entries: initial,
-            scroll: 0,
-        }
-    }
-
-    pub fn push(&mut self, entry: LogEntry) {
-        self.entries.insert(0, entry);
-        if self.entries.len() > MAX_CHANGELOG_ENTRIES {
-            self.entries.truncate(MAX_CHANGELOG_ENTRIES);
-            self.scroll = self.scroll.min(MAX_CHANGELOG_ENTRIES.saturating_sub(1));
-        }
-    }
-
-    pub fn scroll_up(&mut self) {
-        self.scroll = self.scroll.saturating_sub(1);
-    }
-
-    pub fn scroll_down(&mut self) {
-        if self.scroll + 1 < self.entries.len() {
-            self.scroll += 1;
-        }
-    }
-}
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 // ── Chat Input State ──────────────────────────────────────────────────────────
 
@@ -117,7 +7,6 @@ pub struct ChatState {
     pub cursor: usize,
     pub history: Vec<String>,
     pub history_idx: Option<usize>,
-    pub output: Option<String>,
 }
 
 impl ChatState {
@@ -127,7 +16,6 @@ impl ChatState {
             cursor: 0,
             history,
             history_idx: None,
-            output: None,
         }
     }
 
@@ -190,24 +78,79 @@ impl ChatState {
     }
 }
 
+// ── Transient overlay (command output / doc preview) ──────────────────────────
+
+pub struct OverlayState {
+    pub title: String,
+    pub body: String,
+}
+
+impl OverlayState {
+    pub fn new(title: impl Into<String>, body: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            body: body.into(),
+        }
+    }
+
+    pub fn render(&self, f: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
+        let para = Paragraph::new(self.body.clone())
+            .block(
+                Block::default()
+                    .title(self.title.clone())
+                    .borders(Borders::ALL),
+            )
+            .wrap(ratatui::widgets::Wrap { trim: false });
+        f.render_widget(para, area);
+    }
+}
+
 // ── Panel Focus ───────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
+    Context,
     Tree,
-    Changelog,
-    Chat,
+    Activity,
+    Alerts,
+    Command,
 }
 
 impl Focus {
-    pub fn next(&self) -> Self {
+    pub fn next(self) -> Self {
         match self {
-            Focus::Tree => Focus::Changelog,
-            Focus::Changelog => Focus::Chat,
-            Focus::Chat => Focus::Tree,
+            Focus::Context => Focus::Tree,
+            Focus::Tree => Focus::Activity,
+            Focus::Activity => Focus::Alerts,
+            Focus::Alerts => Focus::Command,
+            Focus::Command => Focus::Context,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Focus::Context => Focus::Command,
+            Focus::Tree => Focus::Context,
+            Focus::Activity => Focus::Tree,
+            Focus::Alerts => Focus::Activity,
+            Focus::Command => Focus::Alerts,
+        }
+    }
+
+    pub fn from_index(n: u8) -> Option<Self> {
+        match n {
+            1 => Some(Focus::Context),
+            2 => Some(Focus::Tree),
+            3 => Some(Focus::Activity),
+            4 => Some(Focus::Alerts),
+            5 => Some(Focus::Command),
+            _ => None,
         }
     }
 }
+
+// Backward-compatible alias for tests that referenced the old changelog focus.
+pub type ChangelogFocus = Focus;
 
 #[cfg(test)]
 mod tests {
@@ -246,26 +189,11 @@ mod tests {
 
     #[test]
     fn test_focus_cycles() {
-        let f = Focus::Tree;
-        assert_eq!(f.next(), Focus::Changelog);
-        assert_eq!(f.next().next(), Focus::Chat);
-        assert_eq!(f.next().next().next(), Focus::Tree);
-    }
-
-    #[test]
-    fn test_changelog_state_push() {
-        let mut log = ChangelogState::new(vec![]);
-        use chrono::Utc;
-        let entry = LogEntry {
-            commit_id: "abc".into(),
-            timestamp: Utc::now(),
-            action: crate::types::Action::Create,
-            actor: crate::types::Actor::User,
-            agent_name: None,
-            files: vec![],
-            summary: "test".into(),
-        };
-        log.push(entry);
-        assert_eq!(log.entries.len(), 1);
+        let f = Focus::Context;
+        assert_eq!(f.next(), Focus::Tree);
+        assert_eq!(f.next().next(), Focus::Activity);
+        assert_eq!(f.next().next().next(), Focus::Alerts);
+        assert_eq!(f.next().next().next().next(), Focus::Command);
+        assert_eq!(f.next().next().next().next().next(), Focus::Context);
     }
 }

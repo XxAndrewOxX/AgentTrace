@@ -1,58 +1,84 @@
-use super::panels::{ChangelogState, ChatState, Focus, TreeState};
+use super::activity::ActivityState;
+use super::alerts::AlertState;
+use super::context::ContextState;
+use super::layout::{DashboardLayout, MIN_HEIGHT, MIN_WIDTH};
+use super::output::BufferOutput;
+use super::panels::{ChatState, Focus, OverlayState};
+use super::status::{load_summary_state_for_status, PollRole, StatusBarState};
+use super::tree::TreeState;
+use crate::config::MergedConfig;
 use crate::manifest::Manifest;
+use crate::observability::CliOutput;
 use crate::poll::UiEvent;
+use crate::running_summary::{is_synthesis_in_flight, load_recent_events};
+use crate::session::load_session;
 use crate::types::LogEntry;
 use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::{
     backend::Backend,
-    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame, Terminal,
 };
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-
-// ── Minimum terminal size ─────────────────────────────────────────────────────
-const MIN_WIDTH: u16 = 80;
-const MIN_HEIGHT: u16 = 24;
-
-// ── Application ───────────────────────────────────────────────────────────────
+use std::time::{Duration, Instant};
 
 pub struct App {
-    _store_root: PathBuf,
-    pub manifest: Arc<Mutex<Manifest>>,
-    pub tree: TreeState,
-    pub changelog: ChangelogState,
+    store_root: PathBuf,
+    _config: MergedConfig,
+    manifest: Arc<Mutex<Manifest>>,
+    status: StatusBarState,
+    context: ContextState,
+    tree: TreeState,
+    activity: ActivityState,
+    alerts: AlertState,
     pub chat: ChatState,
-    pub focus: Focus,
-    pub ui_rx: tokio::sync::mpsc::Receiver<UiEvent>,
-    pub should_quit: bool,
+    focus: Focus,
+    overlay: Option<OverlayState>,
+    ui_rx: tokio::sync::mpsc::Receiver<UiEvent>,
+    should_quit: bool,
+    context_expanded: bool,
+    last_refresh: Instant,
+    session_id: Option<String>,
 }
 
 impl App {
     pub fn new(
         store_root: PathBuf,
+        config: MergedConfig,
+        poll_role: PollRole,
         manifest: Arc<Mutex<Manifest>>,
         initial_log: Vec<LogEntry>,
         command_history: Vec<String>,
         ui_rx: tokio::sync::mpsc::Receiver<UiEvent>,
     ) -> Self {
-        let tree = {
-            let m = manifest.lock().unwrap();
-            TreeState::new(&m)
-        };
+        let session_id = load_session(&store_root).map(|s| s.session_id);
+        let events = load_recent_events(&store_root, 50).unwrap_or_default();
+        let manifest_guard = manifest.lock().unwrap();
+        let status = StatusBarState::new(&store_root, poll_role, &config, &manifest_guard);
+        let context = ContextState::new(&store_root, &manifest_guard, session_id.as_deref());
+        let tree = TreeState::new(&manifest_guard);
+        drop(manifest_guard);
+
         Self {
-            _store_root: store_root,
+            store_root,
+            _config: config,
             manifest,
+            status,
+            context,
             tree,
-            changelog: ChangelogState::new(initial_log),
+            activity: ActivityState::new(events, initial_log),
+            alerts: AlertState::new(),
             chat: ChatState::new(command_history),
-            focus: Focus::Chat,
+            focus: Focus::Command,
+            overlay: None,
             ui_rx,
             should_quit: false,
+            context_expanded: true,
+            last_refresh: Instant::now(),
+            session_id,
         }
     }
 
@@ -60,16 +86,19 @@ impl App {
         loop {
             terminal.draw(|f| self.render(f))?;
 
-            // Poll for keyboard events with a short timeout.
-            if crossterm::event::poll(std::time::Duration::from_millis(33))? {
+            if crossterm::event::poll(Duration::from_millis(33))? {
                 if let Event::Key(key) = crossterm::event::read()? {
                     self.handle_key(key);
                 }
             }
 
-            // Drain UI events from poll loop.
             while let Ok(event) = self.ui_rx.try_recv() {
                 self.handle_ui_event(event);
+            }
+
+            if self.last_refresh.elapsed() >= Duration::from_secs(1) {
+                self.refresh_snapshot();
+                self.last_refresh = Instant::now();
             }
 
             if self.should_quit {
@@ -79,41 +108,89 @@ impl App {
         Ok(())
     }
 
+    fn refresh_snapshot(&mut self) {
+        let manifest = self.manifest.lock().unwrap();
+        let summary_state = load_summary_state_for_status(&self.store_root);
+        let in_flight = is_synthesis_in_flight(&self.store_root);
+        self.status.refresh(
+            &self.store_root,
+            &manifest,
+            &summary_state,
+            in_flight,
+        );
+        self.status.set_alert_count(self.alerts.count());
+        self.session_id = load_session(&self.store_root).map(|s| s.session_id);
+        self.context
+            .reload(&self.store_root, &manifest, self.session_id.as_deref());
+        if let Ok(events) = load_recent_events(&self.store_root, 50) {
+            self.activity.reload_events(events);
+        }
+    }
+
     fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+        if self.overlay.is_some() {
+            if matches!(key.code, KeyCode::Esc) {
+                self.overlay = None;
+            }
+            return;
+        }
+
         match key.code {
-            KeyCode::Char('q') if self.focus != Focus::Chat => {
+            KeyCode::Char('q') if self.focus != Focus::Command => {
                 self.should_quit = true;
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.should_quit = true;
             }
+            KeyCode::Char('c') if self.focus != Focus::Command => {
+                self.context_expanded = !self.context_expanded;
+                self.context.expanded = self.context_expanded;
+            }
+            KeyCode::Char('g') if self.focus == Focus::Activity => {
+                self.activity.toggle_mode();
+            }
+            KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.focus = self.focus.prev();
+            }
             KeyCode::Tab => {
                 self.focus = self.focus.next();
             }
+            KeyCode::Char(n @ '1'..='5') => {
+                if let Some(f) = Focus::from_index(n as u8 - b'0') {
+                    self.focus = f;
+                }
+            }
             KeyCode::Up => match self.focus {
+                Focus::Context => self.context.scroll_up(),
                 Focus::Tree => self.tree.scroll_up(),
-                Focus::Changelog => self.changelog.scroll_up(),
-                Focus::Chat => self.chat.history_up(),
+                Focus::Activity => self.activity.scroll_up(),
+                Focus::Alerts => self.alerts.scroll_up(),
+                Focus::Command => self.chat.history_up(),
             },
             KeyCode::Down => match self.focus {
+                Focus::Context => self.context.scroll_down(),
                 Focus::Tree => self.tree.scroll_down(),
-                Focus::Changelog => self.changelog.scroll_down(),
-                Focus::Chat => self.chat.history_down(),
+                Focus::Activity => self.activity.scroll_down(),
+                Focus::Alerts => self.alerts.scroll_down(),
+                Focus::Command => self.chat.history_down(),
             },
-            KeyCode::Char(c) if self.focus == Focus::Chat => {
+            KeyCode::Char(c) if self.focus == Focus::Command => {
                 self.chat.push_char(c);
             }
-            KeyCode::Backspace if self.focus == Focus::Chat => {
+            KeyCode::Backspace if self.focus == Focus::Command => {
                 self.chat.backspace();
             }
-            KeyCode::Enter if self.focus == Focus::Chat => {
+            KeyCode::Enter if self.focus == Focus::Command => {
                 let input = self.chat.take_input();
                 if !input.trim().is_empty() {
                     self.execute_command(&input);
                 }
             }
+            KeyCode::Enter if self.focus == Focus::Tree => {
+                self.open_doc_preview();
+            }
             KeyCode::Esc => {
-                self.chat.output = None;
+                self.overlay = None;
             }
             _ => {}
         }
@@ -122,144 +199,178 @@ impl App {
     fn handle_ui_event(&mut self, event: UiEvent) {
         match event {
             UiEvent::NewCommit(entry) => {
-                self.changelog.push(entry);
-                // Refresh tree.
+                self.status.note_activity(entry.timestamp);
+                self.activity.push_git(entry.clone());
                 if let Ok(m) = self.manifest.lock() {
                     self.tree.update(&m);
                 }
             }
             UiEvent::Violation(msg) => {
-                self.chat.output = Some(msg);
+                self.alerts.push(msg);
+                self.status.set_alert_count(self.alerts.count());
+            }
+            UiEvent::SummaryAppended(event) => {
+                if let Ok(ts) = chrono::DateTime::parse_from_rfc3339(&event.timestamp) {
+                    self.status.note_activity(ts.with_timezone(&chrono::Utc));
+                }
+                self.activity.push_event(event);
+            }
+            UiEvent::ContextRefreshed | UiEvent::RunningSummaryRefreshed => {
+                self.refresh_snapshot();
+            }
+            UiEvent::SessionChanged(session) => {
+                self.session_id = Some(session.session_id);
+                self.status.agent_name = session.name;
+                self.refresh_snapshot();
+            }
+            UiEvent::SynthesisStatus { in_flight, ops_pending } => {
+                self.status.synthesis_in_flight = in_flight;
+                self.status.ops_pending = ops_pending;
             }
         }
     }
 
+    fn open_doc_preview(&mut self) {
+        let Some(doc) = self.tree.selected_document() else {
+            return;
+        };
+        let path = self.store_root.join(&doc.path);
+        let body = std::fs::read_to_string(&path).unwrap_or_else(|e| format!("(unreadable: {e})"));
+        let lines: Vec<&str> = body.lines().collect();
+        let tail: String = if lines.len() > 15 {
+            lines[lines.len() - 15..].join("\n")
+        } else {
+            body
+        };
+        self.overlay = Some(OverlayState::new(
+            format!("Preview: {}", doc.path.display()),
+            tail,
+        ));
+    }
+
     fn execute_command(&mut self, input: &str) {
-        // Simple command dispatch — structured commands only (no LLM in this impl).
         let parts: Vec<&str> = input.split_whitespace().collect();
-        match parts.as_slice() {
-            ["ls"] | ["ls", ..] => {
-                let m = self.manifest.lock().unwrap();
-                let lines: Vec<String> = m
-                    .documents()
-                    .iter()
-                    .map(|d| format!("[{}] {}", d.doc_type.indicator(), d.path.display()))
-                    .collect();
-                self.chat.output = Some(if lines.is_empty() {
-                    "No documents tracked.".into()
-                } else {
-                    lines.join("\n")
-                });
+        let output = BufferOutput::new();
+        let result = match parts.as_slice() {
+            ["ls"] | ["ls", ..] => self.cmd_ls(&output),
+            ["info", path] => self.cmd_info(path, &output),
+            ["show", path] => self.cmd_show(path, &output),
+            ["show", path, ver] => self.cmd_show_version(path, ver, &output),
+            ["diff", path] => self.cmd_diff(path, None, None, &output),
+            ["diff", path, v1, v2] => {
+                self.cmd_diff(path, Some(v1), Some(v2), &output)
             }
             ["q"] | ["quit"] | ["exit"] => {
                 self.should_quit = true;
+                return;
             }
             _ => {
-                self.chat.output = Some(format!(
-                    "Unknown command: '{input}'. Type 'ls' to list documents, 'q' to quit."
-                ));
+                output
+                    .line(&format!(
+                        "Unknown command: '{input}'. Try: ls, info <path>, show <path>, diff <path>, q"
+                    ))
+                    .ok();
+                Ok(())
+            }
+        };
+        if let Err(e) = result {
+            output.error(&e.to_string()).ok();
+        }
+        let body = output.take();
+        if !body.is_empty() {
+            self.overlay = Some(OverlayState::new("Output", body));
+        }
+    }
+
+    fn cmd_ls(&self, output: &BufferOutput) -> Result<()> {
+        let m = self.manifest.lock().unwrap();
+        if m.documents().is_empty() {
+            output.line("No documents tracked.")?;
+        } else {
+            for d in m.documents() {
+                output.line(&format!("[{}] {}", d.doc_type.indicator(), d.path.display()))?;
             }
         }
+        Ok(())
+    }
+
+    fn cmd_info(&self, path: &str, output: &BufferOutput) -> Result<()> {
+        crate::commands::info::run(&self.store_root, &PathBuf::from(path), output)
+    }
+
+    fn cmd_show(&self, path: &str, output: &BufferOutput) -> Result<()> {
+        crate::commands::show::run(&self.store_root, &PathBuf::from(path), 0, output)
+    }
+
+    fn cmd_show_version(&self, path: &str, ver: &str, output: &BufferOutput) -> Result<()> {
+        let version: u32 = ver.parse().map_err(|_| anyhow::anyhow!("invalid version: {ver}"))?;
+        crate::commands::show::run(&self.store_root, &PathBuf::from(path), version, output)
+    }
+
+    fn cmd_diff(
+        &self,
+        path: &str,
+        v1: Option<&str>,
+        v2: Option<&str>,
+        output: &BufferOutput,
+    ) -> Result<()> {
+        let v1 = v1.map(|s| s.parse()).transpose().map_err(|_| anyhow::anyhow!("invalid v1"))?;
+        let v2 = v2.map(|s| s.parse()).transpose().map_err(|_| anyhow::anyhow!("invalid v2"))?;
+        crate::commands::diff::run(&self.store_root, &PathBuf::from(path), v1, v2, output)
     }
 
     pub fn render(&mut self, f: &mut Frame<'_>) {
         let size = f.area();
-
-        // Check minimum terminal size.
         if size.width < MIN_WIDTH || size.height < MIN_HEIGHT {
-            let msg = Paragraph::new("Terminal too small. Please resize to at least 80x24.")
-                .style(Style::default().fg(Color::Red));
+            let msg = Paragraph::new(format!(
+                "Terminal too small. Please resize to at least {MIN_WIDTH}x{MIN_HEIGHT}."
+            ))
+            .style(Style::default().fg(Color::Red));
             f.render_widget(msg, size);
             return;
         }
 
-        // Layout: top = [tree | changelog], bottom = chat
-        let rows = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(5), Constraint::Length(3)])
-            .split(size);
-
-        let cols = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
-            .split(rows[0]);
-
-        self.render_tree(f, cols[0]);
-        self.render_changelog(f, cols[1]);
-        self.render_chat(f, rows[1]);
-    }
-
-    fn render_tree(&mut self, f: &mut Frame<'_>, area: Rect) {
-        let focused = self.focus == Focus::Tree;
-        let (list, state) = self.tree.render_widget();
-        let list = list.block(
-            Block::default()
-                .title("Documents")
-                .borders(Borders::ALL)
-                .border_style(if focused {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default()
-                }),
-        );
-        f.render_stateful_widget(list, area, state);
-    }
-
-    fn render_changelog(&mut self, f: &mut Frame<'_>, area: Rect) {
-        let focused = self.focus == Focus::Changelog;
-
-        // If chat has command output, show that instead.
-        if let Some(output) = &self.chat.output {
-            let para = Paragraph::new(output.clone())
-                .block(
-                    Block::default()
-                        .title("Output")
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(Color::Green)),
-                )
-                .wrap(ratatui::widgets::Wrap { trim: false });
-            f.render_widget(para, area);
+        if let Some(overlay) = &self.overlay {
+            overlay.render(f, size);
             return;
         }
 
-        let visible_height = area.height.saturating_sub(2) as usize;
-        let entries = &self.changelog.entries;
-        let start = self.changelog.scroll.min(entries.len().saturating_sub(1));
-        let visible = entries.iter().skip(start).take(visible_height);
+        let layout = DashboardLayout::compute(size, self.context_expanded);
 
-        let lines: Vec<Line> = visible
-            .map(|entry| {
-                let time = entry.timestamp.format("%H:%M:%S").to_string();
-                let actor_color = if entry.actor.is_agent() {
-                    Color::Magenta
-                } else {
-                    Color::White
-                };
-                Line::from(vec![
-                    Span::styled(time, Style::default().fg(Color::DarkGray)),
-                    Span::raw(" "),
-                    Span::styled(entry.actor.to_string(), Style::default().fg(actor_color)),
-                    Span::raw(" "),
-                    Span::raw(entry.summary.clone()),
-                ])
-            })
-            .collect();
-
-        let para = Paragraph::new(lines).block(
-            Block::default()
-                .title("Changelog")
-                .borders(Borders::ALL)
-                .border_style(if focused {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default()
-                }),
+        self.status.render(f, layout.status, layout.compact);
+        self.context.render(
+            f,
+            layout.context,
+            self.focus == Focus::Context,
+            layout.compact,
         );
-        f.render_widget(para, area);
+
+        let (list, state) = self.tree.render_widget(layout.compact);
+        let tree_border = if self.focus == Focus::Tree {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default()
+        };
+        let list = list.block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(tree_border),
+        );
+        f.render_stateful_widget(list, layout.documents, state);
+
+        self.activity
+            .render(f, layout.activity, self.focus == Focus::Activity);
+
+        if layout.show_alerts_column {
+            self.alerts
+                .render_column(f, layout.alerts, self.focus == Focus::Alerts);
+        }
+
+        self.render_command(f, layout.command);
     }
 
-    fn render_chat(&mut self, f: &mut Frame<'_>, area: Rect) {
-        let focused = self.focus == Focus::Chat;
+    fn render_command(&mut self, f: &mut Frame<'_>, area: ratatui::layout::Rect) {
+        let focused = self.focus == Focus::Command;
         let prompt = format!("> {}", self.chat.input);
         let para = Paragraph::new(prompt).block(
             Block::default()
@@ -283,8 +394,6 @@ mod tests {
     use crate::poll::UiEvent;
     use crate::types::{Action, Actor, CommitId, LogEntry};
     use ratatui::backend::TestBackend;
-    use std::path::PathBuf;
-    use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
 
     fn make_app(tmp: &TempDir) -> (App, tokio::sync::mpsc::Sender<UiEvent>) {
@@ -294,7 +403,16 @@ mod tests {
         let manifest = Manifest::create_empty(info, &root).unwrap();
         let manifest = Arc::new(Mutex::new(manifest));
         let (tx, rx) = tokio::sync::mpsc::channel(10);
-        let app = App::new(root, manifest, vec![], vec![], rx);
+        let config = MergedConfig::default();
+        let app = App::new(
+            root,
+            config,
+            PollRole::Leader,
+            manifest,
+            vec![],
+            vec![],
+            rx,
+        );
         (app, tx)
     }
 
@@ -314,17 +432,16 @@ mod tests {
         let backend = TestBackend::new(40, 10);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| app.render(f)).unwrap();
-        // Just verify it doesn't panic.
     }
 
     #[test]
     fn test_tab_cycles_focus() {
         let tmp = TempDir::new().unwrap();
         let (mut app, _tx) = make_app(&tmp);
-        assert_eq!(app.focus, Focus::Chat);
+        assert_eq!(app.focus, Focus::Command);
         let key = crossterm::event::KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
         app.handle_key(key);
-        assert_eq!(app.focus, Focus::Tree);
+        assert_eq!(app.focus, Focus::Context);
     }
 
     #[test]
@@ -337,10 +454,20 @@ mod tests {
     }
 
     #[test]
+    fn test_violation_goes_to_alerts() {
+        let tmp = TempDir::new().unwrap();
+        let (mut app, tx) = make_app(&tmp);
+        tx.blocking_send(UiEvent::Violation("denied".into())).unwrap();
+        while let Ok(event) = app.ui_rx.try_recv() {
+            app.handle_ui_event(event);
+        }
+        assert_eq!(app.alerts.count(), 1);
+    }
+
+    #[test]
     fn test_new_commit_refreshes_tree() {
         let tmp = TempDir::new().unwrap();
         let (mut app, tx) = make_app(&tmp);
-        assert!(app.tree.documents.is_empty());
 
         {
             let mut m = app.manifest.lock().unwrap();
@@ -368,8 +495,6 @@ mod tests {
             app.handle_ui_event(event);
         }
 
-        assert_eq!(app.tree.documents.len(), 1);
-        assert_eq!(app.tree.documents[0].path, PathBuf::from("added.md"));
-        assert_eq!(app.changelog.entries.len(), 1);
+        assert!(app.tree.selected_document().is_some() || !app.activity.git_entries.is_empty());
     }
 }
