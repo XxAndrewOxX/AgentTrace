@@ -6,6 +6,7 @@ use crate::runtime::{ActivityMonitor, InstanceLock, UiEvent};
 use crate::session::AgentState;
 use crate::tui::app::App;
 use crate::tui::banner;
+use crate::tui::status::PollRole;
 use anyhow::Result;
 use crossterm::{
     event::EnableMouseCapture,
@@ -77,13 +78,14 @@ pub fn run(
     // process already leads the poll loop this monitor observes HEAD-only.
     let (ui_tx, ui_rx) = tokio::sync::mpsc::channel::<UiEvent>(64);
     let agent_state = AgentState::new(agent_name.clone());
-    let _monitor = ActivityMonitor::try_start(
+    let monitor = ActivityMonitor::try_start(
         &store_root,
         config.clone(),
         manifest.clone(),
         agent_state,
         Some(ui_tx),
     )?;
+    let poll_role = PollRole::from_tui_mode(false, monitor.is_poll_leader());
 
     // Enter TUI.
     enable_raw_mode()?;
@@ -92,7 +94,15 @@ pub fn run(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(store_root.clone(), manifest, initial_log, history, ui_rx);
+    let mut app = App::new(
+        store_root.clone(),
+        config.clone(),
+        poll_role,
+        manifest,
+        initial_log,
+        history,
+        ui_rx,
+    );
 
     let result = app.run(&mut terminal);
 
@@ -122,7 +132,13 @@ fn run_readonly(
     let git = GitStore::open(store_root)?;
     let initial_log = git.log(changelog_limit).unwrap_or_default();
     let history = load_command_history(store_root);
-    let (_tx, rx) = tokio::sync::mpsc::channel::<UiEvent>(1);
+    let (ui_tx, rx) = tokio::sync::mpsc::channel::<UiEvent>(64);
+    ActivityMonitor::start_head_watcher(
+        store_root,
+        config.polling.interval_ms,
+        manifest.clone(),
+        ui_tx,
+    )?;
 
     {
         let m = manifest.lock().unwrap();
@@ -148,7 +164,15 @@ fn run_readonly(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(store_root.to_path_buf(), manifest, initial_log, history, rx);
+    let mut app = App::new(
+        store_root.to_path_buf(),
+        config.clone(),
+        PollRole::ReadOnly,
+        manifest,
+        initial_log,
+        history,
+        rx,
+    );
     let result = app.run(&mut terminal);
 
     disable_raw_mode()?;

@@ -2,6 +2,7 @@ use crate::config::MergedConfig;
 use crate::git_store::GitStore;
 use crate::manifest::Manifest;
 use crate::runtime::{AgentState, ChangeProcessor, PollLock, UiEvent};
+use crate::types::Action;
 use anyhow::Result;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -49,8 +50,16 @@ impl ActivityMonitor {
             None => {
                 tracing::info!(
                     "Poll leader already active in another process; \
-                     running without a poll thread (HEAD-only updates)."
+                     running HEAD observer for TUI updates."
                 );
+                if let Some(tx) = ui_tx {
+                    Self::start_head_watcher(
+                        store_root,
+                        config.polling.interval_ms,
+                        manifest,
+                        tx,
+                    )?;
+                }
                 return Ok(Self {
                     poll_leader: false,
                     _processor: None,
@@ -84,6 +93,61 @@ impl ActivityMonitor {
     /// Whether this monitor owns the cross-process poll loop.
     pub fn is_poll_leader(&self) -> bool {
         self.poll_leader
+    }
+
+    /// Lightweight HEAD watcher for observer/read-only TUI instances.
+    pub fn start_head_watcher(
+        store_root: &Path,
+        interval_ms: u64,
+        manifest: Arc<Mutex<Manifest>>,
+        ui_tx: Sender<UiEvent>,
+    ) -> Result<()> {
+        let store_root = store_root.to_path_buf();
+        let git = GitStore::open(&store_root)?;
+        let mut last_seen_oid = git.head_oid()?;
+
+        std::thread::spawn(move || {
+            let git = match GitStore::open(&store_root) {
+                Ok(g) => g,
+                Err(e) => {
+                    tracing::warn!("HEAD watcher failed to open git store: {e}");
+                    return;
+                }
+            };
+            loop {
+                std::thread::sleep(Duration::from_millis(interval_ms));
+                let current_head = match git.head_oid() {
+                    Ok(oid) => oid,
+                    Err(e) => {
+                        tracing::warn!("HEAD watcher oid error: {e}");
+                        continue;
+                    }
+                };
+                if current_head == last_seen_oid {
+                    continue;
+                }
+                match git.commits_since(last_seen_oid) {
+                    Ok(commits) => {
+                        let has_non_violation = commits
+                            .iter()
+                            .any(|e| !matches!(e.action, Action::Violation));
+                        if has_non_violation {
+                            if let Ok(m) = Manifest::load(&store_root) {
+                                if let Ok(mut guard) = manifest.lock() {
+                                    *guard = m;
+                                }
+                            }
+                        }
+                        for entry in commits {
+                            let _ = ui_tx.try_send(UiEvent::NewCommit(entry));
+                        }
+                    }
+                    Err(e) => tracing::warn!("HEAD watcher commits_since error: {e}"),
+                }
+                last_seen_oid = current_head;
+            }
+        });
+        Ok(())
     }
 }
 
