@@ -117,23 +117,35 @@ pub enum Focus {
 }
 
 impl Focus {
-    pub fn next(self) -> Self {
+    pub fn next(self, show_alerts: bool) -> Self {
         match self {
             Focus::Context => Focus::Tree,
             Focus::Tree => Focus::Activity,
-            Focus::Activity => Focus::Alerts,
+            Focus::Activity => {
+                if show_alerts {
+                    Focus::Alerts
+                } else {
+                    Focus::Command
+                }
+            }
             Focus::Alerts => Focus::Command,
             Focus::Command => Focus::Context,
         }
     }
 
-    pub fn prev(self) -> Self {
+    pub fn prev(self, show_alerts: bool) -> Self {
         match self {
             Focus::Context => Focus::Command,
             Focus::Tree => Focus::Context,
             Focus::Activity => Focus::Tree,
             Focus::Alerts => Focus::Activity,
-            Focus::Command => Focus::Alerts,
+            Focus::Command => {
+                if show_alerts {
+                    Focus::Alerts
+                } else {
+                    Focus::Activity
+                }
+            }
         }
     }
 
@@ -190,10 +202,17 @@ mod tests {
     #[test]
     fn test_focus_cycles() {
         let f = Focus::Context;
-        assert_eq!(f.next(), Focus::Tree);
-        assert_eq!(f.next().next(), Focus::Activity);
-        assert_eq!(f.next().next().next(), Focus::Alerts);
-        assert_eq!(f.next().next().next().next(), Focus::Command);
-        assert_eq!(f.next().next().next().next().next(), Focus::Context);
+        assert_eq!(f.next(true), Focus::Tree);
+        assert_eq!(f.next(true).next(true), Focus::Activity);
+        assert_eq!(f.next(true).next(true).next(true), Focus::Alerts);
+        assert_eq!(
+            f.next(true).next(true).next(true).next(true),
+            Focus::Command
+        );
+        assert_eq!(
+            f.next(true).next(true).next(true).next(true).next(true),
+            Focus::Context
+        );
+        assert_eq!(Focus::Activity.next(false), Focus::Command);
     }
 }

@@ -42,6 +42,7 @@ pub struct App {
     context_expanded: bool,
     last_refresh: Instant,
     session_id: Option<String>,
+    show_alerts_column: bool,
 }
 
 impl App {
@@ -79,6 +80,7 @@ impl App {
             context_expanded: true,
             last_refresh: Instant::now(),
             session_id,
+            show_alerts_column: true,
         }
     }
 
@@ -150,12 +152,12 @@ impl App {
                 self.activity.toggle_mode();
             }
             KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                self.focus = self.focus.prev();
+                self.focus = self.focus.prev(self.show_alerts_column);
             }
             KeyCode::Tab => {
-                self.focus = self.focus.next();
+                self.focus = self.focus.next(self.show_alerts_column);
             }
-            KeyCode::Char(n @ '1'..='5') => {
+            KeyCode::Char(n @ '1'..='5') if self.focus != Focus::Command => {
                 if let Some(f) = Focus::from_index(n as u8 - b'0') {
                     self.focus = f;
                 }
@@ -347,6 +349,7 @@ impl App {
         }
 
         let layout = DashboardLayout::compute(size, self.context_expanded);
+        self.show_alerts_column = layout.show_alerts_column;
 
         self.status.render(f, layout.status, layout.compact);
         self.context.render(

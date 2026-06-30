@@ -271,17 +271,16 @@ fn tb9_startup_banner_content() {
 
 #[test]
 fn tb10_focus_cycles_correctly() {
-    // Focus cycling: Tab cycles Context → Tree → Activity → Alerts → Command → Context.
     let mut focus = Focus::Context;
-    focus = focus.next();
+    focus = focus.next(true);
     assert_eq!(focus, Focus::Tree);
-    focus = focus.next();
+    focus = focus.next(true);
     assert_eq!(focus, Focus::Activity);
-    focus = focus.next();
+    focus = focus.next(true);
     assert_eq!(focus, Focus::Alerts);
-    focus = focus.next();
+    focus = focus.next(true);
     assert_eq!(focus, Focus::Command);
-    focus = focus.next();
+    focus = focus.next(true);
     assert_eq!(focus, Focus::Context);
 }
 
