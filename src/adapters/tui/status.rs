@@ -11,7 +11,6 @@ use ratatui::{
     Frame,
 };
 use std::path::Path;
-use std::time::{Duration, Instant};
 
 /// How this TUI instance participates in store monitoring.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +21,16 @@ pub enum PollRole {
 }
 
 impl PollRole {
+    pub fn from_tui_mode(readonly: bool, poll_leader: bool) -> Self {
+        if readonly {
+            PollRole::ReadOnly
+        } else if poll_leader {
+            PollRole::Leader
+        } else {
+            PollRole::Observer
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             PollRole::Leader => "leader",
@@ -52,7 +61,6 @@ pub struct StatusBarState {
     pub synthesis_in_flight: bool,
     pub ops_pending: usize,
     pub last_activity: Option<DateTime<Utc>>,
-    last_tick: Instant,
 }
 
 impl StatusBarState {
@@ -78,7 +86,6 @@ impl StatusBarState {
             synthesis_in_flight: false,
             ops_pending: 0,
             last_activity: None,
-            last_tick: Instant::now(),
         }
     }
 
@@ -92,11 +99,13 @@ impl StatusBarState {
         if let Some(session) = load_session(store_root) {
             self.agent_name = session.name;
             self.session_id = Some(session.session_id);
+        } else {
+            self.agent_name = "user".into();
+            self.session_id = None;
         }
         self.doc_count = manifest.len();
         self.synthesis_in_flight = synthesis_in_flight;
         self.ops_pending = summary_state.ops_since_synthesis;
-        self.last_tick = Instant::now();
     }
 
     pub fn set_alert_count(&mut self, count: usize) {
@@ -107,10 +116,10 @@ impl StatusBarState {
         self.last_activity = Some(ts);
     }
 
-    pub fn activity_age(&self) -> Option<Duration> {
+    pub fn activity_age(&self) -> Option<std::time::Duration> {
         self.last_activity.map(|ts| {
             let now = Utc::now();
-            (now - ts).to_std().unwrap_or(Duration::ZERO)
+            (now - ts).to_std().unwrap_or(std::time::Duration::ZERO)
         })
     }
 
@@ -153,6 +162,7 @@ impl StatusBarState {
         } else {
             String::new()
         };
+        let alert_style = Style::default().fg(Color::Red);
         let pending = if self.ops_pending > 0 && !self.synthesis_in_flight {
             format!(" │ +{} ops", self.ops_pending)
         } else {
@@ -164,8 +174,10 @@ impl StatusBarState {
                 dot,
                 agent,
                 Span::raw(format!(
-                    "{poll}{synth}{docs}{delta}{alerts}{pending}"
+                    "{poll}{synth}{docs}{delta}"
                 )),
+                Span::styled(alerts, alert_style),
+                Span::raw(pending),
             ])
         } else {
             Line::from(vec![
@@ -212,5 +224,42 @@ mod tests {
         let status = StatusBarState::new(root, PollRole::Leader, &config, &manifest);
         assert_eq!(status.poll_role, PollRole::Leader);
         assert_eq!(status.doc_count, 0);
+    }
+
+    #[test]
+    fn poll_role_from_tui_mode() {
+        assert_eq!(
+            PollRole::from_tui_mode(false, true),
+            PollRole::Leader
+        );
+        assert_eq!(
+            PollRole::from_tui_mode(false, false),
+            PollRole::Observer
+        );
+        assert_eq!(
+            PollRole::from_tui_mode(true, true),
+            PollRole::ReadOnly
+        );
+    }
+
+    #[test]
+    fn status_refresh_clears_session_when_lock_removed() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".agent-trace/locks")).unwrap();
+        let info = StoreInfo::new("test".into());
+        let manifest = Manifest::create_empty(info, root).unwrap();
+        let config = MergedConfig::default();
+        let mut status = StatusBarState::new(root, PollRole::Leader, &config, &manifest);
+
+        let session = crate::session::start_session(root, "claude", "cli").unwrap();
+        status.refresh(root, &manifest, &SummaryState::default(), false);
+        assert_eq!(status.agent_name, "claude");
+        assert_eq!(status.session_id.as_deref(), Some(session.session_id.as_str()));
+
+        crate::session::remove_session(root).unwrap();
+        status.refresh(root, &manifest, &SummaryState::default(), false);
+        assert_eq!(status.agent_name, "user");
+        assert!(status.session_id.is_none());
     }
 }

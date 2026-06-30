@@ -20,7 +20,7 @@ pub struct DashboardLayout {
 
 impl DashboardLayout {
     pub fn compute(area: Rect, context_expanded: bool) -> Self {
-        let compact = area.width <= MIN_WIDTH && area.height <= MIN_HEIGHT + 4;
+        let compact = is_compact(area);
         let show_alerts_column = area.width >= 100;
 
         let rows = Layout::default()
@@ -78,6 +78,10 @@ fn context_rows(area: Rect, expanded: bool, compact: bool) -> u16 {
     }
 }
 
+pub fn is_compact(area: Rect) -> bool {
+    area.width <= MIN_WIDTH && area.height <= MIN_HEIGHT + 4
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,5 +103,19 @@ mod tests {
         let layout = DashboardLayout::compute(Rect::new(0, 0, 120, 30), true);
         assert!(layout.show_alerts_column);
         assert!(layout.alerts.width > 0);
+    }
+
+    #[test]
+    fn layout_compact_at_minimum() {
+        assert!(is_compact(Rect::new(0, 0, 80, 24)));
+        let collapsed = DashboardLayout::compute(Rect::new(0, 0, 80, 24), false);
+        let expanded = DashboardLayout::compute(Rect::new(0, 0, 80, 24), true);
+        assert!(collapsed.context.height < expanded.context.height);
+    }
+
+    #[test]
+    fn layout_no_alerts_below_threshold() {
+        let layout = DashboardLayout::compute(Rect::new(0, 0, 99, 30), true);
+        assert!(!layout.show_alerts_column);
     }
 }
