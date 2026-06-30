@@ -65,6 +65,7 @@ impl ActivityState {
             let skip = self.events.len() - MAX_ACTIVITY_ENTRIES;
             self.events = self.events.split_off(skip);
         }
+        self.events.reverse();
         self.scroll = 0;
     }
 
@@ -237,5 +238,16 @@ mod tests {
             });
         }
         assert!(activity.git_entries.len() <= MAX_ACTIVITY_ENTRIES);
+    }
+
+    #[test]
+    fn reload_events_is_newest_first() {
+        let mut activity = ActivityState::new(vec![], vec![]);
+        activity.reload_events(vec![
+            sample_event(1),
+            sample_event(2),
+            sample_event(3),
+        ]);
+        assert_eq!(activity.events[0].path, "file3.md");
     }
 }

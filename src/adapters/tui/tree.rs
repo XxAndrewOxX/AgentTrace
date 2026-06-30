@@ -70,7 +70,14 @@ impl TreeState {
         self.select_index(i);
     }
 
-    pub fn toggle_group_at_selection(&mut self) {
+    pub fn is_header_selected(&self) -> bool {
+        matches!(
+            self.list_state.selected().and_then(|i| self.rows.get(i)),
+            Some(TreeRow::Header { .. })
+        )
+    }
+
+    pub fn toggle_group_at_selection(&mut self, manifest: &Manifest) {
         if let Some(idx) = self.list_state.selected() {
             if let Some(TreeRow::Header { doc_type, .. }) = self.rows.get(idx) {
                 let dt = doc_type.clone();
@@ -79,6 +86,8 @@ impl TreeState {
                 } else {
                     self.collapsed.insert(dt);
                 }
+                self.rebuild(manifest);
+                self.list_state.select(Some(idx.min(self.rows.len().saturating_sub(1))));
             }
         }
     }
@@ -125,7 +134,7 @@ impl TreeState {
         }
     }
 
-    pub fn render_widget(&mut self, compact: bool) -> (List<'_>, &mut ListState) {
+    pub fn render_widget(&mut self, compact: bool, focused: bool) -> (List<'_>, &mut ListState) {
         let items: Vec<ListItem> = self
             .rows
             .iter()
@@ -167,7 +176,16 @@ impl TreeState {
             .collect();
 
         let list = List::new(items)
-            .block(Block::default().title("Documents").borders(Borders::ALL))
+            .block(
+                Block::default()
+                    .title("Documents")
+                    .borders(Borders::ALL)
+                    .border_style(if focused {
+                        Style::default().fg(Color::Yellow)
+                    } else {
+                        Style::default()
+                    }),
+            )
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
         (list, &mut self.list_state)

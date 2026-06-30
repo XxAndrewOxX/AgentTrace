@@ -186,8 +186,19 @@ impl App {
                     self.execute_command(&input);
                 }
             }
+            KeyCode::Char(' ') if self.focus == Focus::Tree => {
+                if let Ok(m) = self.manifest.lock() {
+                    self.tree.toggle_group_at_selection(&m);
+                }
+            }
             KeyCode::Enter if self.focus == Focus::Tree => {
-                self.open_doc_preview();
+                if self.tree.is_header_selected() {
+                    if let Ok(m) = self.manifest.lock() {
+                        self.tree.toggle_group_at_selection(&m);
+                    }
+                } else {
+                    self.open_doc_preview();
+                }
             }
             KeyCode::Esc => {
                 self.overlay = None;
@@ -276,7 +287,7 @@ impl App {
         if let Err(e) = result {
             output.error(&e.to_string()).ok();
         }
-        let body = output.take();
+        let body = output.contents();
         if !body.is_empty() {
             self.overlay = Some(OverlayState::new("Output", body));
         }
@@ -345,17 +356,9 @@ impl App {
             layout.compact,
         );
 
-        let (list, state) = self.tree.render_widget(layout.compact);
-        let tree_border = if self.focus == Focus::Tree {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default()
-        };
-        let list = list.block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(tree_border),
-        );
+        let (list, state) = self
+            .tree
+            .render_widget(layout.compact, self.focus == Focus::Tree);
         f.render_stateful_widget(list, layout.documents, state);
 
         self.activity

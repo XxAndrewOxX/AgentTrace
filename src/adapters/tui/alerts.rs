@@ -1,5 +1,5 @@
 use ratatui::{
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState},
     Frame,
@@ -11,7 +11,6 @@ const MAX_ALERTS: usize = 50;
 #[derive(Debug, Clone)]
 pub struct AlertState {
     pub messages: Vec<String>,
-    pub scroll: usize,
     pub list_state: ListState,
 }
 
@@ -19,7 +18,6 @@ impl AlertState {
     pub fn new() -> Self {
         Self {
             messages: Vec::new(),
-            scroll: 0,
             list_state: ListState::default(),
         }
     }
@@ -42,7 +40,6 @@ impl AlertState {
             None => 0,
         };
         self.list_state.select(Some(i));
-        self.scroll = i;
     }
 
     pub fn scroll_down(&mut self) {
@@ -53,7 +50,6 @@ impl AlertState {
             None => 0,
         };
         self.list_state.select(Some(i));
-        self.scroll = i;
     }
 
     pub fn render_column(
@@ -91,6 +87,7 @@ impl AlertState {
                     .borders(Borders::ALL)
                     .border_style(border_style),
             )
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
             .style(Style::default());
         f.render_stateful_widget(list, area, &mut self.list_state);
     }

@@ -13,7 +13,7 @@ impl BufferOutput {
         Self::default()
     }
 
-    pub fn take(&self) -> String {
+    pub fn contents(&self) -> String {
         let lines = self.lines.lock().unwrap();
         lines.join("\n")
     }
@@ -50,7 +50,7 @@ mod tests {
         let out = BufferOutput::new();
         out.line("hello").unwrap();
         out.warn("careful").unwrap();
-        let text = out.take();
+        let text = out.contents();
         assert!(text.contains("hello"));
         assert!(text.contains("WARN: careful"));
     }
