@@ -2,7 +2,8 @@ use crate::config::MergedConfig;
 use crate::git_store::{CommitInfo, GitStore};
 use crate::manifest::Manifest;
 use crate::permissions::{check_permission, Overrides, PermissionResult, Violation};
-use crate::session;
+use crate::running_summary::SummaryEvent;
+use crate::session::{self, AgentSession};
 use crate::trace::pipeline::apply_trace_hooks;
 use crate::types::{Action, Actor, DocType, FileChange, LogEntry};
 use anyhow::Result;
@@ -19,6 +20,14 @@ pub use crate::runtime::session::AgentState;
 pub enum UiEvent {
     NewCommit(LogEntry),
     Violation(String),
+    SummaryAppended(SummaryEvent),
+    ContextRefreshed,
+    RunningSummaryRefreshed,
+    SessionChanged(AgentSession),
+    SynthesisStatus {
+        in_flight: bool,
+        ops_pending: usize,
+    },
 }
 
 fn is_pid_alive(pid: u32) -> bool {
@@ -286,6 +295,7 @@ impl ChangeProcessor {
                         Some(&self.session_id),
                         &allowed,
                         "poll",
+                        self.ui_tx.as_ref(),
                     ) {
                         tracing::warn!("post-write trace hooks failed: {}", e);
                     }
@@ -606,8 +616,14 @@ mod tests {
 
         let first = rx.try_recv().expect("poll commit should emit once");
         assert!(matches!(first, UiEvent::NewCommit(_)));
-        assert!(
-            rx.try_recv().is_err(),
+        let mut new_commits = 1usize;
+        while let Ok(ev) = rx.try_recv() {
+            if matches!(ev, UiEvent::NewCommit(_)) {
+                new_commits += 1;
+            }
+        }
+        assert_eq!(
+            new_commits, 1,
             "HEAD poll should not duplicate poll-loop commit"
         );
     }

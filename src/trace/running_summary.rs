@@ -80,6 +80,16 @@ pub fn load_summary_state(store_root: &Path) -> Result<SummaryState> {
     Ok(migrate_summary_state(raw))
 }
 
+/// Whether an async LLM running-summary refresh is in progress for this store.
+pub fn is_synthesis_in_flight(store_root: &Path) -> bool {
+    REFRESH_IN_FLIGHT
+        .lock()
+        .expect("refresh lock poisoned")
+        .get(&store_root.to_path_buf())
+        .copied()
+        .unwrap_or(false)
+}
+
 pub fn save_summary_state(store_root: &Path, state: &SummaryState) -> Result<()> {
     let path = summary_state_path(store_root);
     if let Some(parent) = path.parent() {

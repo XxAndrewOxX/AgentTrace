@@ -1,6 +1,7 @@
 use crate::git_store::CommitInfo;
 use crate::llm::trace_insights::Llm;
 use crate::permissions::{check_permission, PermissionResult};
+use crate::runtime::UiEvent;
 use crate::store::Store;
 use crate::trace::context::synthesize_context_content;
 use crate::trace::running_summary::{self, SummaryEvent};
@@ -12,6 +13,7 @@ use crate::types::{Action, Actor, DocType};
 use chrono::Utc;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use tokio::sync::mpsc::Sender;
 
 #[derive(Debug, Error)]
 pub enum WriteDocumentError {
@@ -112,6 +114,7 @@ pub fn write_document(
         session_id,
         &info.files,
         source,
+        None,
     )
     .map_err(WriteDocumentError::Other)?;
 
@@ -126,6 +129,7 @@ pub fn apply_trace_hooks(
     session_id: Option<&str>,
     changed_files: &[(PathBuf, Action, DocType)],
     source: &str,
+    ui_tx: Option<&Sender<UiEvent>>,
 ) -> anyhow::Result<()> {
     if changed_files.is_empty() {
         return Ok(());
@@ -218,11 +222,18 @@ pub fn apply_trace_hooks(
             lines_added: stats.lines_added,
             lines_removed: stats.lines_removed,
         };
-        running_summary::append_event(store_root, event)?;
+        running_summary::append_event(store_root, event.clone())?;
+        if let Some(tx) = ui_tx {
+            let _ = tx.try_send(UiEvent::SummaryAppended(event));
+        }
     }
 
     if let Err(e) = running_summary::refresh_template(store_root, git, manifest) {
         tracing::warn!("running summary template refresh failed: {e}");
+    } else if ui_tx.is_some() {
+        if let Some(tx) = ui_tx {
+            let _ = tx.try_send(UiEvent::RunningSummaryRefreshed);
+        }
     }
     running_summary::schedule_synthesis_refresh(store_root.to_path_buf());
 
@@ -236,7 +247,7 @@ pub fn apply_trace_hooks(
         .filter(|p| crate::git_store::should_track_activity(p))
         .collect();
     if !changed_paths.is_empty() {
-        sync_context_md(store_root, git, manifest, &trace_insights, &changed_paths)?;
+        sync_context_md(store_root, git, manifest, &trace_insights, &changed_paths, ui_tx)?;
     }
 
     Ok(())
@@ -256,6 +267,7 @@ fn sync_context_md(
     manifest: &crate::manifest::Manifest,
     trace_insights: &Llm,
     changed_paths: &[PathBuf],
+    ui_tx: Option<&Sender<UiEvent>>,
 ) -> anyhow::Result<()> {
     let (new_content, commit_label) =
         synthesize_context_content(store_root, manifest, trace_insights, changed_paths)?;
@@ -279,6 +291,9 @@ fn sync_context_md(
         session_id: None,
     };
     git.commit(&info)?;
+    if let Some(tx) = ui_tx {
+        let _ = tx.try_send(UiEvent::ContextRefreshed);
+    }
     Ok(())
 }
 
@@ -330,6 +345,7 @@ mod tests {
             None,
             &changed,
             "cli_write",
+            None,
         )
         .unwrap();
 
