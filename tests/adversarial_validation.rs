@@ -666,14 +666,15 @@ fn pe4_agent_files_faster_than_classification() {
     proc.run_poll_cycle().unwrap();
 
     // WS-C: agent-created files are committed to git as activity but not
-    // auto-registered, so the curated manifest stays empty. The permission check
-    // still treats untracked files as ephemeral Scratch (none are reverted).
+    // auto-registered in the manifest. System artifacts (e.g. running_summary.md)
+    // may be registered by trace hooks.
     let m = manifest.lock().unwrap();
-    assert_eq!(
-        m.list(None).len(),
-        0,
-        "poll must not auto-register agent files in the manifest"
-    );
+    for f in &files {
+        assert!(
+            !m.is_tracked(&PathBuf::from(*f)),
+            "poll must not auto-register agent file {f} in the manifest"
+        );
+    }
     drop(m);
 
     // All files were committed to git. Use a generous log window because agent
