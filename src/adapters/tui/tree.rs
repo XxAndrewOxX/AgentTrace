@@ -7,7 +7,11 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
 /// Flat list row: either a group header or a document entry.
 #[derive(Debug, Clone, PartialEq)]
 enum TreeRow {
-    Header { doc_type: DocType, count: usize, expanded: bool },
+    Header {
+        doc_type: DocType,
+        count: usize,
+        expanded: bool,
+    },
     Document(DocumentEntry),
 }
 
@@ -87,7 +91,8 @@ impl TreeState {
                     self.collapsed.insert(dt);
                 }
                 self.rebuild(manifest);
-                self.list_state.select(Some(idx.min(self.rows.len().saturating_sub(1))));
+                self.list_state
+                    .select(Some(idx.min(self.rows.len().saturating_sub(1))));
             }
         }
     }

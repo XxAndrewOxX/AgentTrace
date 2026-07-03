@@ -173,9 +173,7 @@ impl StatusBarState {
             Line::from(vec![
                 dot,
                 agent,
-                Span::raw(format!(
-                    "{poll}{synth}{docs}{delta}"
-                )),
+                Span::raw(format!("{poll}{synth}{docs}{delta}")),
                 Span::styled(alerts, alert_style),
                 Span::raw(pending),
             ])
@@ -193,9 +191,7 @@ impl StatusBarState {
             ])
         };
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title("agent-trace");
+        let block = Block::default().borders(Borders::ALL).title("agent-trace");
         let para = Paragraph::new(vec![line]).block(block);
         f.render_widget(para, area);
     }
@@ -209,8 +205,8 @@ pub fn load_summary_state_for_status(store_root: &Path) -> SummaryState {
 mod tests {
     use super::*;
     use crate::config::MergedConfig;
-    use crate::state::config::StoreInfo;
     use crate::manifest::Manifest;
+    use crate::state::config::StoreInfo;
     use tempfile::TempDir;
 
     #[test]
@@ -228,18 +224,9 @@ mod tests {
 
     #[test]
     fn poll_role_from_tui_mode() {
-        assert_eq!(
-            PollRole::from_tui_mode(false, true),
-            PollRole::Leader
-        );
-        assert_eq!(
-            PollRole::from_tui_mode(false, false),
-            PollRole::Observer
-        );
-        assert_eq!(
-            PollRole::from_tui_mode(true, true),
-            PollRole::ReadOnly
-        );
+        assert_eq!(PollRole::from_tui_mode(false, true), PollRole::Leader);
+        assert_eq!(PollRole::from_tui_mode(false, false), PollRole::Observer);
+        assert_eq!(PollRole::from_tui_mode(true, true), PollRole::ReadOnly);
     }
 
     #[test]
@@ -255,7 +242,10 @@ mod tests {
         let session = crate::session::start_session(root, "claude", "cli").unwrap();
         status.refresh(root, &manifest, &SummaryState::default(), false);
         assert_eq!(status.agent_name, "claude");
-        assert_eq!(status.session_id.as_deref(), Some(session.session_id.as_str()));
+        assert_eq!(
+            status.session_id.as_deref(),
+            Some(session.session_id.as_str())
+        );
 
         crate::session::remove_session(root).unwrap();
         status.refresh(root, &manifest, &SummaryState::default(), false);

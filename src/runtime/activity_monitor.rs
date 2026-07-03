@@ -53,12 +53,7 @@ impl ActivityMonitor {
                      running HEAD observer for TUI updates."
                 );
                 if let Some(tx) = ui_tx {
-                    Self::start_head_watcher(
-                        store_root,
-                        config.polling.interval_ms,
-                        manifest,
-                        tx,
-                    )?;
+                    Self::start_head_watcher(store_root, config.polling.interval_ms, manifest, tx)?;
                 }
                 return Ok(Self {
                     poll_leader: false,

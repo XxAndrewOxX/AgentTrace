@@ -121,6 +121,8 @@ pub fn write_document(
     Ok(rel)
 }
 
+/// Post-write trace pipeline: summaries, running context, agent logs, index sync.
+#[allow(clippy::too_many_arguments)]
 pub fn apply_trace_hooks(
     store_root: &Path,
     git: &crate::git_store::GitStore,
@@ -247,7 +249,14 @@ pub fn apply_trace_hooks(
         .filter(|p| crate::git_store::should_track_activity(p))
         .collect();
     if !changed_paths.is_empty() {
-        sync_context_md(store_root, git, manifest, &trace_insights, &changed_paths, ui_tx)?;
+        sync_context_md(
+            store_root,
+            git,
+            manifest,
+            &trace_insights,
+            &changed_paths,
+            ui_tx,
+        )?;
     }
 
     Ok(())

@@ -24,10 +24,7 @@ pub enum UiEvent {
     ContextRefreshed,
     RunningSummaryRefreshed,
     SessionChanged(AgentSession),
-    SynthesisStatus {
-        in_flight: bool,
-        ops_pending: usize,
-    },
+    SynthesisStatus { in_flight: bool, ops_pending: usize },
 }
 
 fn is_pid_alive(pid: u32) -> bool {

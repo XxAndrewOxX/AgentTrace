@@ -114,12 +114,8 @@ impl App {
         let manifest = self.manifest.lock().unwrap();
         let summary_state = load_summary_state_for_status(&self.store_root);
         let in_flight = is_synthesis_in_flight(&self.store_root);
-        self.status.refresh(
-            &self.store_root,
-            &manifest,
-            &summary_state,
-            in_flight,
-        );
+        self.status
+            .refresh(&self.store_root, &manifest, &summary_state, in_flight);
         self.status.set_alert_count(self.alerts.count());
         self.session_id = load_session(&self.store_root).map(|s| s.session_id);
         self.context
@@ -236,7 +232,10 @@ impl App {
                 self.status.agent_name = session.name;
                 self.refresh_snapshot();
             }
-            UiEvent::SynthesisStatus { in_flight, ops_pending } => {
+            UiEvent::SynthesisStatus {
+                in_flight,
+                ops_pending,
+            } => {
                 self.status.synthesis_in_flight = in_flight;
                 self.status.ops_pending = ops_pending;
             }
@@ -270,9 +269,7 @@ impl App {
             ["show", path] => self.cmd_show(path, &output),
             ["show", path, ver] => self.cmd_show_version(path, ver, &output),
             ["diff", path] => self.cmd_diff(path, None, None, &output),
-            ["diff", path, v1, v2] => {
-                self.cmd_diff(path, Some(v1), Some(v2), &output)
-            }
+            ["diff", path, v1, v2] => self.cmd_diff(path, Some(v1), Some(v2), &output),
             ["q"] | ["quit"] | ["exit"] => {
                 self.should_quit = true;
                 return;
@@ -301,7 +298,11 @@ impl App {
             output.line("No documents tracked.")?;
         } else {
             for d in m.documents() {
-                output.line(&format!("[{}] {}", d.doc_type.indicator(), d.path.display()))?;
+                output.line(&format!(
+                    "[{}] {}",
+                    d.doc_type.indicator(),
+                    d.path.display()
+                ))?;
             }
         }
         Ok(())
@@ -316,7 +317,9 @@ impl App {
     }
 
     fn cmd_show_version(&self, path: &str, ver: &str, output: &BufferOutput) -> Result<()> {
-        let version: u32 = ver.parse().map_err(|_| anyhow::anyhow!("invalid version: {ver}"))?;
+        let version: u32 = ver
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid version: {ver}"))?;
         crate::commands::show::run(&self.store_root, &PathBuf::from(path), version, output)
     }
 
@@ -327,8 +330,14 @@ impl App {
         v2: Option<&str>,
         output: &BufferOutput,
     ) -> Result<()> {
-        let v1 = v1.map(|s| s.parse()).transpose().map_err(|_| anyhow::anyhow!("invalid v1"))?;
-        let v2 = v2.map(|s| s.parse()).transpose().map_err(|_| anyhow::anyhow!("invalid v2"))?;
+        let v1 = v1
+            .map(|s| s.parse())
+            .transpose()
+            .map_err(|_| anyhow::anyhow!("invalid v1"))?;
+        let v2 = v2
+            .map(|s| s.parse())
+            .transpose()
+            .map_err(|_| anyhow::anyhow!("invalid v2"))?;
         crate::commands::diff::run(&self.store_root, &PathBuf::from(path), v1, v2, output)
     }
 
@@ -410,15 +419,7 @@ mod tests {
         let manifest = Arc::new(Mutex::new(manifest));
         let (tx, rx) = tokio::sync::mpsc::channel(10);
         let config = MergedConfig::default();
-        let app = App::new(
-            root,
-            config,
-            PollRole::Leader,
-            manifest,
-            vec![],
-            vec![],
-            rx,
-        );
+        let app = App::new(root, config, PollRole::Leader, manifest, vec![], vec![], rx);
         (app, tx)
     }
 
@@ -463,7 +464,8 @@ mod tests {
     fn test_violation_goes_to_alerts() {
         let tmp = TempDir::new().unwrap();
         let (mut app, tx) = make_app(&tmp);
-        tx.blocking_send(UiEvent::Violation("denied".into())).unwrap();
+        tx.blocking_send(UiEvent::Violation("denied".into()))
+            .unwrap();
         while let Ok(event) = app.ui_rx.try_recv() {
             app.handle_ui_event(event);
         }

@@ -52,12 +52,7 @@ impl AlertState {
         self.list_state.select(Some(i));
     }
 
-    pub fn render_column(
-        &mut self,
-        f: &mut Frame<'_>,
-        area: ratatui::layout::Rect,
-        focused: bool,
-    ) {
+    pub fn render_column(&mut self, f: &mut Frame<'_>, area: ratatui::layout::Rect, focused: bool) {
         let border_style = if focused {
             Style::default().fg(Color::Yellow)
         } else {

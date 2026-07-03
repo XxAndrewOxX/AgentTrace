@@ -243,11 +243,7 @@ mod tests {
     #[test]
     fn reload_events_is_newest_first() {
         let mut activity = ActivityState::new(vec![], vec![]);
-        activity.reload_events(vec![
-            sample_event(1),
-            sample_event(2),
-            sample_event(3),
-        ]);
+        activity.reload_events(vec![sample_event(1), sample_event(2), sample_event(3)]);
         assert_eq!(activity.events[0].path, "file3.md");
     }
 }
