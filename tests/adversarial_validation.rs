@@ -12,7 +12,8 @@ use agent_trace::git_store::{CommitInfo, GitStore};
 use agent_trace::manifest::Manifest;
 use agent_trace::permissions::{OverrideEntry, Overrides};
 use agent_trace::poll::{AgentState, ChangeProcessor};
-use agent_trace::tui::panels::{ChangelogState, ChatState};
+use agent_trace::tui::activity::ActivityState;
+use agent_trace::tui::panels::ChatState;
 use agent_trace::types::{Action, Actor, DocType, LogEntry};
 use chrono::Utc;
 use std::path::PathBuf;
@@ -665,14 +666,15 @@ fn pe4_agent_files_faster_than_classification() {
     proc.run_poll_cycle().unwrap();
 
     // WS-C: agent-created files are committed to git as activity but not
-    // auto-registered, so the curated manifest stays empty. The permission check
-    // still treats untracked files as ephemeral Scratch (none are reverted).
+    // auto-registered in the manifest. System artifacts (e.g. running_summary.md)
+    // may be registered by trace hooks.
     let m = manifest.lock().unwrap();
-    assert_eq!(
-        m.list(None).len(),
-        0,
-        "poll must not auto-register agent files in the manifest"
-    );
+    for f in &files {
+        assert!(
+            !m.is_tracked(&PathBuf::from(*f)),
+            "poll must not auto-register agent file {f} in the manifest"
+        );
+    }
     drop(m);
 
     // All files were committed to git. Use a generous log window because agent
@@ -1118,15 +1120,14 @@ fn dc4_agent_trace_md_written_atomically() {
 // 5. TUI STRESS TESTS (unit proxies — visual tests require interactive session)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// TS-1: ChangelogState evicts entries beyond the limit — no unbounded growth.
+/// TS-1: Activity git audit stream evicts entries beyond the limit.
 #[test]
 fn ts1_changelog_panel_entry_eviction() {
     use chrono::Utc;
-    let mut changelog = ChangelogState::new(vec![]);
+    let mut activity = ActivityState::new(vec![], vec![]);
 
-    // Push 300 entries — must not grow past MAX_CHANGELOG_ENTRIES (200).
     for i in 0..300 {
-        changelog.push(LogEntry {
+        activity.push_git(LogEntry {
             commit_id: agent_trace::types::CommitId(format!("{i:040x}")),
             timestamp: Utc::now(),
             action: Action::Modify,
@@ -1138,13 +1139,12 @@ fn ts1_changelog_panel_entry_eviction() {
     }
 
     assert!(
-        changelog.entries.len() <= 200,
-        "ChangelogState must cap at 200 entries; has {}",
-        changelog.entries.len()
+        activity.git_entries.len() <= 200,
+        "ActivityState must cap git entries at 200; has {}",
+        activity.git_entries.len()
     );
-    // Scroll must not be out of bounds.
     assert!(
-        changelog.scroll < changelog.entries.len(),
+        activity.scroll < activity.git_entries.len(),
         "Scroll index must be within bounds"
     );
 }
@@ -1168,9 +1168,19 @@ fn ts2_long_filenames_in_tree_panel() {
         .register(&PathBuf::from(long_name), DocType::Scratch, "")
         .unwrap();
 
+    use agent_trace::config::MergedConfig;
+    use agent_trace::tui::status::PollRole;
     let manifest_arc = Arc::new(Mutex::new(manifest));
     let (_tx, rx) = tokio::sync::mpsc::channel(1);
-    let mut app = App::new(root.to_path_buf(), manifest_arc, vec![], vec![], rx);
+    let mut app = App::new(
+        root.to_path_buf(),
+        MergedConfig::default(),
+        PollRole::Leader,
+        manifest_arc,
+        vec![],
+        vec![],
+        rx,
+    );
 
     // Render at exactly minimum terminal size — must not panic.
     let backend = TestBackend::new(80, 24);
@@ -1203,9 +1213,19 @@ fn ts3_thousands_of_files_in_tree_panel() {
     }
     assert_eq!(manifest.len(), 500);
 
+    use agent_trace::config::MergedConfig;
+    use agent_trace::tui::status::PollRole;
     let manifest_arc = Arc::new(Mutex::new(manifest));
     let (_tx, rx) = tokio::sync::mpsc::channel(1);
-    let mut app = App::new(root.to_path_buf(), manifest_arc, vec![], vec![], rx);
+    let mut app = App::new(
+        root.to_path_buf(),
+        MergedConfig::default(),
+        PollRole::Leader,
+        manifest_arc,
+        vec![],
+        vec![],
+        rx,
+    );
 
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).unwrap();

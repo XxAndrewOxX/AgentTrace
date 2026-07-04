@@ -11,10 +11,11 @@
 mod helpers;
 use helpers::TestStore;
 
-use agent_trace::config::StoreInfo;
+use agent_trace::config::{MergedConfig, StoreInfo};
 use agent_trace::manifest::Manifest;
 use agent_trace::tui::app::App;
 use agent_trace::tui::panels::{ChatState, Focus};
+use agent_trace::tui::status::PollRole;
 use std::sync::{Arc, Mutex};
 
 // ── TB-1/TB-2/TB-3/TB-4: Layout rendering ────────────────────────────────────
@@ -42,7 +43,15 @@ fn tb3_below_minimum_shows_message() {
     let manifest = Arc::new(Mutex::new(manifest));
     let (_tx, rx) = tokio::sync::mpsc::channel(1);
 
-    let mut app = App::new(root.to_path_buf(), manifest, vec![], vec![], rx);
+    let mut app = App::new(
+        root.to_path_buf(),
+        MergedConfig::default(),
+        PollRole::Leader,
+        manifest,
+        vec![],
+        vec![],
+        rx,
+    );
     let backend = TestBackend::new(60, 20); // Below 80x24 minimum.
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| app.render(f)).unwrap();
@@ -66,7 +75,15 @@ fn tb1_minimum_size_renders() {
     let manifest = Arc::new(Mutex::new(manifest));
     let (_tx, rx) = tokio::sync::mpsc::channel(1);
 
-    let mut app = App::new(root.to_path_buf(), manifest, vec![], vec![], rx);
+    let mut app = App::new(
+        root.to_path_buf(),
+        MergedConfig::default(),
+        PollRole::Leader,
+        manifest,
+        vec![],
+        vec![],
+        rx,
+    );
     let backend = TestBackend::new(80, 24); // Exactly minimum.
     let mut terminal = Terminal::new(backend).unwrap();
 
@@ -254,14 +271,17 @@ fn tb9_startup_banner_content() {
 
 #[test]
 fn tb10_focus_cycles_correctly() {
-    // Focus cycling is TB-10 proxy: Tab cycles Tree → Changelog → Chat → Tree.
-    let mut focus = Focus::Tree;
-    focus = focus.next();
-    assert_eq!(focus, Focus::Changelog);
-    focus = focus.next();
-    assert_eq!(focus, Focus::Chat);
-    focus = focus.next();
+    let mut focus = Focus::Context;
+    focus = focus.next(true);
     assert_eq!(focus, Focus::Tree);
+    focus = focus.next(true);
+    assert_eq!(focus, Focus::Activity);
+    focus = focus.next(true);
+    assert_eq!(focus, Focus::Alerts);
+    focus = focus.next(true);
+    assert_eq!(focus, Focus::Command);
+    focus = focus.next(true);
+    assert_eq!(focus, Focus::Context);
 }
 
 #[test]
