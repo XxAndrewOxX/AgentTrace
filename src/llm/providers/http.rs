@@ -7,7 +7,30 @@ use crate::llm::synthesis_engine::SynthesisEngine;
 use crate::llm::trace_insights::TraceDocument;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
+
+static COMPLETE_CLIENT: LazyLock<reqwest::blocking::Client> = LazyLock::new(|| {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .pool_max_idle_per_host(4)
+        .build()
+        .expect("shared completion HTTP client")
+});
+
+static HEALTH_CLIENT: LazyLock<reqwest::blocking::Client> = LazyLock::new(|| {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .pool_max_idle_per_host(4)
+        .build()
+        .expect("shared health HTTP client")
+});
+
+static HEALTH_CACHE: LazyLock<Mutex<HashMap<String, (Instant, bool)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+const HEALTH_CACHE_TTL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 pub struct HttpBackend {
@@ -38,12 +61,33 @@ impl HttpBackend {
         }
     }
 
+    fn health_cache_key(&self) -> String {
+        format!("{}|{}", self.provider.slug(), self.base_url)
+    }
+
     pub fn health_check(&self) -> Result<()> {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()?;
+        let key = self.health_cache_key();
+        if let Ok(cache) = HEALTH_CACHE.lock() {
+            if let Some((at, ok)) = cache.get(&key) {
+                if at.elapsed() < HEALTH_CACHE_TTL {
+                    if *ok {
+                        return Ok(());
+                    }
+                    bail!("cached health failure for {}", self.base_url);
+                }
+            }
+        }
+
+        let result = self.health_check_uncached();
+        if let Ok(mut cache) = HEALTH_CACHE.lock() {
+            cache.insert(key, (Instant::now(), result.is_ok()));
+        }
+        result
+    }
+
+    fn health_check_uncached(&self) -> Result<()> {
         let url = format!("{}/models", self.base_url.trim_end_matches('/'));
-        let mut req = client.get(&url);
+        let mut req = HEALTH_CLIENT.get(&url);
         if let Some(key) = &self.api_key {
             req = self.apply_auth(req, key);
         }
@@ -52,6 +96,13 @@ impl HttpBackend {
             return Ok(());
         }
         bail!("HTTP {} from {}", resp.status(), url);
+    }
+
+    /// Test helper / cache bust after model setup.
+    pub fn invalidate_health_cache() {
+        if let Ok(mut cache) = HEALTH_CACHE.lock() {
+            cache.clear();
+        }
     }
 
     fn apply_auth(
@@ -104,9 +155,6 @@ impl HttpBackend {
             content: String,
         }
 
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(120))
-            .build()?;
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
         let body = ChatRequest {
             model: &self.model,
@@ -123,7 +171,7 @@ impl HttpBackend {
             max_tokens: self.max_tokens.min(4096),
             temperature: self.temperature,
         };
-        let mut req = client.post(&url).json(&body);
+        let mut req = COMPLETE_CLIENT.post(&url).json(&body);
         if let Some(key) = &self.api_key {
             req = self.apply_auth(req, key);
         }
@@ -169,9 +217,6 @@ impl HttpBackend {
             .api_key
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("anthropic API key required"))?;
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(120))
-            .build()?;
         let url = format!("{}/messages", self.base_url.trim_end_matches('/'));
         let body = AnthropicRequest {
             model: &self.model,
@@ -182,7 +227,7 @@ impl HttpBackend {
                 content: user,
             }],
         };
-        let resp = client
+        let resp = COMPLETE_CLIENT
             .post(&url)
             .header("x-api-key", key)
             .header("anthropic-version", "2023-06-01")
@@ -267,5 +312,33 @@ mod tests {
         let cfg = SynthesisConfig::default();
         let b = HttpBackend::from_config(SynthesisProvider::Ollama, &cfg, None, "ollama");
         assert_eq!(b.model, "qwen2.5:1.5b");
+    }
+
+    #[test]
+    fn health_cache_remembers_failure() {
+        HttpBackend::invalidate_health_cache();
+        let cfg = SynthesisConfig {
+            base_url: Some("http://127.0.0.1:1/v1".into()),
+            ..Default::default()
+        };
+        let b = HttpBackend::from_config(SynthesisProvider::Ollama, &cfg, None, "ollama");
+        let first = b.health_check();
+        assert!(first.is_err());
+        let start = Instant::now();
+        let second = b.health_check();
+        assert!(second.is_err());
+        // Cached negative should be near-instant (no new TCP wait to :1).
+        assert!(start.elapsed() < Duration::from_millis(200));
+        HttpBackend::invalidate_health_cache();
+    }
+
+    #[test]
+    fn shared_clients_are_initialized_once() {
+        let c1 = &*COMPLETE_CLIENT as *const _;
+        let c2 = &*COMPLETE_CLIENT as *const _;
+        assert_eq!(c1, c2);
+        let h1 = &*HEALTH_CLIENT as *const _;
+        let h2 = &*HEALTH_CLIENT as *const _;
+        assert_eq!(h1, h2);
     }
 }

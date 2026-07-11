@@ -64,7 +64,7 @@ pub enum LlmError {
 pub type TraceInsightsError = LlmError;
 
 struct EngineAdapter {
-    inner: Box<dyn SynthesisEngine>,
+    inner: std::sync::Arc<dyn SynthesisEngine>,
 }
 
 impl TraceInsightsBackend for EngineAdapter {
@@ -105,7 +105,7 @@ impl TraceInsightsBackend for EngineAdapter {
 /// All synthesis operations are routed through this type; callers never
 /// import from `providers::` directly.
 pub struct Llm {
-    backend: Box<dyn TraceInsightsBackend>,
+    backend: std::sync::Arc<dyn TraceInsightsBackend>,
     pub backend_label: String,
 }
 
@@ -124,7 +124,7 @@ impl Llm {
         }
         let label = info.label.clone();
         Ok(Self {
-            backend: Box::new(EngineAdapter {
+            backend: std::sync::Arc::new(EngineAdapter {
                 inner: resolved.into_engine(),
             }),
             backend_label: label,
@@ -170,7 +170,9 @@ impl Llm {
     /// Ensure Ollama daemon is running and the configured model is pulled.
     /// Returns `Ok(EnsureReport)` on success, or an error with an actionable message.
     pub fn ensure_ready(merged: &MergedConfig) -> anyhow::Result<EnsureReport> {
-        super::providers::ollama::ensure_ready(&merged.synthesis)
+        let report = super::providers::ollama::ensure_ready(&merged.synthesis)?;
+        super::providers::invalidate_resolve_caches();
+        Ok(report)
     }
 
     /// Gate check: return backend info or bail if degraded and not allowed.
