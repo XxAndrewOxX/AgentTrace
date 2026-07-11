@@ -98,6 +98,40 @@ impl Manifest {
         Ok(Self::from_parts(file.store, file.documents))
     }
 
+    /// Disk identity for the manifest file (mtime + length). Used by the poll
+    /// loop to skip TOML reparse when nothing changed on disk.
+    pub fn disk_stamp(store_root: &Path) -> Result<Option<(std::time::SystemTime, u64)>> {
+        let path = manifest_path(store_root);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let meta = std::fs::metadata(&path)
+            .with_context(|| format!("Statting manifest: {}", path.display()))?;
+        let mtime = meta
+            .modified()
+            .with_context(|| format!("Reading mtime for {}", path.display()))?;
+        Ok(Some((mtime, meta.len())))
+    }
+
+    /// Reload from disk only when `disk_stamp` differs from `previous`.
+    ///
+    /// Returns `Ok(None)` when the on-disk file is unchanged (caller keeps its
+    /// in-memory manifest). Returns `Ok(Some((manifest, stamp)))` after a load.
+    pub fn load_if_changed(
+        store_root: &Path,
+        previous: Option<(std::time::SystemTime, u64)>,
+    ) -> Result<Option<(Self, (std::time::SystemTime, u64))>> {
+        let stamp = Self::disk_stamp(store_root)?;
+        if stamp == previous {
+            return Ok(None);
+        }
+        let Some(stamp) = stamp else {
+            bail!("Manifest missing at {}", manifest_path(store_root).display());
+        };
+        let loaded = Self::load(store_root)?;
+        Ok(Some((loaded, stamp)))
+    }
+
     pub fn save(&self, store_root: &Path) -> Result<()> {
         let path = manifest_path(store_root);
         let tmp = tmp_manifest_path(store_root);
@@ -251,6 +285,27 @@ mod tests {
         let loaded = Manifest::load(&root).unwrap();
         assert!(loaded.is_empty());
         assert_eq!(loaded.store.name, "test");
+    }
+
+    #[test]
+    fn test_load_if_changed_skips_unchanged() {
+        let tmp = TempDir::new().unwrap();
+        let (root, info) = make_store(&tmp);
+        Manifest::create_empty(info, &root).unwrap();
+        let stamp = Manifest::disk_stamp(&root).unwrap();
+        assert!(stamp.is_some());
+        assert!(Manifest::load_if_changed(&root, stamp).unwrap().is_none());
+
+        // Force a content change (and typically an mtime bump).
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let mut m = Manifest::load(&root).unwrap();
+        m.register(&PathBuf::from("prd.md"), DocType::Plan, "")
+            .unwrap();
+        m.save(&root).unwrap();
+
+        let reloaded = Manifest::load_if_changed(&root, stamp).unwrap();
+        assert!(reloaded.is_some());
+        assert_eq!(reloaded.unwrap().0.len(), 1);
     }
 
     #[test]

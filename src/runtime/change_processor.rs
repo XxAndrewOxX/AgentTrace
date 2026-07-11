@@ -52,6 +52,10 @@ pub struct ChangeProcessor {
     session_id: String,
     /// Last HEAD OID seen by the poll loop (dedup with external commits).
     last_seen_oid: Oid,
+    /// Last observed manifest.toml (mtime, len); skip reparse when unchanged.
+    manifest_stamp: Option<(std::time::SystemTime, u64)>,
+    /// Cheap worktree fingerprint from the last idle/full scan.
+    worktree_fingerprint: Option<u64>,
 }
 
 impl ChangeProcessor {
@@ -65,6 +69,7 @@ impl ChangeProcessor {
         let session_id =
             session::session_id_for_store(&git.workdir).unwrap_or_else(session::new_session_id);
         let last_seen_oid = git.head_oid().unwrap_or_else(|_| Oid::zero());
+        let manifest_stamp = Manifest::disk_stamp(&git.workdir).ok().flatten();
         Self {
             git,
             manifest,
@@ -72,6 +77,8 @@ impl ChangeProcessor {
             ui_tx,
             session_id,
             last_seen_oid,
+            manifest_stamp,
+            worktree_fingerprint: None,
         }
     }
 
@@ -81,8 +88,21 @@ impl ChangeProcessor {
         }
     }
 
-    fn reload_manifest_from_disk(&self) -> Result<()> {
+    fn reload_manifest_from_disk(&mut self) -> Result<()> {
+        match Manifest::load_if_changed(&self.git.workdir, self.manifest_stamp)? {
+            None => Ok(()),
+            Some((loaded, stamp)) => {
+                *self.manifest.lock().unwrap() = loaded;
+                self.manifest_stamp = Some(stamp);
+                Ok(())
+            }
+        }
+    }
+
+    /// Force-reload manifest (e.g. after we know an external writer changed it).
+    fn force_reload_manifest_from_disk(&mut self) -> Result<()> {
         let loaded = Manifest::load(&self.git.workdir)?;
+        self.manifest_stamp = Manifest::disk_stamp(&self.git.workdir).ok().flatten();
         *self.manifest.lock().unwrap() = loaded;
         Ok(())
     }
@@ -101,7 +121,8 @@ impl ChangeProcessor {
                 .iter()
                 .any(|e| !matches!(e.action, Action::Violation));
             if has_non_violation {
-                if let Err(e) = self.reload_manifest_from_disk() {
+                // External writers may have updated the stamp; force reload.
+                if let Err(e) = self.force_reload_manifest_from_disk() {
                     tracing::warn!("Failed to reload manifest after external commit: {}", e);
                 }
             }
@@ -119,19 +140,32 @@ impl ChangeProcessor {
     pub fn run_poll_cycle(&mut self) -> Result<()> {
         self.refresh_session_id();
 
-        // Reload the manifest from disk at the start of each cycle. Disk is the
-        // source of truth: out-of-process writers (MCP/CLI) persist the manifest
-        // before committing, so reloading here keeps the poll loop's in-memory
-        // view consistent and avoids drift.
+        // Reload the manifest from disk only when its mtime/length changed.
+        // Disk remains source of truth for out-of-process writers (MCP/CLI).
         if let Err(e) = self.reload_manifest_from_disk() {
             tracing::warn!("Failed to reload manifest at poll cycle start: {e}");
         }
 
         let store_root = self.git.workdir.clone();
+
+        // Idle fast path: if HEAD is unchanged and a cheap worktree fingerprint
+        // matches the last scan, skip the full git statuses() walk.
+        let head_now = self.git.head_oid().unwrap_or(self.last_seen_oid);
+        let fp = {
+            let manifest = self.manifest.lock().unwrap();
+            worktree_fingerprint(&store_root, &manifest)
+        };
+        if head_now == self.last_seen_oid
+            && self.worktree_fingerprint.is_some_and(|prev| prev == fp)
+        {
+            return Ok(());
+        }
+
         let changes = self.git.detect_changes()?;
         let mut own_commit_oid: Option<Oid> = None;
 
         if changes.is_empty() {
+            self.worktree_fingerprint = Some(fp);
             return self.poll_external_commits();
         }
 
@@ -309,6 +343,15 @@ impl ChangeProcessor {
 
         drop(manifest);
 
+        // After processing changes, refresh the idle fingerprint so the next
+        // tick can skip statuses() when the worktree is quiet again.
+        {
+            let manifest = self.manifest.lock().unwrap();
+            self.worktree_fingerprint = Some(worktree_fingerprint(&store_root, &manifest));
+            // Persist stamp in case apply_trace_hooks / commits updated manifest.toml.
+            self.manifest_stamp = Manifest::disk_stamp(&store_root).ok().flatten();
+        }
+
         // Sync to HEAD after poll-cycle commits (batch + trace hooks) so HEAD poll
         // does not re-emit commits from this cycle.
         if own_commit_oid.is_some() {
@@ -318,6 +361,63 @@ impl ChangeProcessor {
         }
         self.poll_external_commits()
     }
+}
+
+/// Cheap worktree change detector used to skip full `git statuses()` on idle ticks.
+///
+/// Fingerprints tracked file (path, len, mtime) plus top-level entry metadata.
+/// Nested adds typically bump a parent directory mtime on common filesystems;
+/// when that fails, the next statuses() still runs after any HEAD movement.
+fn worktree_fingerprint(workdir: &Path, manifest: &Manifest) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    use std::time::UNIX_EPOCH;
+
+    let mut hasher = DefaultHasher::new();
+    for doc in manifest.documents() {
+        doc.path.hash(&mut hasher);
+        let full = workdir.join(&doc.path);
+        match std::fs::metadata(&full) {
+            Ok(meta) => {
+                meta.len().hash(&mut hasher);
+                let nanos = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0);
+                nanos.hash(&mut hasher);
+            }
+            Err(_) => {
+                0u64.hash(&mut hasher);
+            }
+        }
+    }
+
+    if let Ok(entries) = std::fs::read_dir(workdir) {
+        let mut names: Vec<_> = entries.flatten().collect();
+        names.sort_by_key(|e| e.file_name());
+        for entry in names {
+            let name = entry.file_name();
+            if name == ".agent-trace" || name == ".git" {
+                continue;
+            }
+            name.hash(&mut hasher);
+            if let Ok(meta) = entry.metadata() {
+                meta.file_type().is_dir().hash(&mut hasher);
+                meta.len().hash(&mut hasher);
+                let nanos = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0);
+                nanos.hash(&mut hasher);
+            }
+        }
+    }
+
+    hasher.finish()
 }
 
 // ── Instance Locking ─────────────────────────────────────────────────────────
@@ -392,6 +492,41 @@ mod tests {
         let agent = AgentState::new(None);
         let mut proc = ChangeProcessor::new(git, manifest, config, agent, None);
         proc.run_poll_cycle().unwrap(); // should be a no-op
+    }
+
+    #[test]
+    fn test_idle_poll_skips_statuses_when_fingerprint_stable() {
+        let tmp = TempDir::new().unwrap();
+        let (git, manifest, config) = setup(&tmp);
+        let agent = AgentState::new(None);
+        let mut proc = ChangeProcessor::new(git, manifest, config, agent, None);
+        proc.run_poll_cycle().unwrap();
+        assert!(proc.worktree_fingerprint.is_some());
+        let fp = proc.worktree_fingerprint;
+        // Second idle tick must keep the same fingerprint and succeed without
+        // needing a full statuses scan (early return path).
+        proc.run_poll_cycle().unwrap();
+        assert_eq!(proc.worktree_fingerprint, fp);
+    }
+
+    #[test]
+    fn test_idle_fingerprint_detects_new_top_level_file() {
+        let tmp = TempDir::new().unwrap();
+        let (git, manifest, config) = setup(&tmp);
+        let root = tmp.path().to_path_buf();
+        let agent = AgentState::new(None);
+        let mut proc = ChangeProcessor::new(git, manifest.clone(), config, agent, None);
+        proc.run_poll_cycle().unwrap();
+        let before = proc.worktree_fingerprint;
+
+        std::fs::write(root.join("notes.md"), "# hi\n").unwrap();
+        // Fingerprint must change so the next cycle runs detect_changes.
+        let after = {
+            let m = manifest.lock().unwrap();
+            worktree_fingerprint(&root, &m)
+        };
+        assert_ne!(before, Some(after));
+        proc.run_poll_cycle().unwrap();
     }
 
     #[test]
