@@ -88,8 +88,8 @@ fn maybe_rotate_agent_log(log_path: &Path) -> Result<()> {
     if meta.len() < MAX_AGENT_LOG_BYTES {
         return Ok(());
     }
-    let rotated = log_path.with_extension("md.1");
-    let _ = std::fs::remove_file(&rotated);
+    let stamp = Utc::now().format("%Y%m%d%H%M%S");
+    let rotated = log_path.with_extension(format!("md.{stamp}"));
     std::fs::rename(log_path, &rotated)?;
     Ok(())
 }

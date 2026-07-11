@@ -19,6 +19,8 @@ use tokio::sync::mpsc::Sender;
 
 static CONTEXT_REFRESH_IN_FLIGHT: LazyLock<Mutex<HashMap<PathBuf, bool>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static CONTEXT_PENDING_PATHS: LazyLock<Mutex<HashMap<PathBuf, Vec<PathBuf>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Error)]
 pub enum WriteDocumentError {
@@ -128,9 +130,10 @@ pub fn write_document(
 
 /// Post-write trace pipeline: summaries, running context, agent logs, index sync.
 ///
-/// Hot path uses template summaries and append-only event/log I/O. LLM context
-/// synthesis is scheduled on a background thread when a non-degraded backend is
-/// available so MCP/poll commits are not blocked on HTTP round-trips.
+/// Per-file change summaries still run on the hot path (one LLM call each).
+/// LLM `context.md` synthesis is coalesced onto a background thread when a
+/// non-degraded backend is available so multi-write bursts do not serialize
+/// full-store context rebuilds on the commit path.
 #[allow(clippy::too_many_arguments)]
 pub fn apply_trace_hooks(
     store_root: &Path,
@@ -146,16 +149,30 @@ pub fn apply_trace_hooks(
         return Ok(());
     }
 
-    // Gate: refuse writes that would emit degraded artifacts unless allowed.
-    let backend = Llm::require_backend(Some(store_root))?;
+    // Same gate as main: fail closed when no backend and degraded escape hatch unset.
+    let trace_insights = Llm::from_store_root(store_root)?;
     let agent_label = actor.agent_name().unwrap_or("system");
 
-    // One cheap template summary per file on the hot path (no blocking LLM).
+    // One summarize_change per file (shared by agent log + summary event).
     let mut per_file: Vec<(PathBuf, Action, DocType, crate::types::DiffStats, String)> =
         Vec::with_capacity(changed_files.len());
     for (path, action, doc_type) in changed_files {
         let stats = git.diff_stats(path, None, None).unwrap_or_default();
-        let summary = summarize_change_no_llm(path, doc_type, &stats, agent_label);
+        let diff = format!(
+            "+{} lines\n-{} lines\n",
+            stats.lines_added, stats.lines_removed
+        );
+        let summary = match trace_insights.summarize_change(path, doc_type, &diff) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(
+                    "LLM summarize_change failed for {}, using template: {}",
+                    path.display(),
+                    e
+                );
+                summarize_change_no_llm(path, doc_type, &stats, agent_label)
+            }
+        };
         per_file.push((
             path.clone(),
             action.clone(),
@@ -220,9 +237,7 @@ pub fn apply_trace_hooks(
     }
 
     let context_missing = !store_root.join("context.md").exists();
-    if backend.degraded || context_missing {
-        // Template path is cheap and keeps first-write / degraded stores consistent.
-        let trace_insights = Llm::from_store_root(store_root)?;
+    if trace_insights.is_degraded() || context_missing {
         sync_context_md(
             store_root,
             git,
@@ -243,6 +258,16 @@ fn schedule_context_refresh(
     changed_paths: Vec<PathBuf>,
     ui_tx: Option<Sender<UiEvent>>,
 ) {
+    {
+        let mut pending = CONTEXT_PENDING_PATHS
+            .lock()
+            .expect("context pending lock poisoned");
+        pending
+            .entry(store_root.clone())
+            .or_default()
+            .extend(changed_paths);
+    }
+
     let should_spawn = {
         let mut in_flight = CONTEXT_REFRESH_IN_FLIGHT
             .lock()
@@ -259,26 +284,65 @@ fn schedule_context_refresh(
     }
 
     std::thread::spawn(move || {
-        let result = (|| -> anyhow::Result<()> {
-            let git = crate::git_store::GitStore::open(&store_root)?;
-            let manifest = crate::manifest::Manifest::load(&store_root)?;
-            let trace_insights = Llm::from_store_root(&store_root)?;
-            sync_context_md(
-                &store_root,
-                &git,
-                &manifest,
-                &trace_insights,
-                &changed_paths,
-                ui_tx.as_ref(),
-            )
-        })();
-        if let Err(e) = result {
-            tracing::warn!("background context refresh failed: {e}");
+        loop {
+            let paths = {
+                let mut pending = CONTEXT_PENDING_PATHS
+                    .lock()
+                    .expect("context pending lock poisoned");
+                pending.remove(&store_root).unwrap_or_default()
+            };
+            if paths.is_empty() {
+                break;
+            }
+            // Deduplicate while preserving order.
+            let mut seen = std::collections::HashSet::new();
+            let paths: Vec<PathBuf> = paths
+                .into_iter()
+                .filter(|p| seen.insert(p.clone()))
+                .collect();
+
+            let result = (|| -> anyhow::Result<()> {
+                let git = crate::git_store::GitStore::open(&store_root)?;
+                let manifest = crate::manifest::Manifest::load(&store_root)?;
+                let trace_insights = Llm::from_store_root(&store_root)?;
+                sync_context_md(
+                    &store_root,
+                    &git,
+                    &manifest,
+                    &trace_insights,
+                    &paths,
+                    ui_tx.as_ref(),
+                )
+            })();
+            if let Err(e) = result {
+                tracing::warn!("background context refresh failed: {e}");
+            }
+
+            let more_pending = CONTEXT_PENDING_PATHS
+                .lock()
+                .expect("context pending lock poisoned")
+                .get(&store_root)
+                .is_some_and(|p| !p.is_empty());
+            if !more_pending {
+                break;
+            }
         }
+
         CONTEXT_REFRESH_IN_FLIGHT
             .lock()
             .expect("context refresh lock poisoned")
-            .insert(store_root, false);
+            .insert(store_root.clone(), false);
+
+        // If paths arrived after we cleared in-flight but before unlock visibility,
+        // schedule another pass.
+        let orphaned = CONTEXT_PENDING_PATHS
+            .lock()
+            .expect("context pending lock poisoned")
+            .get(&store_root)
+            .is_some_and(|p| !p.is_empty());
+        if orphaned {
+            schedule_context_refresh(store_root, Vec::new(), ui_tx);
+        }
     });
 }
 
@@ -472,9 +536,7 @@ mod tests {
         std::fs::write(root.join(&path), "v1").unwrap();
         manifest.register(&path, DocType::Plan, "bot").unwrap();
         manifest.save(&root).unwrap();
-        let actor = Actor::Agent {
-            name: "bot".into(),
-        };
+        let actor = Actor::Agent { name: "bot".into() };
         apply_trace_hooks(
             &root,
             &git,

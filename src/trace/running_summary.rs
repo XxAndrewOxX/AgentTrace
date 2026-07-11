@@ -199,7 +199,11 @@ fn maybe_compact_events(store_root: &Path) -> Result<()> {
     } else {
         content + "\n"
     };
-    std::fs::write(events_path(store_root), content)?;
+    // Atomic replace so a concurrent append cannot be truncated mid-write.
+    let path = events_path(store_root);
+    let tmp = path.with_extension("jsonl.compact.tmp");
+    std::fs::write(&tmp, &content)?;
+    std::fs::rename(&tmp, &path)?;
     Ok(())
 }
 
