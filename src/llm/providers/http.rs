@@ -30,7 +30,8 @@ static HEALTH_CLIENT: LazyLock<reqwest::blocking::Client> = LazyLock::new(|| {
 static HEALTH_CACHE: LazyLock<Mutex<HashMap<String, (Instant, bool)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-const HEALTH_CACHE_TTL: Duration = Duration::from_secs(30);
+const HEALTH_OK_TTL: Duration = Duration::from_secs(30);
+const HEALTH_FAIL_TTL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub struct HttpBackend {
@@ -62,14 +63,21 @@ impl HttpBackend {
     }
 
     fn health_cache_key(&self) -> String {
-        format!("{}|{}", self.provider.slug(), self.base_url)
+        format!(
+            "{}|{}|{}|{}",
+            self.provider.slug(),
+            self.base_url,
+            self.model,
+            self.api_key.is_some()
+        )
     }
 
     pub fn health_check(&self) -> Result<()> {
         let key = self.health_cache_key();
         if let Ok(cache) = HEALTH_CACHE.lock() {
             if let Some((at, ok)) = cache.get(&key) {
-                if at.elapsed() < HEALTH_CACHE_TTL {
+                let ttl = if *ok { HEALTH_OK_TTL } else { HEALTH_FAIL_TTL };
+                if at.elapsed() < ttl {
                     if *ok {
                         return Ok(());
                     }

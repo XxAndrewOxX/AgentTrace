@@ -171,8 +171,13 @@ impl Llm {
     /// Returns `Ok(EnsureReport)` on success, or an error with an actionable message.
     pub fn ensure_ready(merged: &MergedConfig) -> anyhow::Result<EnsureReport> {
         let report = super::providers::ollama::ensure_ready(&merged.synthesis)?;
-        super::providers::invalidate_resolve_caches();
+        Self::invalidate_caches();
         Ok(report)
+    }
+
+    /// Bust health/resolve caches after model/config/credential changes.
+    pub fn invalidate_caches() {
+        super::providers::invalidate_resolve_caches();
     }
 
     /// Gate check: return backend info or bail if degraded and not allowed.

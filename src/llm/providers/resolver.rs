@@ -4,17 +4,9 @@ use crate::config::{
     CredentialsStore, MergedConfig, SynthesisConfig, SynthesisMode, SynthesisProvider,
 };
 use crate::llm::synthesis_engine::{DegradedBackend, SynthesisEngine};
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::sync::{Arc, LazyLock, Mutex};
-use std::time::{Duration, Instant};
 
 static DEGRADED_WARNED: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
-
-static RESOLVE_CACHE: LazyLock<Mutex<HashMap<u64, (Instant, ResolvedBackendInfo)>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-const RESOLVE_CACHE_TTL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 pub struct ResolvedBackendInfo {
@@ -55,39 +47,10 @@ impl ResolvedBackend {
     }
 }
 
-fn synthesis_fingerprint(syn: &SynthesisConfig, creds: &CredentialsStore) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    format!("{:?}", syn.mode).hash(&mut hasher);
-    syn.provider.slug().hash(&mut hasher);
-    syn.model.hash(&mut hasher);
-    syn.effective_base_url().hash(&mut hasher);
-    syn.max_tokens.hash(&mut hasher);
-    syn.temperature.to_bits().hash(&mut hasher);
-    // Credential presence affects remote resolution without storing secrets.
-    creds.api_key_for(syn.provider).is_some().hash(&mut hasher);
-    hasher.finish()
-}
-
 pub fn resolve(merged: &MergedConfig, creds: &CredentialsStore) -> ResolvedBackend {
-    let fp = synthesis_fingerprint(&merged.synthesis, creds);
-    if let Ok(cache) = RESOLVE_CACHE.lock() {
-        if let Some((at, info)) = cache.get(&fp) {
-            if at.elapsed() < RESOLVE_CACHE_TTL && info.degraded {
-                // Fast path for known-degraded configs (common in tests / offline).
-                return ResolvedBackend::Degraded(DegradedBackend);
-            }
-        }
-    }
-
-    let resolved = resolve_uncached(merged, creds);
-    let info = resolved.info();
-    if let Ok(mut cache) = RESOLVE_CACHE.lock() {
-        cache.insert(fp, (Instant::now(), info));
-    }
-    resolved
-}
-
-fn resolve_uncached(merged: &MergedConfig, creds: &CredentialsStore) -> ResolvedBackend {
+    // Always re-enter resolution. Health probes themselves are TTL-cached
+    // inside HttpBackend (short negative TTL, longer positive TTL) so this is
+    // cheap without pinning the process in degraded mode for 30s after recovery.
     let syn = &merged.synthesis;
     match syn.mode {
         SynthesisMode::Remote => try_remote(syn, creds)
@@ -144,11 +107,8 @@ fn warn_and_degraded(reason: &str) -> ResolvedBackend {
     ResolvedBackend::Degraded(DegradedBackend)
 }
 
-/// Clear resolve + HTTP health caches (e.g. after `model ensure`).
+/// Clear HTTP health caches (e.g. after `model ensure` / config changes).
 pub fn invalidate_resolve_caches() {
-    if let Ok(mut cache) = RESOLVE_CACHE.lock() {
-        cache.clear();
-    }
     HttpBackend::invalidate_health_cache();
 }
 
@@ -175,7 +135,6 @@ mod tests {
         let creds = CredentialsStore::default();
         let resolved = resolve(&merged, &creds);
         assert!(resolved.info().degraded);
-        // Second resolve should hit degraded cache.
         let again = resolve(&merged, &creds);
         assert!(again.info().degraded);
     }
@@ -203,9 +162,7 @@ mod tests {
                 polling: PollingConfig::default(),
             },
         );
-        // Remote will fail health check in unit test (no real API), so falls through to degraded
         let resolved = resolve(&merged, &creds);
-        // Either remote (if reachable) or degraded — main thing: no embedded step
         let _ = resolved.info();
     }
 }
