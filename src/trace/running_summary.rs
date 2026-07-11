@@ -47,7 +47,7 @@ struct SummaryStateRaw {
     #[serde(default)]
     events_count_at_history_summary: usize,
     #[serde(default)]
-    ops_since_context: usize,
+    ops_since_context: Option<usize>,
 }
 
 fn migrate_summary_state(raw: SummaryStateRaw) -> SummaryState {
@@ -56,7 +56,9 @@ fn migrate_summary_state(raw: SummaryStateRaw) -> SummaryState {
         events_count_at_synthesis_refresh: raw.events_count_at_synthesis_refresh,
         ops_since_synthesis: raw.ops_since_synthesis,
         events_count_at_history_summary: raw.events_count_at_history_summary,
-        ops_since_context: raw.ops_since_context,
+        // Missing field on upgrade → force a context refresh on the next write
+        // so existing stores do not silently debounce for N ops after upgrade.
+        ops_since_context: raw.ops_since_context.unwrap_or(usize::MAX / 4),
     };
     if state.events_count_at_template_refresh == 0
         && state.events_count_at_synthesis_refresh == 0
@@ -280,8 +282,17 @@ fn save_synthesis_watermark(store_root: &Path, event_count: usize) -> Result<()>
 pub fn increment_synthesis_ops(store_root: &Path) -> Result<usize> {
     let mut state = load_summary_state(store_root)?;
     state.ops_since_synthesis += 1;
-    state.ops_since_context += 1;
     let n = state.ops_since_synthesis;
+    save_summary_state(store_root, &state)?;
+    Ok(n)
+}
+
+/// Count one write-batch toward the context.md debounce threshold.
+pub fn increment_context_ops(store_root: &Path) -> Result<usize> {
+    let mut state = load_summary_state(store_root)?;
+    // Saturating add so upgrade sentinel (MAX/4) still trips the threshold.
+    state.ops_since_context = state.ops_since_context.saturating_add(1);
+    let n = state.ops_since_context;
     save_summary_state(store_root, &state)?;
     Ok(n)
 }

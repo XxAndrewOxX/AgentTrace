@@ -147,15 +147,16 @@ pub fn synthesize_no_llm(store_root: &Path, manifest: &Manifest) -> Result<Strin
 /// Build trace documents for LLM context synthesis from manifest entries and
 /// recently changed paths (including unmanifested source files).
 ///
-/// Changed paths are read first. Total snippet budget matches the prompt
-/// truncation limit (`MAX_CONTEXT_SNIPPET_CHARS`) so we do not read every
-/// document when only a fraction will fit in the prompt.
+/// Changed paths are preferred, but at least one Plan/Reference document is
+/// reserved when present so the prompt is not entirely recent-edit noise.
+/// Total snippet budget matches the prompt truncation limit (2000 chars).
 pub fn build_trace_documents(
     store_root: &Path,
     manifest: &Manifest,
     changed_paths: &[PathBuf],
 ) -> Vec<TraceDocument> {
     const MAX_TOTAL_CHARS: usize = 2000;
+    const RESERVED_FOR_PLAN: usize = 400;
     let mut seen: HashSet<PathBuf> = HashSet::new();
     let mut docs: Vec<TraceDocument> = Vec::new();
     let mut used_chars = 0usize;
@@ -164,11 +165,12 @@ pub fn build_trace_documents(
                     seen: &mut HashSet<PathBuf>,
                     used_chars: &mut usize,
                     path: &Path,
-                    doc_type: DocType| {
+                    doc_type: DocType,
+                    budget_remaining: usize| {
         if seen.contains(path) || !crate::git_store::should_track_activity(path) {
             return;
         }
-        if *used_chars >= MAX_TOTAL_CHARS {
+        if budget_remaining == 0 {
             return;
         }
         let full = store_root.join(path);
@@ -176,9 +178,8 @@ pub fn build_trace_documents(
             return;
         }
         seen.insert(path.to_path_buf());
-        let remaining = MAX_TOTAL_CHARS - *used_chars;
         let content = std::fs::read_to_string(&full).unwrap_or_default();
-        let take = remaining.min(2000);
+        let take = budget_remaining.min(2000);
         let snippet: String = content.chars().take(take).collect();
         *used_chars += snippet.chars().count();
         docs.push(TraceDocument {
@@ -188,17 +189,37 @@ pub fn build_trace_documents(
         });
     };
 
+    // Reserve budget for the first plan/reference so they are not crowded out.
+    let curated: Vec<_> = manifest
+        .documents()
+        .iter()
+        .filter(|d| matches!(d.doc_type, DocType::Plan | DocType::Reference))
+        .collect();
+    if let Some(first) = curated.first() {
+        let reserved = RESERVED_FOR_PLAN.min(MAX_TOTAL_CHARS);
+        push_doc(
+            &mut docs,
+            &mut seen,
+            &mut used_chars,
+            &first.path,
+            first.doc_type.clone(),
+            reserved,
+        );
+    }
+
     for path in changed_paths {
         let doc_type = manifest
             .find_by_path(path)
             .map(|d| d.doc_type.clone())
             .unwrap_or(DocType::Scratch);
+        let remaining = MAX_TOTAL_CHARS.saturating_sub(used_chars);
         push_doc(
             &mut docs,
             &mut seen,
             &mut used_chars,
             path,
             doc_type,
+            remaining,
         );
     }
 
@@ -209,12 +230,14 @@ pub fn build_trace_documents(
         ) {
             continue;
         }
+        let remaining = MAX_TOTAL_CHARS.saturating_sub(used_chars);
         push_doc(
             &mut docs,
             &mut seen,
             &mut used_chars,
             &d.path,
             d.doc_type.clone(),
+            remaining,
         );
     }
 

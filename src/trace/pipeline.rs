@@ -227,8 +227,9 @@ pub fn apply_trace_hooks(
 
     sync_agent_trace_md(store_root, git, manifest)?;
 
-    // Debounce context.md synthesis (same ops cadence as running-summary by
-    // default). Always refresh when missing or when pending user updates exist.
+    // Debounce context.md synthesis for live LLM backends. Template/degraded
+    // synthesis is cheap, so always refresh there. Also refresh when missing
+    // or when pending user updates exist.
     let changed_paths: Vec<PathBuf> = changed_files
         .iter()
         .map(|(p, _, _)| p.clone())
@@ -238,9 +239,11 @@ pub fn apply_trace_hooks(
         return Ok(());
     }
 
-    if running_summary::should_refresh_context(store_root) {
+    let _ = running_summary::increment_context_ops(store_root);
+    let force_template = trace_insights.is_degraded();
+    if force_template || running_summary::should_refresh_context(store_root) {
         let context_missing = !store_root.join("context.md").exists();
-        if trace_insights.is_degraded() || context_missing {
+        if force_template || context_missing {
             sync_context_md(
                 store_root,
                 git,
@@ -493,21 +496,21 @@ mod tests {
             .unwrap();
         manifest.save(&root).unwrap();
 
-        let changed = vec![(scratch_path.clone(), Action::Modify, DocType::Scratch)];
-        apply_trace_hooks(
-            &root,
-            &git,
-            &manifest,
-            &Actor::User,
-            None,
-            &changed,
-            "cli_write",
-            None,
-        )
-        .unwrap();
-        let first = std::fs::read_to_string(root.join("context.md")).unwrap();
+        // Seed context.md so missing-file force-refresh does not apply, and
+        // reset the upgrade sentinel so debounce is measurable.
+        std::fs::write(root.join("context.md"), "# seeded\n").unwrap();
+        running_summary::reset_context_ops(&root).unwrap();
 
-        std::fs::write(root.join(&scratch_path), "second body should not force refresh").unwrap();
+        assert!(
+            !running_summary::should_refresh_context(&root),
+            "freshly reset counter must be under threshold"
+        );
+        running_summary::increment_context_ops(&root).unwrap();
+        assert!(!running_summary::should_refresh_context(&root));
+
+        // Degraded backends still refresh every write (template is cheap);
+        // verify that path still succeeds.
+        let changed = vec![(scratch_path, Action::Modify, DocType::Scratch)];
         apply_trace_hooks(
             &root,
             &git,
@@ -519,16 +522,23 @@ mod tests {
             None,
         )
         .unwrap();
-        let second = std::fs::read_to_string(root.join("context.md")).unwrap();
+        assert!(root.join("context.md").exists());
+    }
+
+    #[test]
+    fn context_ops_count_per_write_batch_not_per_file() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
+        std::fs::write(root.join("context.md"), "# seeded\n").unwrap();
+        running_summary::reset_context_ops(&root).unwrap();
+        // Simulate a multi-file write batch: one increment, not N.
+        running_summary::increment_context_ops(&root).unwrap();
         assert_eq!(
-            first, second,
-            "context.md must stay unchanged while under debounce threshold"
-        );
-        assert!(
             running_summary::load_summary_state(&root)
                 .unwrap()
-                .ops_since_context
-                > 0
+                .ops_since_context,
+            1
         );
     }
 
@@ -543,9 +553,7 @@ mod tests {
         manifest.register(&path, DocType::Plan, "bot").unwrap();
         manifest.save(&root).unwrap();
 
-        let actor = Actor::Agent {
-            name: "bot".into(),
-        };
+        let actor = Actor::Agent { name: "bot".into() };
         apply_trace_hooks(
             &root,
             &git,
