@@ -126,7 +126,10 @@ impl Manifest {
             return Ok(None);
         }
         let Some(stamp) = stamp else {
-            bail!("Manifest missing at {}", manifest_path(store_root).display());
+            bail!(
+                "Manifest missing at {}",
+                manifest_path(store_root).display()
+            );
         };
         let loaded = Self::load(store_root)?;
         Ok(Some((loaded, stamp)))
