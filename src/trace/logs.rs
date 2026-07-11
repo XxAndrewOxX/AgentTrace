@@ -5,7 +5,7 @@ use chrono::Utc;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// Soft cap for agent session logs before rotating to a `.1` backup.
+/// Soft cap for agent session logs before rotating to a timestamped backup.
 const MAX_AGENT_LOG_BYTES: u64 = 512 * 1024;
 
 /// Generate a human-readable summary for an agent change (no LLM version).
@@ -45,7 +45,7 @@ pub fn append_agent_log(
         .unwrap_or(&log_path)
         .to_path_buf();
 
-    maybe_rotate_agent_log(&log_path)?;
+    rotate_agent_log_if_oversized(&log_path)?;
 
     let mut file = std::fs::OpenOptions::new()
         .create(true)
@@ -81,7 +81,10 @@ pub fn append_agent_log(
     Ok(())
 }
 
-fn maybe_rotate_agent_log(log_path: &Path) -> Result<()> {
+/// If `log_path` exists and exceeds [`MAX_AGENT_LOG_BYTES`], rename it to a
+/// timestamped sibling (e.g. `agent-ses.md.20260711…`) so the next append
+/// starts a fresh file. No-op when the file is missing or still under the cap.
+fn rotate_agent_log_if_oversized(log_path: &Path) -> Result<()> {
     let Ok(meta) = std::fs::metadata(log_path) else {
         return Ok(());
     };

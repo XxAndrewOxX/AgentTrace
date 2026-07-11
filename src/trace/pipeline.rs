@@ -253,97 +253,112 @@ pub fn apply_trace_hooks(
     Ok(())
 }
 
+/// Queue `changed_paths` for a background `context.md` refresh.
+///
+/// Coalescing model (same idea as running-summary synthesis refresh):
+/// 1. Always append paths into a per-store pending set.
+/// 2. At most one worker thread runs per store (`CONTEXT_REFRESH_IN_FLIGHT`).
+/// 3. The worker drains the pending set, synthesizes, then repeats if more
+///    paths arrived during the run.
+/// 4. After clearing the in-flight flag, re-check once for a race where paths
+///    landed between the last drain and the flag clear.
 fn schedule_context_refresh(
     store_root: PathBuf,
     changed_paths: Vec<PathBuf>,
     ui_tx: Option<Sender<UiEvent>>,
 ) {
-    {
-        let mut pending = CONTEXT_PENDING_PATHS
-            .lock()
-            .expect("context pending lock poisoned");
-        pending
-            .entry(store_root.clone())
-            .or_default()
-            .extend(changed_paths);
-    }
-
-    let should_spawn = {
-        let mut in_flight = CONTEXT_REFRESH_IN_FLIGHT
-            .lock()
-            .expect("context refresh lock poisoned");
-        if *in_flight.get(&store_root).unwrap_or(&false) {
-            false
-        } else {
-            in_flight.insert(store_root.clone(), true);
-            true
-        }
-    };
-    if !should_spawn {
+    enqueue_pending_context_paths(&store_root, changed_paths);
+    if !try_claim_context_worker(&store_root) {
+        // Another worker is already draining this store's queue.
         return;
     }
+    std::thread::spawn(move || run_context_refresh_worker(store_root, ui_tx));
+}
 
-    std::thread::spawn(move || {
-        loop {
-            let paths = {
-                let mut pending = CONTEXT_PENDING_PATHS
-                    .lock()
-                    .expect("context pending lock poisoned");
-                pending.remove(&store_root).unwrap_or_default()
-            };
-            if paths.is_empty() {
-                break;
-            }
-            // Deduplicate while preserving order.
-            let mut seen = std::collections::HashSet::new();
-            let paths: Vec<PathBuf> = paths
-                .into_iter()
-                .filter(|p| seen.insert(p.clone()))
-                .collect();
+fn enqueue_pending_context_paths(store_root: &Path, changed_paths: Vec<PathBuf>) {
+    let mut pending = CONTEXT_PENDING_PATHS
+        .lock()
+        .expect("context pending lock poisoned");
+    pending
+        .entry(store_root.to_path_buf())
+        .or_default()
+        .extend(changed_paths);
+}
 
-            let result = (|| -> anyhow::Result<()> {
-                let git = crate::git_store::GitStore::open(&store_root)?;
-                let manifest = crate::manifest::Manifest::load(&store_root)?;
-                let trace_insights = Llm::from_store_root(&store_root)?;
-                sync_context_md(
-                    &store_root,
-                    &git,
-                    &manifest,
-                    &trace_insights,
-                    &paths,
-                    ui_tx.as_ref(),
-                )
-            })();
-            if let Err(e) = result {
-                tracing::warn!("background context refresh failed: {e}");
-            }
+/// Returns true if this caller should spawn the background worker.
+fn try_claim_context_worker(store_root: &Path) -> bool {
+    let mut in_flight = CONTEXT_REFRESH_IN_FLIGHT
+        .lock()
+        .expect("context refresh lock poisoned");
+    if *in_flight.get(store_root).unwrap_or(&false) {
+        return false;
+    }
+    in_flight.insert(store_root.to_path_buf(), true);
+    true
+}
 
-            let more_pending = CONTEXT_PENDING_PATHS
-                .lock()
-                .expect("context pending lock poisoned")
-                .get(&store_root)
-                .is_some_and(|p| !p.is_empty());
-            if !more_pending {
-                break;
-            }
+fn take_pending_context_paths(store_root: &Path) -> Vec<PathBuf> {
+    let mut pending = CONTEXT_PENDING_PATHS
+        .lock()
+        .expect("context pending lock poisoned");
+    let paths = pending.remove(store_root).unwrap_or_default();
+    // Preserve first-seen order while dropping duplicates from bursty writers.
+    let mut seen = std::collections::HashSet::new();
+    paths
+        .into_iter()
+        .filter(|p| seen.insert(p.clone()))
+        .collect()
+}
+
+fn has_pending_context_paths(store_root: &Path) -> bool {
+    CONTEXT_PENDING_PATHS
+        .lock()
+        .expect("context pending lock poisoned")
+        .get(store_root)
+        .is_some_and(|p| !p.is_empty())
+}
+
+fn clear_context_worker(store_root: &Path) {
+    CONTEXT_REFRESH_IN_FLIGHT
+        .lock()
+        .expect("context refresh lock poisoned")
+        .insert(store_root.to_path_buf(), false);
+}
+
+fn run_context_refresh_worker(store_root: PathBuf, ui_tx: Option<Sender<UiEvent>>) {
+    loop {
+        let paths = take_pending_context_paths(&store_root);
+        if paths.is_empty() {
+            break;
         }
 
-        CONTEXT_REFRESH_IN_FLIGHT
-            .lock()
-            .expect("context refresh lock poisoned")
-            .insert(store_root.clone(), false);
-
-        // If paths arrived after we cleared in-flight but before unlock visibility,
-        // schedule another pass.
-        let orphaned = CONTEXT_PENDING_PATHS
-            .lock()
-            .expect("context pending lock poisoned")
-            .get(&store_root)
-            .is_some_and(|p| !p.is_empty());
-        if orphaned {
-            schedule_context_refresh(store_root, Vec::new(), ui_tx);
+        if let Err(e) = refresh_context_once(&store_root, &paths, ui_tx.as_ref()) {
+            tracing::warn!("background context refresh failed: {e}");
         }
-    });
+
+        if !has_pending_context_paths(&store_root) {
+            break;
+        }
+    }
+
+    clear_context_worker(&store_root);
+
+    // Paths may have been enqueued after the last empty check but before we
+    // cleared the in-flight flag; kick another worker if so.
+    if has_pending_context_paths(&store_root) {
+        schedule_context_refresh(store_root, Vec::new(), ui_tx);
+    }
+}
+
+fn refresh_context_once(
+    store_root: &Path,
+    paths: &[PathBuf],
+    ui_tx: Option<&Sender<UiEvent>>,
+) -> anyhow::Result<()> {
+    let git = crate::git_store::GitStore::open(store_root)?;
+    let manifest = crate::manifest::Manifest::load(store_root)?;
+    let trace_insights = Llm::from_store_root(store_root)?;
+    sync_context_md(store_root, &git, &manifest, &trace_insights, paths, ui_tx)
 }
 
 fn sync_agent_trace_md(

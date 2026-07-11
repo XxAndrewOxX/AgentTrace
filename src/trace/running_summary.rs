@@ -151,7 +151,7 @@ pub fn append_event(store_root: &Path, event: SummaryEvent) -> Result<()> {
     writeln!(file, "{line}")?;
 
     // Lazy compact with hysteresis so we are not rewriting on every overflowed append.
-    maybe_compact_events(store_root)?;
+    compact_events_if_over_retention(store_root)?;
     Ok(())
 }
 
@@ -177,7 +177,9 @@ fn count_event_lines(store_root: &Path) -> Result<usize> {
     Ok(content.lines().filter(|l| !l.trim().is_empty()).count())
 }
 
-fn maybe_compact_events(store_root: &Path) -> Result<()> {
+/// Rewrite `summary_events.jsonl` down to [`MAX_EVENTS_RETAINED`] once the file
+/// grows past that limit by a hysteresis margin. No-op when under the threshold.
+fn compact_events_if_over_retention(store_root: &Path) -> Result<()> {
     const HYSTERESIS: usize = 50;
     let count = count_event_lines(store_root)?;
     if count <= MAX_EVENTS_RETAINED + HYSTERESIS {
