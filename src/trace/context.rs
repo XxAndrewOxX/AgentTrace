@@ -146,49 +146,76 @@ pub fn synthesize_no_llm(store_root: &Path, manifest: &Manifest) -> Result<Strin
 
 /// Build trace documents for LLM context synthesis from manifest entries and
 /// recently changed paths (including unmanifested source files).
+///
+/// Changed paths are read first. Total snippet budget matches the prompt
+/// truncation limit (`MAX_CONTEXT_SNIPPET_CHARS`) so we do not read every
+/// document when only a fraction will fit in the prompt.
 pub fn build_trace_documents(
     store_root: &Path,
     manifest: &Manifest,
     changed_paths: &[PathBuf],
 ) -> Vec<TraceDocument> {
+    const MAX_TOTAL_CHARS: usize = 2000;
     let mut seen: HashSet<PathBuf> = HashSet::new();
-    let mut docs: Vec<TraceDocument> = manifest
-        .documents()
-        .iter()
-        .filter(|d| {
-            matches!(
-                d.doc_type,
-                DocType::Plan | DocType::Reference | DocType::Scratch
-            )
-        })
-        .map(|d| {
-            seen.insert(d.path.clone());
-            let content = std::fs::read_to_string(store_root.join(&d.path)).unwrap_or_default();
-            let snippet: String = content.chars().take(2000).collect();
-            TraceDocument {
-                path: d.path.display().to_string(),
-                doc_type: d.doc_type.clone(),
-                content_snippet: snippet,
-            }
-        })
-        .collect();
+    let mut docs: Vec<TraceDocument> = Vec::new();
+    let mut used_chars = 0usize;
 
-    for path in changed_paths {
+    let push_doc = |docs: &mut Vec<TraceDocument>,
+                    seen: &mut HashSet<PathBuf>,
+                    used_chars: &mut usize,
+                    path: &Path,
+                    doc_type: DocType| {
         if seen.contains(path) || !crate::git_store::should_track_activity(path) {
-            continue;
+            return;
+        }
+        if *used_chars >= MAX_TOTAL_CHARS {
+            return;
         }
         let full = store_root.join(path);
         if !full.is_file() {
-            continue;
+            return;
         }
-        seen.insert(path.clone());
+        seen.insert(path.to_path_buf());
+        let remaining = MAX_TOTAL_CHARS - *used_chars;
         let content = std::fs::read_to_string(&full).unwrap_or_default();
-        let snippet: String = content.chars().take(2000).collect();
+        let take = remaining.min(2000);
+        let snippet: String = content.chars().take(take).collect();
+        *used_chars += snippet.chars().count();
         docs.push(TraceDocument {
             path: path.display().to_string(),
-            doc_type: DocType::Scratch,
+            doc_type,
             content_snippet: snippet,
         });
+    };
+
+    for path in changed_paths {
+        let doc_type = manifest
+            .find_by_path(path)
+            .map(|d| d.doc_type.clone())
+            .unwrap_or(DocType::Scratch);
+        push_doc(
+            &mut docs,
+            &mut seen,
+            &mut used_chars,
+            path,
+            doc_type,
+        );
+    }
+
+    for d in manifest.documents() {
+        if !matches!(
+            d.doc_type,
+            DocType::Plan | DocType::Reference | DocType::Scratch
+        ) {
+            continue;
+        }
+        push_doc(
+            &mut docs,
+            &mut seen,
+            &mut used_chars,
+            &d.path,
+            d.doc_type.clone(),
+        );
     }
 
     docs

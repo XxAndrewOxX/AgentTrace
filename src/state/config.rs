@@ -82,6 +82,10 @@ pub struct SynthesisConfig {
     pub temperature: f32,
     #[serde(default = "default_refresh_every_ops")]
     pub refresh_every_ops: usize,
+    /// How many tracked write ops between automatic `context.md` LLM refreshes.
+    /// Defaults to the same cadence as running-summary synthesis.
+    #[serde(default = "default_refresh_every_ops")]
+    pub context_refresh_every_ops: usize,
     /// Legacy field — ignored; kept for deserializing old config files.
     #[serde(skip_serializing, default)]
     pub fallback: serde_json::Value,
@@ -113,6 +117,7 @@ impl Default for SynthesisConfig {
             max_tokens: default_max_tokens(),
             temperature: default_synthesis_temperature(),
             refresh_every_ops: default_refresh_every_ops(),
+            context_refresh_every_ops: default_refresh_every_ops(),
             fallback: serde_json::Value::Null,
         }
     }
@@ -176,6 +181,11 @@ impl SynthesisConfig {
                 base.refresh_every_ops
             } else {
                 ov.refresh_every_ops
+            },
+            context_refresh_every_ops: if ov.context_refresh_every_ops == 0 {
+                base.context_refresh_every_ops
+            } else {
+                ov.context_refresh_every_ops
             },
             fallback: serde_json::Value::Null,
         }

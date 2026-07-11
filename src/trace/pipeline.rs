@@ -227,6 +227,8 @@ pub fn apply_trace_hooks(
 
     sync_agent_trace_md(store_root, git, manifest)?;
 
+    // Debounce context.md synthesis (same ops cadence as running-summary by
+    // default). Always refresh when missing or when pending user updates exist.
     let changed_paths: Vec<PathBuf> = changed_files
         .iter()
         .map(|(p, _, _)| p.clone())
@@ -236,18 +238,23 @@ pub fn apply_trace_hooks(
         return Ok(());
     }
 
-    let context_missing = !store_root.join("context.md").exists();
-    if trace_insights.is_degraded() || context_missing {
-        sync_context_md(
-            store_root,
-            git,
-            manifest,
-            &trace_insights,
-            &changed_paths,
-            ui_tx,
-        )?;
-    } else {
-        schedule_context_refresh(store_root.to_path_buf(), changed_paths, ui_tx.cloned());
+    if running_summary::should_refresh_context(store_root) {
+        let context_missing = !store_root.join("context.md").exists();
+        if trace_insights.is_degraded() || context_missing {
+            sync_context_md(
+                store_root,
+                git,
+                manifest,
+                &trace_insights,
+                &changed_paths,
+                ui_tx,
+            )?;
+        } else {
+            schedule_context_refresh(store_root.to_path_buf(), changed_paths, ui_tx.cloned());
+        }
+        if let Err(e) = running_summary::reset_context_ops(store_root) {
+            tracing::warn!("failed to reset context ops counter: {e}");
+        }
     }
 
     Ok(())
@@ -461,6 +468,106 @@ mod tests {
         let ctx = std::fs::read_to_string(root.join("context.md")).expect("context.md created");
         assert!(ctx.contains("reconnect watermark test"));
         assert!(ctx.contains("[scratch] notes.md:"));
+    }
+
+    #[test]
+    fn context_refresh_is_debounced_across_writes() {
+        let tmp = TempDir::new().unwrap();
+        let (root, mut manifest, git) = setup(&tmp);
+        // Force a high debounce threshold via store config.
+        let store_cfg = crate::config::StoreConfig {
+            store: crate::config::StoreInfo::new("test".into()),
+            llm: None,
+            synthesis: Some(crate::config::SynthesisConfig {
+                context_refresh_every_ops: 10,
+                ..crate::config::SynthesisConfig::for_unit_tests_degraded()
+            }),
+            polling: crate::config::PollingConfig::default(),
+        };
+        store_cfg.save(&root).unwrap();
+
+        let scratch_path = PathBuf::from("notes.md");
+        std::fs::write(root.join(&scratch_path), "first body").unwrap();
+        manifest
+            .register(&scratch_path, DocType::Scratch, "")
+            .unwrap();
+        manifest.save(&root).unwrap();
+
+        let changed = vec![(scratch_path.clone(), Action::Modify, DocType::Scratch)];
+        apply_trace_hooks(
+            &root,
+            &git,
+            &manifest,
+            &Actor::User,
+            None,
+            &changed,
+            "cli_write",
+            None,
+        )
+        .unwrap();
+        let first = std::fs::read_to_string(root.join("context.md")).unwrap();
+
+        std::fs::write(root.join(&scratch_path), "second body should not force refresh").unwrap();
+        apply_trace_hooks(
+            &root,
+            &git,
+            &manifest,
+            &Actor::User,
+            None,
+            &changed,
+            "cli_write",
+            None,
+        )
+        .unwrap();
+        let second = std::fs::read_to_string(root.join("context.md")).unwrap();
+        assert_eq!(
+            first, second,
+            "context.md must stay unchanged while under debounce threshold"
+        );
+        assert!(
+            running_summary::load_summary_state(&root)
+                .unwrap()
+                .ops_since_context
+                > 0
+        );
+    }
+
+    #[test]
+    fn summarize_change_runs_once_per_file_for_agent_writes() {
+        // Behavioral guard: agent log summary text must match the summary event
+        // text for the same path (shared summarize_change result).
+        let tmp = TempDir::new().unwrap();
+        let (root, mut manifest, git) = setup(&tmp);
+        let path = PathBuf::from("prd.md");
+        std::fs::write(root.join(&path), "plan content").unwrap();
+        manifest.register(&path, DocType::Plan, "bot").unwrap();
+        manifest.save(&root).unwrap();
+
+        let actor = Actor::Agent {
+            name: "bot".into(),
+        };
+        apply_trace_hooks(
+            &root,
+            &git,
+            &manifest,
+            &actor,
+            Some("ses-dedupe"),
+            &[(path.clone(), Action::Modify, DocType::Plan)],
+            "mcp_write",
+            None,
+        )
+        .unwrap();
+
+        let events = running_summary::load_all_events(&root).unwrap();
+        let event = events
+            .iter()
+            .find(|e| e.path == "prd.md")
+            .expect("summary event");
+        let log = std::fs::read_to_string(root.join("logs").join("bot-ses-dedupe.md")).unwrap();
+        assert!(
+            log.contains(&event.summary),
+            "agent log must reuse the same summary text as the event"
+        );
     }
 
     #[test]

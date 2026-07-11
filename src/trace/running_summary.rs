@@ -28,6 +28,8 @@ pub struct SummaryState {
     pub ops_since_synthesis: usize,
     #[serde(default)]
     pub events_count_at_history_summary: usize,
+    #[serde(default)]
+    pub ops_since_context: usize,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -44,6 +46,8 @@ struct SummaryStateRaw {
     ops_since_refresh: usize,
     #[serde(default)]
     events_count_at_history_summary: usize,
+    #[serde(default)]
+    ops_since_context: usize,
 }
 
 fn migrate_summary_state(raw: SummaryStateRaw) -> SummaryState {
@@ -52,6 +56,7 @@ fn migrate_summary_state(raw: SummaryStateRaw) -> SummaryState {
         events_count_at_synthesis_refresh: raw.events_count_at_synthesis_refresh,
         ops_since_synthesis: raw.ops_since_synthesis,
         events_count_at_history_summary: raw.events_count_at_history_summary,
+        ops_since_context: raw.ops_since_context,
     };
     if state.events_count_at_template_refresh == 0
         && state.events_count_at_synthesis_refresh == 0
@@ -275,9 +280,39 @@ fn save_synthesis_watermark(store_root: &Path, event_count: usize) -> Result<()>
 pub fn increment_synthesis_ops(store_root: &Path) -> Result<usize> {
     let mut state = load_summary_state(store_root)?;
     state.ops_since_synthesis += 1;
+    state.ops_since_context += 1;
     let n = state.ops_since_synthesis;
     save_summary_state(store_root, &state)?;
     Ok(n)
+}
+
+pub fn reset_context_ops(store_root: &Path) -> Result<()> {
+    let mut state = load_summary_state(store_root)?;
+    state.ops_since_context = 0;
+    save_summary_state(store_root, &state)
+}
+
+pub fn context_refresh_threshold(store_root: &Path) -> usize {
+    crate::config::MergedConfig::load(store_root)
+        .map(|c| c.synthesis.context_refresh_every_ops)
+        .unwrap_or(10)
+        .max(1)
+}
+
+/// Whether the post-write pipeline should refresh `context.md` now.
+pub fn should_refresh_context(store_root: &Path) -> bool {
+    if !store_root.join("context.md").exists() {
+        return true;
+    }
+    if crate::trace::context::load_pending_updates(store_root)
+        .map(|u| !u.is_empty())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    load_summary_state(store_root)
+        .map(|s| s.ops_since_context >= context_refresh_threshold(store_root))
+        .unwrap_or(true)
 }
 
 pub fn synthesis_refresh_threshold(store_root: &Path) -> usize {
