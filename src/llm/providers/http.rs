@@ -11,6 +11,11 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+// Two process-wide clients on purpose:
+// - COMPLETE_CLIENT: long timeout for chat/completions (synthesis can take tens of seconds).
+// - HEALTH_CLIENT: short timeout for /models probes so resolve/gate checks fail fast
+//   instead of blocking the write/poll path behind a 120s socket wait.
+// reqwest timeouts are client-scoped, so one shared client cannot serve both budgets.
 static COMPLETE_CLIENT: LazyLock<reqwest::blocking::Client> = LazyLock::new(|| {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(120))
