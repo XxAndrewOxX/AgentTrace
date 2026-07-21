@@ -213,6 +213,8 @@ fn cmd_setup(store_root: Option<&std::path::Path>, output: &dyn CliOutput) -> Re
             }
             Err(e) => output.warn(&format!("  Warning: {e} — run `agent-trace model ensure`"))?,
         }
+    } else {
+        Llm::invalidate_caches();
     }
 
     let merged = load_merged(store_root)?;
@@ -243,6 +245,7 @@ fn cmd_use(provider: &str, output: &dyn CliOutput) -> Result<()> {
     config.synthesis.provider = p;
     config.synthesis.model = p.default_model().into();
     config.save()?;
+    Llm::invalidate_caches();
     output.line(&format!("Active provider set to {}", p.slug()))?;
     Ok(())
 }
@@ -268,6 +271,7 @@ fn cmd_set(
         config.synthesis.mode = parse_mode(&m)?;
     }
     config.save()?;
+    Llm::invalidate_caches();
     output.line("Synthesis config updated.")?;
     Ok(())
 }
@@ -284,6 +288,7 @@ fn cmd_credentials(sub: CredentialsCmd, output: &dyn CliOutput) -> Result<()> {
             let mut creds = CredentialsStore::load().unwrap_or_default();
             creds.set_key(p, key);
             creds.save()?;
+            Llm::invalidate_caches();
             output.line("Credentials saved.")?;
         }
         CredentialsCmd::Clear { provider } => {
@@ -291,6 +296,7 @@ fn cmd_credentials(sub: CredentialsCmd, output: &dyn CliOutput) -> Result<()> {
             let mut creds = CredentialsStore::load().unwrap_or_default();
             creds.clear_key(p);
             creds.save()?;
+            Llm::invalidate_caches();
             output.line(&format!("Cleared credentials for {}.", p.slug()))?;
         }
     }
@@ -354,6 +360,7 @@ fn cmd_pull(size: &str, output: &dyn CliOutput) -> Result<()> {
     config.synthesis.provider = SynthesisProvider::Ollama;
     config.synthesis.model = normalized;
     config.save()?;
+    Llm::invalidate_caches();
     output.line("Ollama model pulled and config updated.")?;
     Ok(())
 }

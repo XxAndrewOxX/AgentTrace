@@ -4,7 +4,7 @@ use crate::config::{
     CredentialsStore, MergedConfig, SynthesisConfig, SynthesisMode, SynthesisProvider,
 };
 use crate::llm::synthesis_engine::{DegradedBackend, SynthesisEngine};
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 static DEGRADED_WARNED: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
@@ -39,15 +39,18 @@ impl ResolvedBackend {
         }
     }
 
-    pub fn into_engine(self) -> Box<dyn SynthesisEngine> {
+    pub fn into_engine(self) -> Arc<dyn SynthesisEngine> {
         match self {
-            Self::Http(b) => Box::new(b),
-            Self::Degraded(b) => Box::new(b),
+            Self::Http(b) => Arc::new(b),
+            Self::Degraded(b) => Arc::new(b),
         }
     }
 }
 
 pub fn resolve(merged: &MergedConfig, creds: &CredentialsStore) -> ResolvedBackend {
+    // Always re-enter resolution. Health probes themselves are TTL-cached
+    // inside HttpBackend (short negative TTL, longer positive TTL) so this is
+    // cheap without pinning the process in degraded mode for 30s after recovery.
     let syn = &merged.synthesis;
     match syn.mode {
         SynthesisMode::Remote => try_remote(syn, creds)
@@ -104,6 +107,11 @@ fn warn_and_degraded(reason: &str) -> ResolvedBackend {
     ResolvedBackend::Degraded(DegradedBackend)
 }
 
+/// Clear HTTP health caches (e.g. after `model ensure` / config changes).
+pub fn invalidate_resolve_caches() {
+    HttpBackend::invalidate_health_cache();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,6 +119,7 @@ mod tests {
 
     #[test]
     fn auto_mode_falls_back_to_degraded_without_backends() {
+        invalidate_resolve_caches();
         let merged = MergedConfig::merge(
             GlobalConfig {
                 synthesis: SynthesisConfig::for_unit_tests_degraded(),
@@ -126,11 +135,14 @@ mod tests {
         let creds = CredentialsStore::default();
         let resolved = resolve(&merged, &creds);
         assert!(resolved.info().degraded);
+        let again = resolve(&merged, &creds);
+        assert!(again.info().degraded);
     }
 
     #[test]
     fn auto_prefers_remote_when_creds_present() {
         use crate::config::{SynthesisConfig, SynthesisMode, SynthesisProvider};
+        invalidate_resolve_caches();
         let mut creds = CredentialsStore::default();
         creds.set_key(SynthesisProvider::Openai, "sk-fake-key".into());
         let merged = MergedConfig::merge(
@@ -150,9 +162,7 @@ mod tests {
                 polling: PollingConfig::default(),
             },
         );
-        // Remote will fail health check in unit test (no real API), so falls through to degraded
         let resolved = resolve(&merged, &creds);
-        // Either remote (if reachable) or degraded — main thing: no embedded step
         let _ = resolved.info();
     }
 }
