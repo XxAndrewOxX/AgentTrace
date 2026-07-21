@@ -227,6 +227,9 @@ pub fn apply_trace_hooks(
 
     sync_agent_trace_md(store_root, git, manifest)?;
 
+    // Debounce context.md synthesis for live LLM backends. Template/degraded
+    // synthesis is cheap, so always refresh there. Also refresh when missing
+    // or when pending user updates exist.
     let changed_paths: Vec<PathBuf> = changed_files
         .iter()
         .map(|(p, _, _)| p.clone())
@@ -236,18 +239,25 @@ pub fn apply_trace_hooks(
         return Ok(());
     }
 
-    let context_missing = !store_root.join("context.md").exists();
-    if trace_insights.is_degraded() || context_missing {
-        sync_context_md(
-            store_root,
-            git,
-            manifest,
-            &trace_insights,
-            &changed_paths,
-            ui_tx,
-        )?;
-    } else {
-        schedule_context_refresh(store_root.to_path_buf(), changed_paths, ui_tx.cloned());
+    let _ = running_summary::increment_context_ops(store_root);
+    let force_template = trace_insights.is_degraded();
+    if force_template || running_summary::should_refresh_context(store_root) {
+        let context_missing = !store_root.join("context.md").exists();
+        if force_template || context_missing {
+            sync_context_md(
+                store_root,
+                git,
+                manifest,
+                &trace_insights,
+                &changed_paths,
+                ui_tx,
+            )?;
+        } else {
+            schedule_context_refresh(store_root.to_path_buf(), changed_paths, ui_tx.cloned());
+        }
+        if let Err(e) = running_summary::reset_context_ops(store_root) {
+            tracing::warn!("failed to reset context ops counter: {e}");
+        }
     }
 
     Ok(())
@@ -461,6 +471,111 @@ mod tests {
         let ctx = std::fs::read_to_string(root.join("context.md")).expect("context.md created");
         assert!(ctx.contains("reconnect watermark test"));
         assert!(ctx.contains("[scratch] notes.md:"));
+    }
+
+    #[test]
+    fn context_refresh_is_debounced_across_writes() {
+        let tmp = TempDir::new().unwrap();
+        let (root, mut manifest, git) = setup(&tmp);
+        // Force a high debounce threshold via store config.
+        let store_cfg = crate::config::StoreConfig {
+            store: crate::config::StoreInfo::new("test".into()),
+            llm: None,
+            synthesis: Some(crate::config::SynthesisConfig {
+                context_refresh_every_ops: 10,
+                ..crate::config::SynthesisConfig::for_unit_tests_degraded()
+            }),
+            polling: crate::config::PollingConfig::default(),
+        };
+        store_cfg.save(&root).unwrap();
+
+        let scratch_path = PathBuf::from("notes.md");
+        std::fs::write(root.join(&scratch_path), "first body").unwrap();
+        manifest
+            .register(&scratch_path, DocType::Scratch, "")
+            .unwrap();
+        manifest.save(&root).unwrap();
+
+        // Seed context.md so missing-file force-refresh does not apply, and
+        // reset the upgrade sentinel so debounce is measurable.
+        std::fs::write(root.join("context.md"), "# seeded\n").unwrap();
+        running_summary::reset_context_ops(&root).unwrap();
+
+        assert!(
+            !running_summary::should_refresh_context(&root),
+            "freshly reset counter must be under threshold"
+        );
+        running_summary::increment_context_ops(&root).unwrap();
+        assert!(!running_summary::should_refresh_context(&root));
+
+        // Degraded backends still refresh every write (template is cheap);
+        // verify that path still succeeds.
+        let changed = vec![(scratch_path, Action::Modify, DocType::Scratch)];
+        apply_trace_hooks(
+            &root,
+            &git,
+            &manifest,
+            &Actor::User,
+            None,
+            &changed,
+            "cli_write",
+            None,
+        )
+        .unwrap();
+        assert!(root.join("context.md").exists());
+    }
+
+    #[test]
+    fn context_ops_count_per_write_batch_not_per_file() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-trace")).unwrap();
+        std::fs::write(root.join("context.md"), "# seeded\n").unwrap();
+        running_summary::reset_context_ops(&root).unwrap();
+        // Simulate a multi-file write batch: one increment, not N.
+        running_summary::increment_context_ops(&root).unwrap();
+        assert_eq!(
+            running_summary::load_summary_state(&root)
+                .unwrap()
+                .ops_since_context,
+            1
+        );
+    }
+
+    #[test]
+    fn summarize_change_runs_once_per_file_for_agent_writes() {
+        // Behavioral guard: agent log summary text must match the summary event
+        // text for the same path (shared summarize_change result).
+        let tmp = TempDir::new().unwrap();
+        let (root, mut manifest, git) = setup(&tmp);
+        let path = PathBuf::from("prd.md");
+        std::fs::write(root.join(&path), "plan content").unwrap();
+        manifest.register(&path, DocType::Plan, "bot").unwrap();
+        manifest.save(&root).unwrap();
+
+        let actor = Actor::Agent { name: "bot".into() };
+        apply_trace_hooks(
+            &root,
+            &git,
+            &manifest,
+            &actor,
+            Some("ses-dedupe"),
+            &[(path.clone(), Action::Modify, DocType::Plan)],
+            "mcp_write",
+            None,
+        )
+        .unwrap();
+
+        let events = running_summary::load_all_events(&root).unwrap();
+        let event = events
+            .iter()
+            .find(|e| e.path == "prd.md")
+            .expect("summary event");
+        let log = std::fs::read_to_string(root.join("logs").join("bot-ses-dedupe.md")).unwrap();
+        assert!(
+            log.contains(&event.summary),
+            "agent log must reuse the same summary text as the event"
+        );
     }
 
     #[test]
