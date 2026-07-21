@@ -128,9 +128,10 @@ pub fn append_event(store_root: &Path, event: SummaryEvent) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut events = load_all_events(store_root)?;
-    if let Some(last) = events.last() {
-        if is_near_duplicate(last, &event) {
+
+    // Duplicate suppression only needs the previous event — avoid full JSONL parse.
+    if let Some(last) = read_last_event(store_root)? {
+        if is_near_duplicate(&last, &event) {
             tracing::debug!(
                 "skipping duplicate activity event for {} ({})",
                 event.path,
@@ -139,12 +140,57 @@ pub fn append_event(store_root: &Path, event: SummaryEvent) -> Result<()> {
             return Ok(());
         }
     }
+
     increment_synthesis_ops(store_root)?;
-    events.push(event);
-    if events.len() > MAX_EVENTS_RETAINED {
-        let skip = events.len() - MAX_EVENTS_RETAINED;
-        events = events.split_off(skip);
+    let line = serde_json::to_string(&event).unwrap_or_default();
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)?;
+    writeln!(file, "{line}")?;
+
+    // Lazy compact with hysteresis so we are not rewriting on every overflowed append.
+    compact_events_if_over_retention(store_root)?;
+    Ok(())
+}
+
+fn read_last_event(store_root: &Path) -> Result<Option<SummaryEvent>> {
+    let path = events_path(store_root);
+    if !path.exists() {
+        return Ok(None);
     }
+    let content = std::fs::read_to_string(&path)?;
+    Ok(content
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .and_then(|l| serde_json::from_str(l).ok()))
+}
+
+fn count_event_lines(store_root: &Path) -> Result<usize> {
+    let path = events_path(store_root);
+    if !path.exists() {
+        return Ok(0);
+    }
+    let content = std::fs::read_to_string(&path)?;
+    Ok(content.lines().filter(|l| !l.trim().is_empty()).count())
+}
+
+/// Rewrite `summary_events.jsonl` down to [`MAX_EVENTS_RETAINED`] once the file
+/// grows past that limit by a hysteresis margin. No-op when under the threshold.
+fn compact_events_if_over_retention(store_root: &Path) -> Result<()> {
+    const HYSTERESIS: usize = 50;
+    let count = count_event_lines(store_root)?;
+    if count <= MAX_EVENTS_RETAINED + HYSTERESIS {
+        return Ok(());
+    }
+    let mut events = load_all_events(store_root)?;
+    if events.len() <= MAX_EVENTS_RETAINED {
+        return Ok(());
+    }
+    let skip = events.len() - MAX_EVENTS_RETAINED;
+    events = events.split_off(skip);
     let content = events
         .iter()
         .map(|e| serde_json::to_string(e).unwrap_or_default())
@@ -155,7 +201,11 @@ pub fn append_event(store_root: &Path, event: SummaryEvent) -> Result<()> {
     } else {
         content + "\n"
     };
-    std::fs::write(&path, content)?;
+    // Atomic replace so a concurrent append cannot be truncated mid-write.
+    let path = events_path(store_root);
+    let tmp = path.with_extension("jsonl.compact.tmp");
+    std::fs::write(&tmp, &content)?;
+    std::fs::rename(&tmp, &path)?;
     Ok(())
 }
 
@@ -949,7 +999,9 @@ mod tests {
     fn events_retention_truncates_old() {
         let tmp = TempDir::new().unwrap();
         let (root, _, _) = setup(&tmp);
-        for i in 0..MAX_EVENTS_RETAINED + 10 {
+        // Compact triggers only after MAX + hysteresis (50).
+        let total = MAX_EVENTS_RETAINED + 51;
+        for i in 0..total {
             append_event(
                 &root,
                 SummaryEvent {
@@ -972,6 +1024,6 @@ mod tests {
         }
         let events = load_all_events(&root).unwrap();
         assert_eq!(events.len(), MAX_EVENTS_RETAINED);
-        assert_eq!(events[0].path, "f10.md");
+        assert_eq!(events[0].path, "f51.md");
     }
 }

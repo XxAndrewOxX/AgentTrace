@@ -2,7 +2,11 @@ use crate::git_store::{CommitInfo, GitStore};
 use crate::types::{Action, Actor, DiffStats, DocType};
 use anyhow::Result;
 use chrono::Utc;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+
+/// Soft cap for agent session logs before rotating to a timestamped backup.
+const MAX_AGENT_LOG_BYTES: u64 = 512 * 1024;
 
 /// Generate a human-readable summary for an agent change (no LLM version).
 pub fn summarize_change_no_llm(
@@ -41,22 +45,27 @@ pub fn append_agent_log(
         .unwrap_or(&log_path)
         .to_path_buf();
 
-    let mut content = if log_path.exists() {
-        std::fs::read_to_string(&log_path)?
-    } else {
-        format!("# Agent Log: {agent_name} (session {session_id})\n\n")
-    };
+    rotate_agent_log_if_oversized(&log_path)?;
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
+
+    // Seed a header only when creating a new/empty file.
+    if file.metadata()?.len() == 0 {
+        writeln!(file, "# Agent Log: {agent_name} (session {session_id})\n")?;
+    }
 
     for entry in entries {
-        content.push_str(&format!(
-            "## {} — {}\n\n{}\n\n",
+        writeln!(
+            file,
+            "## {} — {}\n\n{}\n",
             entry.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
             entry.path.display(),
             entry.summary,
-        ));
+        )?;
     }
-
-    std::fs::write(&log_path, &content)?;
 
     // Commit with system authorship.
     let info = CommitInfo {
@@ -69,6 +78,22 @@ pub fn append_agent_log(
     };
     git.commit(&info)?;
 
+    Ok(())
+}
+
+/// If `log_path` exists and exceeds [`MAX_AGENT_LOG_BYTES`], rename it to a
+/// timestamped sibling (e.g. `agent-ses.md.20260711…`) so the next append
+/// starts a fresh file. No-op when the file is missing or still under the cap.
+fn rotate_agent_log_if_oversized(log_path: &Path) -> Result<()> {
+    let Ok(meta) = std::fs::metadata(log_path) else {
+        return Ok(());
+    };
+    if meta.len() < MAX_AGENT_LOG_BYTES {
+        return Ok(());
+    }
+    let stamp = Utc::now().format("%Y%m%d%H%M%S");
+    let rotated = log_path.with_extension(format!("md.{stamp}"));
+    std::fs::rename(log_path, &rotated)?;
     Ok(())
 }
 
