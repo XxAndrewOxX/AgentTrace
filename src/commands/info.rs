@@ -10,24 +10,19 @@ pub fn run(store_root: &Path, file: &Path, output: &dyn CliOutput) -> Result<()>
         .find_by_path(file)
         .ok_or_else(|| anyhow::anyhow!("File not tracked: {}", file.display()))?;
 
-    // Count commits efficiently without loading all entries into memory.
-    let version_count = store.git.count_file_commits(file)? as u32;
-
-    // We only need the first and last entries for timestamps/actor; load at most 1 to get
-    // the most recent, and separately retrieve the oldest via bounded log call if needed.
-    // log_file returns newest-first, so first() = most recent, last() = oldest in the slice.
-    // Load at most version_count entries (bounded), which is correct and avoids usize::MAX.
-    let history = store.git.log_file(file, version_count as usize)?;
-    let created = history
-        .last()
+    // Single history walk: count + newest/oldest bounds (avoids count + log double scan).
+    let (version_count_usize, newest, oldest) = store.git.file_history_bounds(file)?;
+    let version_count = version_count_usize as u32;
+    let created = oldest
+        .as_ref()
         .map(|e| e.timestamp.to_string())
         .unwrap_or_else(|| "unknown".into());
-    let last_modified = history
-        .first()
+    let last_modified = newest
+        .as_ref()
         .map(|e| e.timestamp.to_string())
         .unwrap_or_else(|| "unknown".into());
-    let created_by = history
-        .last()
+    let created_by = oldest
+        .as_ref()
         .map(|e| e.actor.to_string())
         .unwrap_or_else(|| "unknown".into());
 
