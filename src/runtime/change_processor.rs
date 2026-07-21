@@ -52,6 +52,8 @@ pub struct ChangeProcessor {
     session_id: String,
     /// Last HEAD OID seen by the poll loop (dedup with external commits).
     last_seen_oid: Oid,
+    /// Last observed manifest.toml (mtime, len); skip reparse when unchanged.
+    manifest_stamp: Option<(std::time::SystemTime, u64)>,
 }
 
 impl ChangeProcessor {
@@ -65,6 +67,7 @@ impl ChangeProcessor {
         let session_id =
             session::session_id_for_store(&git.workdir).unwrap_or_else(session::new_session_id);
         let last_seen_oid = git.head_oid().unwrap_or_else(|_| Oid::zero());
+        let manifest_stamp = Manifest::disk_stamp(&git.workdir).ok().flatten();
         Self {
             git,
             manifest,
@@ -72,6 +75,7 @@ impl ChangeProcessor {
             ui_tx,
             session_id,
             last_seen_oid,
+            manifest_stamp,
         }
     }
 
@@ -81,8 +85,21 @@ impl ChangeProcessor {
         }
     }
 
-    fn reload_manifest_from_disk(&self) -> Result<()> {
+    fn reload_manifest_from_disk(&mut self) -> Result<()> {
+        match Manifest::load_if_changed(&self.git.workdir, self.manifest_stamp)? {
+            None => Ok(()),
+            Some((loaded, stamp)) => {
+                *self.manifest.lock().unwrap() = loaded;
+                self.manifest_stamp = Some(stamp);
+                Ok(())
+            }
+        }
+    }
+
+    /// Force-reload manifest (e.g. after we know an external writer changed it).
+    fn force_reload_manifest_from_disk(&mut self) -> Result<()> {
         let loaded = Manifest::load(&self.git.workdir)?;
+        self.manifest_stamp = Manifest::disk_stamp(&self.git.workdir).ok().flatten();
         *self.manifest.lock().unwrap() = loaded;
         Ok(())
     }
@@ -101,7 +118,8 @@ impl ChangeProcessor {
                 .iter()
                 .any(|e| !matches!(e.action, Action::Violation));
             if has_non_violation {
-                if let Err(e) = self.reload_manifest_from_disk() {
+                // External writers may have updated the stamp; force reload.
+                if let Err(e) = self.force_reload_manifest_from_disk() {
                     tracing::warn!("Failed to reload manifest after external commit: {}", e);
                 }
             }
@@ -119,10 +137,11 @@ impl ChangeProcessor {
     pub fn run_poll_cycle(&mut self) -> Result<()> {
         self.refresh_session_id();
 
-        // Reload the manifest from disk at the start of each cycle. Disk is the
-        // source of truth: out-of-process writers (MCP/CLI) persist the manifest
-        // before committing, so reloading here keeps the poll loop's in-memory
-        // view consistent and avoids drift.
+        // Reload the manifest from disk only when its mtime/length changed.
+        // Disk remains source of truth for out-of-process writers (MCP/CLI).
+        // We intentionally still run full git statuses() every tick: a worktree
+        // fingerprint that only covers top-level entries misses nested
+        // untracked/unmanifested edits (the common poll case).
         if let Err(e) = self.reload_manifest_from_disk() {
             tracing::warn!("Failed to reload manifest at poll cycle start: {e}");
         }
@@ -309,6 +328,9 @@ impl ChangeProcessor {
 
         drop(manifest);
 
+        // Persist stamp in case apply_trace_hooks / commits updated manifest.toml.
+        self.manifest_stamp = Manifest::disk_stamp(&store_root).ok().flatten();
+
         // Sync to HEAD after poll-cycle commits (batch + trace hooks) so HEAD poll
         // does not re-emit commits from this cycle.
         if own_commit_oid.is_some() {
@@ -392,6 +414,44 @@ mod tests {
         let agent = AgentState::new(None);
         let mut proc = ChangeProcessor::new(git, manifest, config, agent, None);
         proc.run_poll_cycle().unwrap(); // should be a no-op
+    }
+
+    #[test]
+    fn test_idle_poll_skips_manifest_reparse_when_stamp_stable() {
+        let tmp = TempDir::new().unwrap();
+        let (git, manifest, config) = setup(&tmp);
+        let agent = AgentState::new(None);
+        let mut proc = ChangeProcessor::new(git, manifest, config, agent, None);
+        proc.run_poll_cycle().unwrap();
+        let stamp = proc.manifest_stamp;
+        assert!(stamp.is_some());
+        proc.run_poll_cycle().unwrap();
+        assert_eq!(proc.manifest_stamp, stamp);
+    }
+
+    #[test]
+    fn test_nested_untracked_edit_still_detected_after_idle_tick() {
+        let tmp = TempDir::new().unwrap();
+        let (git, manifest, config) = setup(&tmp);
+        let root = tmp.path().to_path_buf();
+        let agent = AgentState::new(None);
+        let mut proc = ChangeProcessor::new(git, manifest, config, agent, None);
+
+        std::fs::create_dir_all(root.join("a/b/c")).unwrap();
+        std::fs::write(root.join("a/b/c/deep.md"), "v1\n").unwrap();
+        proc.run_poll_cycle().unwrap(); // commit create
+
+        // Idle tick with quiet worktree.
+        proc.run_poll_cycle().unwrap();
+
+        std::fs::write(root.join("a/b/c/deep.md"), "v2 nested edit\n").unwrap();
+        proc.run_poll_cycle().unwrap();
+        let log = proc.git.log(5).unwrap();
+        assert!(
+            log.iter()
+                .any(|e| e.files.iter().any(|(p, _, _)| p.ends_with("deep.md"))),
+            "nested unmanifested edit must still be committed after an idle poll"
+        );
     }
 
     #[test]
