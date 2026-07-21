@@ -11,6 +11,7 @@ use anyhow::{bail, Context, Result};
 use chrono::{TimeZone, Utc};
 use git2::{DiffOptions, Oid, Repository, RepositoryInitOptions, Signature, StatusOptions, Tree};
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -24,6 +25,58 @@ fn store_git_lock(workdir: &Path) -> Arc<Mutex<()>> {
         .entry(workdir.to_path_buf())
         .or_insert_with(|| Arc::new(Mutex::new(())))
         .clone()
+}
+
+/// Cross-process advisory lock for mutating git ops.
+///
+/// CLI `write` subprocesses exit while background synthesis threads may still be
+/// committing; that can leave a stale `index.lock`. Holding an OS flock around
+/// commits serializes writers across processes, and once we hold it any leftover
+/// `index.lock` is safe to clear.
+struct CrossProcessGitLock {
+    _file: File,
+}
+
+fn acquire_cross_process_git_lock(workdir: &Path) -> Result<CrossProcessGitLock> {
+    let dir = workdir.join(".agent-trace").join("locks");
+    std::fs::create_dir_all(&dir).context("create .agent-trace/locks for git lock")?;
+    let path = dir.join("git.lock");
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&path)
+        .with_context(|| format!("open git lock at {}", path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::AsRawFd;
+        let fd = file.as_raw_fd();
+        let rc = unsafe { libc::flock(fd, libc::LOCK_EX) };
+        if rc != 0 {
+            return Err(anyhow::anyhow!(
+                "failed to acquire git lock {}: {}",
+                path.display(),
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+
+    Ok(CrossProcessGitLock { _file: file })
+}
+
+fn clear_stale_index_lock(repo: &Repository) {
+    let lock_path = repo.path().join("index.lock");
+    if lock_path.exists() {
+        tracing::warn!(
+            "removing stale git index.lock at {} (previous writer likely exited mid-commit)",
+            lock_path.display()
+        );
+        if let Err(e) = std::fs::remove_file(&lock_path) {
+            tracing::warn!("failed to remove stale index.lock: {e}");
+        }
+    }
 }
 
 pub struct CommitInfo {
@@ -91,8 +144,10 @@ impl GitStore {
     }
 
     fn create_empty_commit(&self, message: &str) -> Result<Oid> {
+        let _cross = acquire_cross_process_git_lock(&self.workdir)?;
         let lock = store_git_lock(&self.workdir);
         let _guard = lock.lock().expect("store git lock poisoned");
+        clear_stale_index_lock(&self.repo);
         let sig = Signature::now("agent-trace", "system@agent-trace")?;
         let tree_oid = {
             let mut index = self.repo.index()?;
@@ -178,8 +233,10 @@ impl GitStore {
     // ── Commit Operations ─────────────────────────────────────────────────
 
     pub fn commit(&self, info: &CommitInfo) -> Result<Oid> {
+        let _cross = acquire_cross_process_git_lock(&self.workdir)?;
         let lock = store_git_lock(&self.workdir);
         let _guard = lock.lock().expect("store git lock poisoned");
+        clear_stale_index_lock(&self.repo);
         let mut index = self.repo.index()?;
 
         for (path, action, _doc_type) in &info.files {
